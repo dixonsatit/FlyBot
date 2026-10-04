@@ -95,28 +95,24 @@ python tools/fake_stackchan.py --host 192.168.1.10     # หุ่นจำล�
   (มืออยู่ใกล้นิ่ง ๆ) และการติดตามได้ตรงกลาง, sleep pressure ↑ เมื่อไม่มีอะไรเกิดขึ้น
   → alert (OA สูง) > happy (DA สูง) > sleepy > curious
 
-## ฝั่ง CoreS3 (ตัวอย่างแนวทาง)
+## ฝั่ง CoreS3 (เฟิร์มแวร์)
 
-ฝั่งหุ่นต้องทำ 3 อย่าง: (1) หาตำแหน่งวัตถุในภาพแล้ว publish `camera` (2) publish IMU/proximity
-(3) subscribe `stackchan/command` แล้วสั่งเซอร์โว/หน้า/ลำโพง ตัวอย่างโครง Arduino
-(PubSubClient + ArduinoJson + m5stack-avatar; ปรับชื่อฟังก์ชันเซอร์โวให้ตรงกับเฟิร์มแวร์ของคุณ):
+โปรเจกต์ PlatformIO อยู่ที่ `firmware/stackchan/` (CoreS3 + เซอร์โว SG90, M5Unified, M5CoreS3,
+m5stack-avatar, PubSubClient, ArduinoJson, ESP32Servo)
 
-```cpp
-void onCommand(char* topic, byte* payload, unsigned int len) {
-  JsonDocument doc;
-  if (deserializeJson(doc, payload, len)) return;
-  float pan = doc["servo"]["pan_angle"], tilt = doc["servo"]["tilt_angle"];
-  servoX.moveTo(90 + pan);  servoY.moveTo(90 + tilt);   // แล้วแต่การติดตั้งเซอร์โว
-  const char* e = doc["face"]["expression"];
-  avatar.setExpression(!strcmp(e, "happy") ? Expression::Happy
-                     : !strcmp(e, "sleepy") ? Expression::Sleepy
-                     : !strcmp(e, "alert")  ? Expression::Angry : Expression::Doubt);
-  for (JsonArray t : doc["audio"]["tones"].as<JsonArray>()) {
-    if (t[0].as<int>() > 0) M5.Speaker.tone(t[0], t[1]);
-    delay(t[1].as<int>());
-  }
-}
+```bash
+cd firmware/stackchan
+cp src/flybot_config.example.h src/flybot_config.h   # WiFi, broker, ขาเซอร์โว, ทิศ/ขอบเขตมุม
+pio run -t upload && pio device monitor
 ```
+
+- กล้อง GC0308 แบบ grayscale 160×120: หาวัตถุด้วย frame differencing (จุดศูนย์กลางของพิกเซลที่เปลี่ยน)
+  แล้วคำนวณ `vx, vy` บนบอร์ด `polarity` = ทิศของการเปลี่ยนความสว่าง (ON/OFF)
+  ถ้าภาพเปลี่ยนเกิน `MAX_MOTION_FRACTION` (หัวกำลังหมุน/แสงเปลี่ยน) จะข้ามเฟรมนั้น
+- IMU (BMI270) ~30 Hz, LTR-553 `ps` 10 Hz
+- เซอร์โว: `องศา = CENTER + SIGN × มุมจากคำสั่ง` แล้วจำกัดใน MIN..MAX (SG90 แกน Y ขยับได้ ~60–90°)
+  ค่าเริ่มต้น Port.C X=17, Y=18 ถ้าหัวหันผิดทางให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
+- เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Doubt
 
 ## โครงสร้าง
 
@@ -129,5 +125,6 @@ flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
 flybot/sim.py              ฉากจำลอง
 tools/fake_stackchan.py    หุ่นจำลองฝั่ง MQTT
+firmware/stackchan/        เฟิร์มแวร์ CoreS3 (PlatformIO)
 tests/                     pytest
 ```

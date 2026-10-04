@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 data/
 *.bundle
+.venv/
+firmware/*/.pio/
+firmware/*/src/flybot_config.h
