@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.4.1 (2026-10-04)
+
+### Bug Fixes
+
+- **deploy**: Strip newlines from the MQTT password and log refused connections
+  ([`fe2ffc9`](https://github.com/dixonsatit/FlyBot/commit/fe2ffc9e945b16182275423fa05f6e908151db4b))
+
+
 ## v0.4.0 (2026-10-04)
 
 ### Features
