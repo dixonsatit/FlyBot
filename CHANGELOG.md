@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-10-04)
+
+### Continuous Integration
+
+- Mark GitHub releases as pre-release until tested on the robot
+  ([`e374039`](https://github.com/dixonsatit/FlyBot/commit/e374039a5faa87c77b4c0f8af1ae8b4a834fb4fd))
+
+### Features
+
+- **firmware**: Boot self-test and Thai speech-balloon font
+  ([`c8dde09`](https://github.com/dixonsatit/FlyBot/commit/c8dde095a31626f9c671c631fa67942ee502cbae))
+
+
 ## v0.2.0 (2026-10-04)
 
 ### Features
