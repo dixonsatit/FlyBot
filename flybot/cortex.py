@@ -82,7 +82,6 @@ class Cortex:
         self.narrate_cooldown_s = narrate_cooldown_s
         self.history: list[dict] = []
         self.history_turns = history_turns
-        self.personality = "curious"
         self.event_counts: dict[str, int] = {}
         self._last_narration = -float("inf")
         self._jobs: queue.Queue = queue.Queue(maxsize=8)
@@ -120,6 +119,10 @@ class Cortex:
                 self._jobs.task_done()
 
     # -- jobs ---------------------------------------------------------------------
+    @property
+    def personality(self) -> str:
+        return self.controller.personality
+
     @property
     def lang(self) -> str:
         return self.controller.cfg.screen_lang if self.controller.cfg.screen_lang in SCREEN_RULES else "en"
@@ -204,16 +207,10 @@ class Cortex:
     def _set_personality(self, name: str) -> str:
         if name not in PERSONALITIES:
             return json.dumps({"error": f"unknown personality {name}"})
-        # every field any preset touches: this preset's value or the plain default
-        default = type(self.controller.cfg)()
-        changes = {k: PERSONALITIES[name].get(k, getattr(default, k))
-                   for k in {k for preset in PERSONALITIES.values() for k in preset}}
-        before = {k: getattr(self.controller.cfg, k) for k in changes}
-        self.controller.configure(**changes)
-        self.personality = name
+        diff = self.controller.set_personality(name)
         # report the real parameter changes so the reply describes them, not invented ones
-        return json.dumps({"personality": name, "changed": {k: {"from": before[k], "to": v}
-                                                           for k, v in changes.items() if before[k] != v},
+        return json.dumps({"personality": name, "changed": {k: {"from": old, "to": new}
+                                                           for k, (old, new) in diff.items()},
                            "meaning": {"alert_threshold": "octopamine level that makes the face alert",
                                        "gf_threshold": "Giant Fiber drive needed to escape",
                                        "habituation_recovery_s": "how fast things feel new again",

@@ -55,15 +55,21 @@ class StackChanBridge:
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
         self.cortex: Cortex | None = None
+        self.dashboard = None  # flybot.dashboard.Dashboard, optional
         self._jpeg: bytes | None = None
         self._jpeg_ready = threading.Event()
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
                       vision: bool = False, vision_llm=None) -> None:
-        self.cortex = Cortex(llm, self.controller, lambda topic, body: self.client.publish(topic, body, qos=1),
+        self.cortex = Cortex(llm, self.controller, self._publish_cortex,
                              self.base, emit_event=lambda ev: self.events.emit(ev),
                              snapshot=self.snapshot if vision else None, narrate=narrate,
                              narrate_cooldown_s=narrate_cooldown_s, vision_llm=vision_llm)
+
+    def _publish_cortex(self, topic: str, body: str) -> None:
+        self.client.publish(topic, body, qos=1)
+        if self.dashboard:
+            self.dashboard.add("chat", json.loads(body))
 
     def snapshot(self, timeout: float) -> bytes | None:
         """Ask the robot for one JPEG frame (called from the cortex thread)."""
@@ -136,8 +142,12 @@ class StackChanBridge:
                 cmd = self.controller.step(self.sensors, now - last, now=now)
                 last = now
                 self.client.publish(topic, json.dumps(cmd, separators=(",", ":")), qos=0)
+                if self.dashboard:
+                    self.dashboard.on_command(cmd)
                 for event in self.controller.pop_events():
                     self.events.emit(event, now=now, brain=cmd.get("brain"))
+                    if self.dashboard:
+                        self.dashboard.add("event", {k: v for k, v in event.items() if k not in ("time", "key")})
                     if self.cortex:
                         self.cortex.on_event(event, self.controller.snapshot.get("brain"))
                 if heartbeat and now - beat >= 1.0:  # liveness: the control loop is still turning
@@ -194,6 +204,12 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--remind-minutes", default="10,1", help="minutes before start, comma-separated")
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
+    dash = ap.add_argument_group("web dashboard")
+    dash.add_argument("--dashboard-port", type=int, help="serve the dashboard on this port (off if unset)")
+    dash.add_argument("--dashboard-user", default="stackchan")
+    dash.add_argument("--dashboard-password", help="HTTP basic auth password (no auth if unset)")
+    dash.add_argument("--dashboard-sim", action="store_true",
+                      help="start with the simulated robot on (turn off when a real robot is connected)")
     llm = ap.add_argument_group("LLM cortex (narration, chat, vision)")
     llm.add_argument("--llm", default="none", choices=["none", "anthropic", "openai"],
                      help="anthropic = Claude API; openai = any OpenAI-compatible endpoint")
@@ -241,14 +257,15 @@ def main(argv: list[str] | None = None) -> None:
                         if args.llm_vision and args.llm_vision_model else None)
     except ValueError as e:  # includes invalid --llm-extra-body JSON
         ap.error(str(e))
-    bridge = StackChanBridge(BrainController(cfg, gains=gains, looming=looming), args.host, args.port,
+    controller = BrainController(cfg, gains=gains, looming=looming)
+    controller.personality = args.personality
+    bridge = StackChanBridge(controller, args.host, args.port,
                              args.base_topic, args.rate, args.username, args.password, args.webhook,
                              args.event_cooldown)
     if model:
         log.info("LLM cortex: %s %s%s", args.llm, getattr(model, "model", ""), " + vision" if args.llm_vision else "")
         bridge.attach_cortex(model, narrate=not args.no_narrate, narrate_cooldown_s=args.narrate_cooldown,
                              vision=args.llm_vision, vision_llm=vision_model)
-        bridge.cortex.personality = args.personality
     if args.calendar:
         from zoneinfo import ZoneInfo
         try:
@@ -259,6 +276,11 @@ def main(argv: list[str] | None = None) -> None:
         reminder = MeetingReminder(args.calendar, bridge.controller.remind, leads, args.calendar_refresh, tz)
         reminder.start()
         log.info("Meeting reminders: %d calendar(s), %s min before", len(args.calendar), args.remind_minutes)
+    if args.dashboard_port:
+        from .dashboard import Dashboard
+        bridge.dashboard = Dashboard(bridge, args.dashboard_port, args.dashboard_user, args.dashboard_password,
+                                     sim=args.dashboard_sim)
+        bridge.dashboard.start()
     bridge.run(heartbeat=args.heartbeat)
 
 

@@ -24,6 +24,8 @@ spec:
           env:
             - name: FLYBOT_PASSWORD
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
+            - name: FLYBOT_DASHBOARD_PASSWORD   # dashboard basic auth: user stackchan, same password as MQTT
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
             - name: FLYBOT_CALENDAR            # ICS URL(s), whitespace-separated
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: calendar-url, optional: true}}
             - name: FLYBOT_WEBHOOK
@@ -32,6 +34,11 @@ spec:
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: llm-api-key, optional: true}}
             - name: FLYBOT_LLM_API_KEY_ENV
               value: LLM_API_KEY
+          ports:
+            - {name: dashboard, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: dashboard}
+            periodSeconds: 10
           livenessProbe:             # the 20 Hz control loop touches this file every second
             exec:
               command: ["python", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/tmp/flybot-heartbeat') > 30)"]
@@ -49,3 +56,14 @@ spec:
           configMap: {name: flybot-gains}
         - name: tmp
           emptyDir: {}
+---
+# Web dashboard on the LAN: http://<node IP>:31880 (user stackchan, MQTT password)
+apiVersion: v1
+kind: Service
+metadata:
+  name: flybot-dashboard
+spec:
+  type: NodePort
+  selector: {app: flybot-bridge}
+  ports:
+    - {name: http, port: 8080, targetPort: dashboard, nodePort: 31880}

@@ -138,6 +138,23 @@ python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
 - **เกมดึงความสนใจ** `--game` — นับเวลาที่หุ่นมองวัตถุตรงกลางได้ต่อเนื่อง (หลุดสั้นกว่า `game_grace_s` ไม่นับว่าขาด)
   frame differencing เห็นเฉพาะของที่ขยับ ผู้เล่นต้องขยับวัตถุช้า ๆ ให้หุ่นตาม
 
+## Dashboard (หน้าเว็บ)
+
+```bash
+python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboard-port 8088 --dashboard-sim [--llm ...]
+# เปิด http://localhost:8088   (บน K8s: http://<node IP>:31880 ผู้ใช้ stackchan + รหัส MQTT)
+```
+
+- **หุ่น**: หน้าตามอารมณ์, ทิศหัว (pan/tilt), บอลลูนข้อความ; **สมองสด**: HS/VS, LC10, dopamine, octopamine,
+  novelty, ความง่วง, LPLC2/LC4/Giant Fiber
+- **โลกจำลอง** (`--dashboard-sim` หรือสวิตช์มุมขวาบน): ใช้ `flybot.plant` แทนหุ่น — ลากวัตถุ, ให้วัตถุขยับเอง,
+  หมุนตัวหุ่น, ลูบหัว, ของพุ่งเข้าหา; **ปิดเมื่อต่อหุ่นจริง** ไม่งั้นสองแหล่งจะป้อนสมองตัวเดียวกัน
+- **สั่ง**: นิสัย, เกม, หันซ้าย/ขวา/เงย; **แชทกับ LLM** + ฟีดเหตุการณ์
+- **🔊 พูด**: อ่านคำตอบ/คำบรรยาย/เตือนประชุมด้วยเสียงไทยในเครื่อง (Web Speech API, ไม่ส่งข้อความออก) ปากหุ่นขยับตาม
+- **🎤 ฟัง**: พูดแทนพิมพ์ด้วยตัวรู้จำเสียงของ Chrome — **เสียงถูกส่งไป Google** และใช้ได้เฉพาะ `https` หรือ `localhost`
+  (บน K8s: `kubectl -n flybot port-forward svc/flybot-dashboard 8080` แล้วเปิด http://localhost:8080)
+  จะเปลี่ยนไปใช้บริการเสียงของระบบซักประวัติภายในเมื่อมี API
+
 ## รันบน Kubernetes
 
 `deploy/k8s/` (kustomize) มี bridge + Mosquitto (มีรหัสผ่าน) ให้หุ่นต่อจาก LAN ผ่าน NodePort `31883`

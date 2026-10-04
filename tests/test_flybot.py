@@ -621,3 +621,77 @@ def test_bridge_options_from_environment(monkeypatch):
     assert (args.host, args.port, args.game, args.webhook) == ("mosquitto", 8883, True, None)
     assert args.calendar == ["https://a/x.ics", "https://b/y.ics"]
     assert ap.parse_args(["--host", "cli"]).host == "cli"  # command line still wins
+
+
+# -- web dashboard -----------------------------------------------------------------
+
+class _FakeBridge:
+    def __init__(self, controller):
+        from flybot import SensorState
+        self.controller, self.sensors, self.cortex = controller, SensorState(), None
+
+        class _Client:
+            @staticmethod
+            def is_connected():
+                return True
+        self.client = _Client()
+
+
+def _http(port, method, path, body=None, auth=None):
+    import base64 as _b64
+    import json as _json
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method,
+                                 data=_json.dumps(body).encode() if body is not None else None,
+                                 headers={"Content-Type": "application/json"})
+    if auth:
+        req.add_header("Authorization", "Basic " + _b64.b64encode(auth.encode()).decode())
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_dashboard_api_auth_and_controls(gains):
+    import json as _json
+    from flybot.dashboard import Dashboard
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    dash = Dashboard(_FakeBridge(brain), port=0, password="pw")
+    dash.start()
+    try:
+        assert _http(dash.port, "GET", "/api/state")[0] == 401
+        assert _http(dash.port, "GET", "/healthz")[0] == 200
+        status, page = _http(dash.port, "GET", "/", auth="stackchan:pw")
+        assert status == 200 and "FlyBot" in page.decode()
+        assert _http(dash.port, "POST", "/api/personality", {"name": "bold"}, auth="stackchan:pw")[0] == 200
+        assert _http(dash.port, "POST", "/api/personality", {"name": "grumpy"}, auth="stackchan:pw")[0] == 400
+        assert _http(dash.port, "POST", "/api/chat", {"text": "hi"}, auth="stackchan:pw")[0] == 400  # no LLM
+        _http(dash.port, "POST", "/api/game", {"on": True}, auth="stackchan:pw")
+        brain.step(SensorState(), 0.05, now=0.0)
+        state = _json.loads(_http(dash.port, "GET", "/api/state", auth="stackchan:pw")[1])
+        assert state["personality"] == "bold" and state["game_on"] is True and brain.cfg.gf_threshold == 1.6
+    finally:
+        dash.stop()
+
+
+def test_dashboard_simulator_drives_the_brain(gains):
+    import time as _time
+    from flybot.dashboard import Dashboard
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    bridge = _FakeBridge(brain)
+    dash = Dashboard(bridge, port=0, sim=True)
+    dash.sim.set_target(40, 10)
+    dash.sim.auto = True  # keep it moving so the frame-differencing camera sees it
+    try:
+        last = _time.monotonic()
+        for _ in range(80):  # 4 s of bridge loop at 20 Hz
+            _time.sleep(0.05)
+            now = _time.monotonic()
+            dash.on_command(brain.step(bridge.sensors, now - last, now=now))
+            last = now
+        assert bridge.sensors.camera is not None and bridge.sensors.imu is not None
+        assert dash.sim.state()["pan"] != 0  # the simulated head followed the commands
+    finally:
+        dash.stop()

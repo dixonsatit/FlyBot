@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlyBot Dashboard</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --ink: #1d2330; --muted: #6b7385; --line: #e2e5eb;
+    --accent: #3b6ef6; --warm: #f08a24; --good: #1f9d63; --bad: #d64545; --face: #fdfdfd;
+    --bar-bg: #eef0f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11141a; --card: #1a1f28; --ink: #e8ebf1; --muted: #9aa3b5; --line: #2a313d;
+            --accent: #6b93ff; --warm: #ffa04d; --good: #3cc68a; --bad: #ff6b6b; --face: #262c37; --bar-bg: #252b36; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 "Sarabun", "Noto Sans Thai", "Leelawadee UI", Tahoma, system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+           background: var(--card); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .pill { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bar-bg); color: var(--muted); }
+  .pill.ok { color: var(--good); } .pill.off { color: var(--bad); }
+  .spacer { flex: 1; }
+  main { display: grid; gap: 16px; padding: 16px 20px; grid-template-columns: 300px minmax(320px, 1fr) 360px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr 1fr; } .col3 { grid-column: 1 / -1; } }
+  @media (max-width: 720px) { main { grid-template-columns: 1fr; padding: 12px; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .robot { position: relative; display: flex; justify-content: center; padding-top: 52px; }
+  .balloon { position: absolute; top: 0; left: 50%; transform: translateX(-50%); max-width: 100%;
+             background: var(--card); border: 2px solid var(--ink); border-radius: 16px; padding: 4px 14px;
+             font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
+  .balloon.hide { opacity: 0; }
+  .readout { display: flex; justify-content: space-around; font-variant-numeric: tabular-nums; color: var(--muted);
+             font-size: 13px; margin-top: 8px; }
+  .readout b { color: var(--ink); font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  button, select, input[type=text] { font: inherit; color: var(--ink); background: var(--bar-bg);
+             border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.on { background: var(--good); color: #fff; border-color: var(--good); }
+  button.rec { background: var(--bad); color: #fff; border-color: var(--bad); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .6; } }
+  label.switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; }
+  canvas { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; border-radius: 8px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+  .bar { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 8px; font-size: 13px; margin: 5px 0; }
+  .bar .track { position: relative; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; transition: all .12s; }
+  .bar .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--bad); }
+  .bar .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .feed { height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+  .item { font-size: 14px; padding: 6px 10px; border-radius: 8px; background: var(--bar-bg); }
+  .item .t { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+  .item.you { background: var(--accent); color: #fff; align-self: flex-end; max-width: 85%; }
+  .item.you .t { color: #dfe6ff; }
+  .item.reply { border-left: 3px solid var(--accent); }
+  .item.narration { border-left: 3px solid var(--good); }
+  .item.event { border-left: 3px solid var(--warm); }
+  form.chat { display: flex; gap: 8px; margin-top: 10px; }
+  form.chat input { flex: 1; min-width: 0; }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧠 FlyBot</h1>
+  <span id="conn" class="pill">กำลังเชื่อมต่อ…</span>
+  <span id="llm" class="pill">LLM</span>
+  <span class="spacer"></span>
+  <button id="speak" title="อ่านคำตอบออกเสียง (เสียงไทยในเครื่อง ไม่ส่งข้อความออกไปไหน)">🔇 เสียงปิด</button>
+  <select id="voice" title="เสียงพูด"></select>
+  <label class="switch"><input type="checkbox" id="simOn"> หุ่นจำลอง</label>
+</header>
+<main>
+  <section class="col">
+    <div class="card">
+      <h2>หุ่น</h2>
+      <div class="robot">
+        <div id="balloon" class="balloon hide"></div>
+        <svg id="face" viewBox="0 0 220 160" width="220" height="160" aria-label="robot face">
+          <rect x="10" y="10" width="200" height="140" rx="26" fill="var(--face)" stroke="var(--ink)" stroke-width="3"/>
+          <g id="eyes"></g>
+          <path id="mouth" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="readout"><span>อารมณ์ <b id="expr">-</b></span><span>pan <b id="pan">0</b>°</span><span>tilt <b id="tilt">0</b>°</span></div>
+    </div>
+    <div class="card">
+      <h2>สั่งหุ่น</h2>
+      <div class="row">นิสัย <select id="personality"></select></div>
+      <div class="row">
+        <button id="game">เกมดึงความสนใจ</button>
+        <span id="gameScore" class="hint"></span>
+      </div>
+      <div class="row">
+        <button data-look="-60,10">หันซ้าย</button>
+        <button data-look="0,10">ตรงกลาง</button>
+        <button data-look="60,10">หันขวา</button>
+        <button data-look="0,28">เงยหน้า</button>
+      </div>
+      <div class="err" id="err1"></div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="card">
+      <h2>โลกจำลอง (มองจากด้านบน)</h2>
+      <canvas id="world" width="640" height="380"></canvas>
+      <div class="row">
+        ความสูงวัตถุ <input type="range" id="el" min="-10" max="35" value="10">
+        <button data-act="auto">ให้วัตถุขยับเอง</button>
+      </div>
+      <div class="row">
+        <button data-act="rotate">หมุนตัวหุ่น 45°</button>
+        <button data-act="pet">ลูบหัว</button>
+        <button data-act="loom">ของพุ่งเข้าหา!</button>
+      </div>
+      <p class="hint">ลากจุดสีส้มเพื่อขยับวัตถุ — กล้อง (frame differencing) เห็นเฉพาะของที่ขยับ ถ้าวัตถุหยุดนิ่งหุ่นจะใช้ความจำ (PFL3) หันกลับไปทางเดิม · เส้นน้ำเงิน = ทิศที่หัวมอง, พื้นที่จาง = มุมกล้อง, เส้นเทา = ทิศตัวหุ่น · คำสั่งหัน (ปุ่ม/แชท) ตั้งเป้าในความจำ หุ่นจะหันไปเมื่อไม่เห็นวัตถุที่ขยับ (กด "ให้วัตถุขยับเอง" ปิดด้วยการลากวัตถุแล้วปล่อยนิ่ง)</p>
+      <div class="err" id="err2"></div>
+    </div>
+    <div class="card">
+      <h2>สมองแมลงหวี่ (สด)</h2>
+      <div id="bars"></div>
+    </div>
+  </section>
+
+  <section class="col col3">
+    <div class="card">
+      <h2>เหตุการณ์ & แชท</h2>
+      <div id="feed" class="feed"></div>
+      <form class="chat" id="chat">
+        <button type="button" id="mic" title="กดแล้วพูดภาษาไทย (ใช้ระบบรู้จำเสียงของ Chrome: เสียงถูกส่งไปประมวลผลที่ Google)">🎤</button>
+        <input type="text" id="msg" placeholder="พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย" autocomplete="off">
+        <button class="primary" type="submit">ส่ง</button>
+      </form>
+      <div class="err" id="err3"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const BARS = [
+  ["HS", "HS ซ้าย/ขวา", -1, 1], ["VS", "VS ขึ้น/ลง", -1, 1],
+  ["LC10x", "LC10 ตำแหน่ง x", -1, 1], ["LC10y", "LC10 ตำแหน่ง y", -1, 1],
+  ["dopamine", "โดปามีน", 0, 1], ["octopamine", "ออกโทพามีน", 0, 1],
+  ["novelty", "ความแปลกใหม่", 0, 1], ["sleep_pressure", "ความง่วง", 0, 1],
+  ["LPLC2", "LPLC2 (ขยาย)", 0, 1.5], ["LC4", "LC4 (ความเร็วขอบ)", 0, 1.5], ["GF", "Giant Fiber", 0, 1.5, 1.0],
+];
+const EVENT_TEXT = { presence: "👀 มีอะไรใหม่เข้ามา", escape: "⚡ สะดุ้งหลบ", record: "🏆 สถิติใหม่ในเกม",
+                     meeting: "📅 เตือนประชุม", seen: "📷 เห็น" };
+let since = 0, state = null, lastTarget = 0, firstPoll = true;
+
+// ---- brain bars ---------------------------------------------------------------
+$("bars").innerHTML = BARS.map(([k, label, , , mark]) =>
+  `<div class="bar"><span>${label}</span><span class="track"><span class="fill" id="b_${k}"></span>${
+    mark ? `<span class="mark" style="left:${mark / 1.5 * 100}%"></span>` : ""}</span><span class="val" id="v_${k}">0</span></div>`).join("");
+function setBar(k, v, lo, hi) {
+  const el = $("b_" + k); if (!el) return;
+  v = Math.max(lo, Math.min(hi, v || 0));
+  if (lo < 0) { const mid = 50, w = Math.abs(v) / hi * 50;
+    el.style.left = (v < 0 ? mid - w : mid) + "%"; el.style.width = w + "%"; }
+  else { el.style.left = "0"; el.style.width = (v - lo) / (hi - lo) * 100 + "%"; }
+  $("v_" + k).textContent = (v || 0).toFixed(2);
+}
+
+// ---- face ---------------------------------------------------------------------
+function drawFace(expr, pan, tilt) {
+  const dx = Math.max(-1, Math.min(1, pan / 60)) * 18, dy = -Math.max(-1, Math.min(1, tilt / 30)) * 10;
+  const ex = [75 + dx, 145 + dx], ey = 70 + dy, ink = "var(--ink)";
+  let eyes = "", mouth = "";
+  if (expr === "happy") {
+    eyes = ex.map(x => `<path d="M${x - 14} ${ey + 4} Q${x} ${ey - 14} ${x + 14} ${ey + 4}" fill="none" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
+    mouth = `M${88 + dx} ${112 + dy} Q${110 + dx} ${132 + dy} ${132 + dx} ${112 + dy}`;
+  } else if (expr === "sleepy") {
+    eyes = ex.map(x => `<line x1="${x - 13}" y1="${ey + 2}" x2="${x + 13}" y2="${ey + 2}" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
+    mouth = `M${100 + dx} ${118 + dy} Q${110 + dx} ${122 + dy} ${120 + dx} ${118 + dy}`;
+  } else if (expr === "alert") {
+    eyes = ex.map((x, i) => `<circle cx="${x}" cy="${ey + 4}" r="13" fill="${ink}"/>` +
+      `<line x1="${x - 16}" y1="${ey - 20 + (i ? -6 : 0)}" x2="${x + 16}" y2="${ey - 20 + (i ? 0 : -6)}" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
+    mouth = `M${92 + dx} ${120 + dy} L${128 + dx} ${120 + dy}`;
+  } else { // curious
+    eyes = ex.map(x => `<circle cx="${x}" cy="${ey}" r="10" fill="${ink}"/>`).join("");
+    mouth = `M${96 + dx} ${116 + dy} Q${110 + dx} ${124 + dy} ${124 + dx} ${116 + dy}`;
+  }
+  if (talking && Math.floor(performance.now() / 140) % 2) {  // mouth opens and closes while speaking
+    mouth = `M${96 + dx} ${114 + dy} Q${110 + dx} ${134 + dy} ${124 + dx} ${114 + dy} Q${110 + dx} ${118 + dy} ${96 + dx} ${114 + dy}`;
+  }
+  $("eyes").innerHTML = eyes; $("mouth").setAttribute("d", mouth);
+}
+
+// ---- world view ---------------------------------------------------------------
+const cv = $("world"), ctx = cv.getContext("2d");
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const origin = () => ({ x: cv.width / 2, y: cv.height - 34, r: Math.min(cv.width / 2, cv.height) - 52 });
+const toXY = (az, r) => { const o = origin(), a = (az - 90) * Math.PI / 180;
+  return { x: o.x + Math.cos(a) * r, y: o.y + Math.sin(a) * r }; };
+function drawWorld() {
+  if (!state) return;
+  const s = state.sim, o = origin(), line = css("--line"), muted = css("--muted");
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = line; ctx.lineWidth = 1;
+  for (const f of [0.33, 0.66, 1]) { ctx.beginPath(); ctx.arc(o.x, o.y, o.r * f, Math.PI, 2 * Math.PI); ctx.stroke(); }
+  ctx.fillStyle = muted; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
+  for (const az of [-90, -45, 0, 45, 90]) { const p = toXY(az, o.r + 16); ctx.fillText(az + "°", p.x, p.y + 4); }
+  const gaze = s.body_yaw + s.pan;
+  // camera field of view (62 deg)
+  ctx.fillStyle = css("--accent") + "22"; ctx.beginPath(); ctx.moveTo(o.x, o.y);
+  ctx.arc(o.x, o.y, o.r, (gaze - 31 - 90) * Math.PI / 180, (gaze + 31 - 90) * Math.PI / 180); ctx.closePath(); ctx.fill();
+  const ray = (az, color, w, len) => { const p = toXY(az, len); ctx.strokeStyle = color; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(p.x, p.y); ctx.stroke(); };
+  ray(s.body_yaw, muted, 3, o.r * 0.45);
+  ray(gaze, css("--accent"), 4, o.r);
+  // target
+  const t = toXY(s.target.az, o.r * 0.78), size = s.looming ? 26 : 12;
+  ctx.fillStyle = css("--warm"); ctx.beginPath(); ctx.arc(t.x, t.y, size, 0, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = muted; ctx.fillText(`วัตถุ ${s.target.az.toFixed(0)}° / สูง ${s.target.el.toFixed(0)}°`, t.x, t.y - size - 8);
+  // robot
+  ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(o.x, o.y, 14, 0, 2 * Math.PI); ctx.fill();
+  if (s.petting) { ctx.fillText("✋", o.x + 28, o.y + 4); }
+  if (!s.enabled) { ctx.fillStyle = muted; ctx.fillText("หุ่นจำลองปิดอยู่ (เปิดที่มุมขวาบน)", o.x, 24); }
+}
+function pointerAz(ev) {
+  const r = cv.getBoundingClientRect(), o = origin();
+  const x = (ev.clientX - r.left) * cv.width / r.width - o.x, y = (ev.clientY - r.top) * cv.height / r.height - o.y;
+  return Math.max(-120, Math.min(120, Math.atan2(x, -y) * 180 / Math.PI));
+}
+let dragging = false;
+cv.addEventListener("pointerdown", (e) => { dragging = true; cv.setPointerCapture(e.pointerId); moveTarget(e); });
+cv.addEventListener("pointermove", (e) => { if (dragging) moveTarget(e); });
+cv.addEventListener("pointerup", () => { dragging = false; });
+function moveTarget(e) {
+  const now = performance.now(); if (now - lastTarget < 80) return; lastTarget = now;
+  post("/api/sim", { target: { az: pointerAz(e), el: +$("el").value } }, "err2");
+}
+$("el").addEventListener("input", () => state && post("/api/sim", { target: { az: state.sim.target.az, el: +$("el").value } }, "err2"));
+
+// ---- Thai speech (Web Speech API, voices installed on this computer) ------------
+let speakOn = false, talking = false, thaiVoices = [];
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+function loadVoices() {
+  thaiVoices = speechSynthesis.getVoices().filter(v => v.lang.replace("_", "-").startsWith("th"))
+    .sort((a, b) => (b.localService - a.localService) || (/Enhanced|Premium/.test(b.name) - /Enhanced|Premium/.test(a.name)));
+  const sel = $("voice"), keep = store.get("flybot-voice") || sel.value;
+  sel.innerHTML = ""; thaiVoices.forEach(v => sel.add(new Option(v.name.replace(/\s*\(.*\)/, "") +
+    (/Enhanced|Premium/.test(v.name) ? " ★" : ""), v.name)));
+  if (thaiVoices.some(v => v.name === keep)) sel.value = keep;
+  sel.style.display = thaiVoices.length ? "" : "none";
+  $("speak").title = thaiVoices.length  // voices often arrive after the first call (voiceschanged)
+    ? "อ่านคำตอบออกเสียง (เสียงไทยในเครื่อง ไม่ส่งข้อความออกไปไหน)"
+    : "เครื่องนี้ไม่มีเสียงพูดภาษาไทย (macOS: ตั้งค่า > การช่วยการเข้าถึง > เนื้อหาที่พูด)";
+}
+if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+else { $("speak").disabled = true; $("voice").style.display = "none"; }
+function setSpeak(on) {
+  speakOn = on; $("speak").textContent = on ? "🔊 เสียงเปิด" : "🔇 เสียงปิด"; $("speak").className = on ? "on" : "";
+  if (!on) { speechSynthesis.cancel(); talking = false; }
+}
+$("speak").onclick = () => { setSpeak(!speakOn); if (speakOn) say("เปิดเสียงแล้วครับ"); };  // the click unlocks audio
+$("voice").onchange = (e) => { store.set("flybot-voice", e.target.value); if (speakOn) { speechSynthesis.cancel(); say("สวัสดีครับ"); } };
+function say(text) {
+  if (!speakOn || !text) return;
+  if (speechSynthesis.pending) return;  // don't pile up a backlog of old lines
+  const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ""));
+  u.lang = "th-TH"; u.rate = 1.0; u.pitch = 1.15;
+  const v = thaiVoices.find(v => v.name === $("voice").value) || thaiVoices[0]; if (v) u.voice = v;
+  u.onstart = () => { talking = true; }; u.onend = u.onerror = () => { talking = false; };
+  speechSynthesis.speak(u);
+}
+
+// ---- feed ---------------------------------------------------------------------
+function addFeed(f) {
+  const div = document.createElement("div"); let cls = "item", text = "";
+  if (f.kind === "you") { cls += " you"; text = f.data.text; }
+  else if (f.kind === "chat") { cls += " " + (f.data.type || "reply"); text = (f.data.type === "narration" ? "🧠 " : "🤖 ") + f.data.text; }
+  else if (f.kind === "event") { cls += " event"; const d = f.data;
+    text = d.type === "meeting" ? d.message.replace(/^StackChan:\s*/, "📅 ") :
+           d.type === "seen" ? "📷 เห็น: " + (d.description || d.screen) : (EVENT_TEXT[d.type] || d.type); }
+  div.className = cls; div.innerHTML = `<span class="t">${f.at}</span>`; div.append(document.createTextNode(text));
+  if (!firstPoll) {  // speak new replies, narrations and meeting reminders (not the backlog on page load)
+    if (f.kind === "chat") say(f.data.text);
+    else if (f.kind === "event" && f.data.type === "meeting") say(f.data.message.replace(/^StackChan:\s*/, ""));
+  }
+  const feed = $("feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  feed.append(div); if (atBottom) feed.scrollTop = feed.scrollHeight;
+}
+
+// ---- API ----------------------------------------------------------------------
+async function post(path, body, errId) {
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json(); $(errId).textContent = r.ok ? "" : (j.error || r.statusText);
+  } catch (e) { $(errId).textContent = "ส่งไม่สำเร็จ: " + e.message; }
+}
+document.querySelectorAll("[data-look]").forEach(b => b.onclick = () => {
+  const [pan, tilt] = b.dataset.look.split(",").map(Number); post("/api/look", { pan, tilt }, "err1"); });
+document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => post("/api/sim", { action: b.dataset.act }, "err2"));
+$("simOn").onchange = (e) => post("/api/sim", { enabled: e.target.checked }, "err2");
+$("game").onclick = () => post("/api/game", { on: !(state && state.game_on) }, "err1");
+$("personality").onchange = (e) => post("/api/personality", { name: e.target.value }, "err1");
+$("chat").onsubmit = (e) => { e.preventDefault(); const m = $("msg").value.trim(); if (!m) return;
+  $("msg").value = ""; post("/api/chat", { text: m }, "err3"); };
+
+// ---- Thai speech input (Chrome's recognizer: the audio is processed by Google) ----
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+if (!Recognition) { $("mic").disabled = true; $("mic").title = "browser นี้ไม่รองรับการพูดแทนพิมพ์ (ใช้ Chrome หรือ Edge)"; }
+$("mic").onclick = () => {
+  if (rec) { rec.stop(); return; }
+  if (!window.isSecureContext) {  // browsers only open the microphone on https:// or localhost
+    $("err3").textContent = "ไมค์ใช้ได้เฉพาะ https หรือ localhost: รัน kubectl -n flybot port-forward svc/flybot-dashboard 8080 แล้วเปิด http://localhost:8080";
+    return;
+  }
+  if (speakOn) speechSynthesis.cancel();  // don't let the robot hear itself
+  rec = new Recognition(); rec.lang = "th-TH"; rec.interimResults = true; rec.continuous = false;
+  let finalText = "";
+  rec.onstart = () => { $("mic").className = "rec"; $("err3").textContent = ""; $("msg").placeholder = "กำลังฟัง… พูดได้เลย"; };
+  rec.onresult = (e) => {
+    let interim = "";
+    for (const r of e.results) (r.isFinal ? (finalText = r[0].transcript) : (interim += r[0].transcript));
+    $("msg").value = finalText || interim;
+  };
+  rec.onerror = (e) => {
+    $("err3").textContent = { "not-allowed": "ไม่ได้รับอนุญาตให้ใช้ไมค์ (อนุญาตที่ไอคอนแถบที่อยู่ของ browser)",
+      "no-speech": "ไม่ได้ยินเสียง ลองใหม่อีกครั้ง", "network": "รู้จำเสียงไม่ได้: ต้องต่ออินเทอร์เน็ต (ใช้บริการของ Google)",
+      "audio-capture": "ไม่พบไมค์" }[e.error] || ("รู้จำเสียงผิดพลาด: " + e.error);
+  };
+  rec.onend = () => {
+    rec = null; $("mic").className = ""; $("msg").placeholder = "พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย";
+    if (finalText.trim()) { $("msg").value = ""; post("/api/chat", { text: finalText.trim() }, "err3"); }
+  };
+  rec.start();
+};
+
+async function poll() {
+  try {
+    const r = await fetch("/api/state?since=" + since); state = await r.json();
+    state.feed.forEach(addFeed); if (state.feed.length) since = state.feed[state.feed.length - 1].id;
+    firstPoll = false;
+    $("conn").textContent = state.connected ? "MQTT เชื่อมต่อแล้ว" : "MQTT ไม่ได้เชื่อมต่อ";
+    $("conn").className = "pill " + (state.connected ? "ok" : "off");
+    $("llm").textContent = state.llm ? "LLM เปิด" : "LLM ปิด"; $("llm").className = "pill " + (state.llm ? "ok" : "");
+    $("simOn").checked = state.sim.enabled;
+    const expr = (state.face && state.face.expression) || "curious", sv = state.servo || {};
+    drawFace(expr, sv.pan_angle || 0, sv.tilt_angle || 0);
+    $("expr").textContent = { curious: "อยากรู้", alert: "ตื่นตัว", happy: "มีความสุข", sleepy: "ง่วง" }[expr] || expr;
+    $("pan").textContent = (sv.pan_angle || 0).toFixed(0); $("tilt").textContent = (sv.tilt_angle || 0).toFixed(0);
+    $("balloon").textContent = state.text || ""; $("balloon").className = "balloon" + (state.text ? "" : " hide");
+    const b = state.brain || {};
+    BARS.forEach(([k, , lo, hi]) => setBar(k, k === "LC10x" ? (b.LC10 || [0])[0] : k === "LC10y" ? (b.LC10 || [0, 0])[1] : b[k], lo, hi));
+    const sel = $("personality");
+    if (!sel.options.length) state.personalities.forEach(p => sel.add(new Option(p, p)));
+    if (document.activeElement !== sel) sel.value = state.personality;
+    $("game").className = state.game_on ? "on" : "";
+    $("gameScore").textContent = state.game ? `ต่อเนื่อง ${state.game.streak}s · ดีที่สุด ${state.game.best}s` : "";
+    drawWorld();
+  } catch (e) { $("conn").textContent = "เชื่อมต่อ dashboard ไม่ได้"; $("conn").className = "pill off"; }
+  setTimeout(poll, 150);
+}
+poll();
+</script>
+</body>
+</html>

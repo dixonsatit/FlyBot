@@ -158,6 +158,7 @@ class BrainController:
         self._text_shown = False
         self._audio: dict | None = None  # one-shot sound queued by a command
         self.snapshot: dict = {}  # latest expression / pose / brain state, for readers on other threads
+        self.personality = "curious"
         self.pan = 0.0
         self.tilt = 0.0
         self._nearness = 0.0
@@ -236,6 +237,19 @@ class BrainController:
             self.gf.threshold = self.cfg.gf_threshold
             self.gf.refractory_s = self.cfg.gf_refractory_s
         self._inbox.put(apply)
+
+    def set_personality(self, name: str) -> dict:
+        """Apply a PERSONALITIES preset live; returns {field: (old, new)} for what changed."""
+        if name not in PERSONALITIES:
+            raise ValueError(f"unknown personality {name!r}")
+        default = ControllerConfig()
+        # every field any preset touches: this preset's value or the plain default
+        changes = {k: PERSONALITIES[name].get(k, getattr(default, k))
+                   for k in {k for preset in PERSONALITIES.values() for k in preset}}
+        diff = {k: (getattr(self.cfg, k), v) for k, v in changes.items() if getattr(self.cfg, k) != v}
+        self.configure(**changes)
+        self.personality = name
+        return diff
 
     def say(self, text: str, seconds: float = 6.0) -> None:
         """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
@@ -428,6 +442,7 @@ class BrainController:
         if cfg.telemetry:
             cmd["brain"] = brain
         self.snapshot = {"expression": expression, "pan": round(self.pan, 1), "tilt": round(self.tilt, 1),
+                         "text": text,  # unshaped, for displays with real Thai shaping
                          "target_visible": target is not None, "brain": brain,
                          **({"game": cmd["game"]} if "game" in cmd else {})}
         for event in self.events:
