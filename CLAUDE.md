@@ -24,7 +24,7 @@ python -m flybot.tune [--search] [--set k=v] [--plant k=v]   # score/tune agains
 
 `sim`, `mqtt_bridge` and `tune` accept `--set key=value` (any `ControllerConfig` field; tuples as `a,b`), parsed by `controller.apply_overrides`.
 
-To test end to end locally, start `mosquitto` (Homebrew, `/opt/homebrew/sbin/mosquitto`) on `127.0.0.1:1883`, then the bridge, then `fake_stackchan.py` (it runs the `sim.scene` for 30 s and prints the received commands). Use `mosquitto_sub -t 'stackchan/#' -v` to capture traffic.
+To test end to end locally, start `mosquitto` (Homebrew, `/opt/homebrew/sbin/mosquitto`) on `127.0.0.1:1883`, then the bridge with `--set sensor_latency_s=0`, then `fake_stackchan.py`. The fake renders frames from the latest pan with no delay, so the default 0.1 s compensation would overcorrect by about 8°. The fake runs `sim.scene` for 30 s and prints the received commands. Use `mosquitto_sub -t 'stackchan/#' -v` to capture traffic.
 
 Run `pytest -q` before every commit. `pyproject.toml` sets `addopts = "-p no:nengo"` — Nengo's pytest plugin is disabled on purpose. There is no linter configured. Brian2 is not used (incompatible with numpy ≥ 2).
 

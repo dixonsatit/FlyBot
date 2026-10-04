@@ -47,9 +47,20 @@ gains = derive_gains(adj)                                     # น้ำหน�
 
 ```bash
 python -m flybot.sim                                   # จำลองฉากโดยไม่ต้องมีหุ่น/broker
-python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex
-python tools/fake_stackchan.py --host 192.168.1.10     # หุ่นจำลองสำหรับทดสอบ broker
+python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex   # ใช้กับหุ่นจริง
 ```
+
+ทดสอบ MQTT ในเครื่องด้วยหุ่นจำลอง (เปิดคนละ terminal ตามลำดับ):
+
+```bash
+mosquitto -v
+python -m flybot.mqtt_bridge --host 127.0.0.1 --data-dir data/codex --set sensor_latency_s=0
+python tools/fake_stackchan.py --host 127.0.0.1        # ส่งเซ็นเซอร์ 30 วินาที แล้วพิมพ์คำสั่งที่ได้รับ
+mosquitto_sub -h 127.0.0.1 -t 'stackchan/#' -v         # (ไม่บังคับ) ดูทุกข้อความ
+```
+
+`fake_stackchan.py` สร้างภาพจากมุมหัวล่าสุดทันทีจึงไม่มี latency ต้องใส่ `--set sensor_latency_s=0`
+ไม่อย่างนั้น controller จะชดเชยเกิน (หัวคลาดเป้า ~8°) ส่วนหุ่นจริงใช้ค่าเริ่มต้น 0.1 วินาที
 
 ตัวเลือก: `--port --username --password --base-topic --side L|R --rate 20 --backend nengo|rate --no-telemetry`
 ค่าปรับจูนอื่น ๆ (FOV, gain, ขีดจำกัดมุม, ทิศ IMU, `sensor_latency_s`) อยู่ใน `ControllerConfig` (`flybot/controller.py`)
