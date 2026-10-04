@@ -129,7 +129,7 @@ def load_codex(
     """Read Codex CSV exports from ``data_dir`` and keep optic-lobe synapses of ``side``."""
     data_dir = Path(data_dir)
     conn_path = _find(data_dir, ("connections",))
-    type_path = _find(data_dir, ("visual_neuron_types", "consolidated_cell_types", "classification"))
+    type_path = _find(data_dir, ("visual_neuron_types", "consolidated_cell_types", "cell_types", "classification"))
     if conn_path is None or type_path is None:
         raise FileNotFoundError(
             f"Expected connections*.csv(.gz) and a cell-type table in {data_dir}; "
