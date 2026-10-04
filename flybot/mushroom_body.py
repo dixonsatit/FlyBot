@@ -48,6 +48,7 @@ class MushroomBody:
         depression: float = 0.4,
         recovery_s: float = 30.0,
         hold_s: float = 1.0,
+        alert_threshold: float = 0.5,
         seed: int = 3,
     ):
         rng = np.random.default_rng(seed)
@@ -60,6 +61,9 @@ class MushroomBody:
         self.depression = depression
         self.recovery_s = recovery_s
         self.hold_s = hold_s
+        # a new object after a long idle period peaks near 0.56 (the empty scene
+        # habituates overlapping KCs); rotation/petting stay below ~0.32
+        self.alert_threshold = alert_threshold
         self.state = Neuromodulators()
         self.expression = "curious"
         self._since_change = 0.0
@@ -108,7 +112,7 @@ class MushroomBody:
 
     def _choose(self, dt: float) -> bool:
         s = self.state
-        if s.octopamine > 0.6:
+        if s.octopamine > self.alert_threshold:
             want = "alert"
         elif s.dopamine > 0.45:
             want = "happy"

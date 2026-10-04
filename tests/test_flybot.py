@@ -125,3 +125,16 @@ def test_v783_type_names_map_to_groups():
     names = ["T4a", "Mi1", "LPi03", "HSE", "VS1", "VSm", "LC10a", "H1", "Dm3q"]
     con = Connectome(pd.DataFrame(), pd.Series(names, index=range(len(names))), "test")
     assert con.groups().tolist() == ["T4a", "Mi1", "LPi", "HS", "VS", "VS", "LC10"]
+
+
+def test_new_object_after_idle_triggers_alert(gains):
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    s = SensorState()
+    for i in range(600):  # 30 s with no sensor data habituates the empty scene
+        brain.step(s, 0.05, now=i * 0.05)
+    faces = []
+    for i in range(40):
+        t = 30 + i * 0.05
+        s.update("camera", camera(160 + 60 * np.sin(np.pi * i * 0.05), vx=280.0), now=t)
+        faces.append(brain.step(s, 0.05, now=t)["face"]["expression"])
+    assert "alert" in faces
