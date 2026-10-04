@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-10-04)
+
+### Features
+
+- **deploy**: Run the bridge on Kubernetes
+  ([`c40fbbf`](https://github.com/dixonsatit/FlyBot/commit/c40fbbf2b57fc08b802f13a2b11f86b82af882bc))
+
+
 ## v0.3.0 (2026-10-04)
 
 ### Continuous Integration
