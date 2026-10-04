@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import queue
 import time
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
@@ -144,6 +145,11 @@ class BrainController:
         self._game_start: float | None = None
         self._game_last = -math.inf
         self.game_best = 0.0
+        # commands from other threads (the LLM cortex), applied at the start of a step
+        self._inbox: queue.SimpleQueue = queue.SimpleQueue()
+        self._say: tuple[str, float] | None = None
+        self._text_shown = False
+        self.snapshot: dict = {}  # latest expression / pose / brain state, for readers on other threads
         self.pan = 0.0
         self.tilt = 0.0
         self._nearness = 0.0
@@ -203,6 +209,37 @@ class BrainController:
         left, right, top, bottom = (float(v) for v in lum)
         return (right - left) / (right + left + 1.0), (top - bottom) / (top + bottom + 1.0)
 
+    # -- thread-safe commands (queued, applied on the control thread) --------
+    def look_at(self, pan_deg: float, tilt_deg: float) -> None:
+        """Steer the gaze through the FC2 goal (PFL3 turns there while no target is seen)."""
+        def apply():
+            pan = float(np.clip(pan_deg, *self.cfg.pan_limits))
+            self.cx.set_goal(self.cx.heading + pan)
+            self._tilt_home = float(np.clip(tilt_deg, *self.cfg.tilt_limits))
+        self._inbox.put(apply)
+
+    def configure(self, **changes) -> None:
+        """Change ControllerConfig fields live (personality, game, thresholds)."""
+        def apply():
+            self.cfg = replace(self.cfg, **changes)
+            self.mb.alert_threshold = self.cfg.alert_threshold
+            self.mb.recovery_s = self.cfg.habituation_recovery_s
+            self.mb.sleep_time_s = self.cfg.sleep_time_s
+            self.gf.threshold = self.cfg.gf_threshold
+            self.gf.refractory_s = self.cfg.gf_refractory_s
+        self._inbox.put(apply)
+
+    def say(self, text: str, seconds: float = 6.0) -> None:
+        """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
+        self._inbox.put(lambda: setattr(self, "_say", (text, self._clock + seconds)))
+
+    def _apply_inbox(self) -> None:
+        while True:
+            try:
+                self._inbox.get_nowait()()
+            except queue.Empty:
+                return
+
     def pop_events(self) -> list[dict]:
         events, self.events = self.events, []
         return events
@@ -239,6 +276,7 @@ class BrainController:
     def step(self, sensors: SensorState, dt: float, now: float | None = None) -> dict:
         cfg = self.cfg
         self._clock = time.monotonic() if now is None else now
+        self._apply_inbox()
         target = self._target(sensors)
 
         # optic lobe: remove self-induced image motion with an efference copy taken at the
@@ -339,19 +377,29 @@ class BrainController:
             "face": {"expression": expression},
             "audio": AUDIO["startle"] if escape else AUDIO[expression] if changed else None,
         }
+        text = ""
         if cfg.game:
             game = self._game(stim[0] if target else None, stim[1] if target else None)
             cmd["game"] = game
-            cmd["text"] = f"{game['streak']:.1f}s / best {game['best']:.1f}s"
+            text = f"{game['streak']:.1f}s / best {game['best']:.1f}s"
+        if self._say and self._clock < self._say[1]:
+            text = self._say[0]
+        if text or self._text_shown:  # one empty text clears the balloon
+            cmd["text"] = text
+        self._text_shown = bool(text)
+        brain = {
+            "HS": round(float(hs), 3), "VS": round(float(vs), 3),
+            "LC10": [round(float(px), 3), round(float(py), 3)],
+            "heading": round(self.cx.heading, 1),
+            "dopamine": round(mods.dopamine, 3), "octopamine": round(mods.octopamine, 3),
+            "novelty": round(mods.novelty, 3), "sleep_pressure": round(mods.sleep_pressure, 3),
+            "LPLC2": round(self.gf.lplc2, 3), "LC4": round(self.gf.lc4, 3), "GF": round(self.gf.v, 3),
+        }
         if cfg.telemetry:
-            cmd["brain"] = {
-                "HS": round(float(hs), 3), "VS": round(float(vs), 3),
-                "LC10": [round(float(px), 3), round(float(py), 3)],
-                "heading": round(self.cx.heading, 1),
-                "dopamine": round(mods.dopamine, 3), "octopamine": round(mods.octopamine, 3),
-                "novelty": round(mods.novelty, 3), "sleep_pressure": round(mods.sleep_pressure, 3),
-                "LPLC2": round(self.gf.lplc2, 3), "LC4": round(self.gf.lc4, 3), "GF": round(self.gf.v, 3),
-            }
+            cmd["brain"] = brain
+        self.snapshot = {"expression": expression, "pan": round(self.pan, 1), "tilt": round(self.tilt, 1),
+                         "target_visible": target is not None, "brain": brain,
+                         **({"game": cmd["game"]} if "game" in cmd else {})}
         for event in self.events:
             event.setdefault("time", round(self._clock, 3))
         return cmd

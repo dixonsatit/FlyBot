@@ -286,3 +286,156 @@ def test_event_sink_cooldown_and_webhook():
     assert [t for t, _ in published] == ["stackchan/event", "stackchan/event"]
     assert sorted(r["type"] for r in received) == ["escape", "presence"]
     assert all(r["robot"] == "stackchan" and "time" not in r for r in received)
+
+
+# -- LLM cortex (Claude / OpenAI-compatible) against local fake servers ------------
+
+class _FakeLLMServer:
+    """Serves scripted JSON responses in order and records requests (path, headers, body)."""
+
+    def __init__(self, responses):
+        import http.server
+        import json as _json
+        import threading
+        self.requests, responses = [], list(responses)
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = _json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                outer.requests.append((self.path, dict(self.headers), body))
+                data = _json.dumps(responses.pop(0)).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _look_tool(calls):
+    from flybot.llm import Tool
+    schema = {"type": "object", "properties": {"pan_deg": {"type": "number"}, "tilt_deg": {"type": "number"}},
+              "required": ["pan_deg", "tilt_deg"], "additionalProperties": False}
+    return Tool("look_at", "turn head", schema, lambda pan_deg, tilt_deg: calls.append((pan_deg, tilt_deg)) or "ok")
+
+
+def test_openai_compatible_tool_loop():
+    pytest.importorskip("openai")
+    from flybot.llm import OpenAICompatLLM
+    call = {"id": "call_1", "type": "function",
+            "function": {"name": "look_at", "arguments": '{"pan_deg": 30, "tilt_deg": 10}'}}
+    usage = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    server = _FakeLLMServer([
+        {"id": "c1", "object": "chat.completion", "created": 0, "model": "local", "usage": usage,
+         "choices": [{"index": 0, "finish_reason": "tool_calls",
+                      "message": {"role": "assistant", "content": None, "tool_calls": [call]}}]},
+        {"id": "c2", "object": "chat.completion", "created": 0, "model": "local", "usage": usage,
+         "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "หันขวาแล้ว"}}]},
+    ])
+    calls = []
+    try:
+        llm = OpenAICompatLLM("local", base_url=server.url + "/v1")
+        reply = llm.ask("sys", [], "หันขวาหน่อย", tools=[_look_tool(calls)], image_jpeg=b"\xff\xd8fake")
+    finally:
+        server.close()
+    assert reply == "หันขวาแล้ว" and calls == [(30, 10)]
+    first, second = server.requests[0][2], server.requests[1][2]
+    assert first["messages"][0] == {"role": "system", "content": "sys"}
+    assert first["messages"][1]["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert first["tools"][0]["function"]["name"] == "look_at"
+    assert second["messages"][-1] == {"role": "tool", "tool_call_id": "call_1", "content": "ok"}
+
+
+def test_anthropic_tool_loop_and_fallback_request():
+    pytest.importorskip("anthropic")
+    from flybot.llm import AnthropicLLM
+    usage = {"input_tokens": 1, "output_tokens": 1}
+    base = {"type": "message", "role": "assistant", "model": "claude-opus-5-5", "stop_sequence": None, "usage": usage}
+    server = _FakeLLMServer([
+        {**base, "id": "m1", "stop_reason": "tool_use", "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": "look_at", "input": {"pan_deg": -20, "tilt_deg": 5}}]},
+        {**base, "id": "m2", "stop_reason": "end_turn", "content": [{"type": "text", "text": "หันซ้ายแล้ว"}]},
+    ])
+    calls = []
+    try:
+        llm = AnthropicLLM(api_key="test", base_url=server.url)
+        llm.fallbacks = True  # normally only on the real Claude API; check the request shape here
+        reply = llm.ask("sys", [], "หันซ้าย", tools=[_look_tool(calls)])
+    finally:
+        server.close()
+    assert reply == "หันซ้ายแล้ว" and calls == [(-20, 5)]
+    (path, headers, first), (_, _, second) = server.requests
+    assert path.startswith("/v1/messages")
+    assert "server-side-fallback-2026-07-01" in headers.get("anthropic-beta", "")
+    assert first["fallbacks"] == "default" and first["model"] == "claude-opus-5-5"
+    assert first["output_config"] == {"effort": "low"}
+    assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert first["tools"][0]["input_schema"]["required"] == ["pan_deg", "tilt_deg"]
+    result = second["messages"][-1]["content"][0]
+    assert result == {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}
+
+
+class _ScriptedLLM:
+    supports_images = True
+
+    def __init__(self, script):
+        self.script, self.prompts = script, []
+
+    def ask(self, system, history, text, tools=None, image_jpeg=None, max_steps=4):
+        self.prompts.append((text, image_jpeg))
+        return self.script(text, {t.name: t for t in tools or []}, image_jpeg)
+
+
+def _drain(cortex, timeout=2.0):
+    import time as _time
+    end = _time.monotonic() + timeout
+    while _time.monotonic() < end and cortex._jobs.unfinished_tasks:
+        _time.sleep(0.01)
+
+
+def test_cortex_narrates_chats_and_describes(gains):
+    import json as _json
+    from flybot.cortex import Cortex
+
+    def script(text, tools, image):
+        if image:
+            return "A coffee mug\nแก้วกาแฟ"
+        if "Event:" in text:
+            return "Whoa, too close!\nGiant Fiber ยิงเพราะ LPLC2 เห็นของขยายเร็ว"
+        tools["look_at"].call({"pan_deg": 40, "tilt_deg": 10})
+        tools["set_personality"].call({"name": "skittish"})
+        return "หันขวาแล้ว และตอนนี้ขี้ตกใจนะ"
+
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    published, events = [], []
+    cortex = Cortex(_ScriptedLLM(script), brain, lambda t, b: published.append((t, _json.loads(b))),
+                    emit_event=events.append, snapshot=lambda timeout: b"\xff\xd8jpeg", narrate_cooldown_s=0)
+    s = SensorState()
+    cortex.on_event({"type": "escape"}, {"GF": 1.2})
+    _drain(cortex)
+    assert brain.step(s, 0.05, now=0.0)["text"] == "Whoa, too close!"
+    assert published[-1][1]["type"] == "narration" and "LPLC2" in published[-1][1]["text"]
+
+    cortex.on_chat("หันขวาหน่อย")
+    _drain(cortex)
+    for i in range(60):
+        brain.step(s, 0.05, now=0.05 * (i + 1))
+    assert brain.pan > 20 and brain.tilt > 5  # PFL3 steered to the requested goal
+    assert brain.cfg.gf_threshold == 0.6 and cortex.personality == "skittish"
+    assert published[-1] == ("stackchan/chat/out", {"type": "reply", "to": "หันขวาหน่อย",
+                                                     "text": "หันขวาแล้ว และตอนนี้ขี้ตกใจนะ"})
+
+    cortex.on_event({"type": "presence"})
+    _drain(cortex)
+    assert events and events[-1]["type"] == "seen" and events[-1]["description"] == "แก้วกาแฟ"

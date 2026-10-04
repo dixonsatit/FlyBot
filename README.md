@@ -138,6 +138,39 @@ python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
 - **เกมดึงความสนใจ** `--game` — นับเวลาที่หุ่นมองวัตถุตรงกลางได้ต่อเนื่อง (หลุดสั้นกว่า `game_grace_s` ไม่นับว่าขาด)
   frame differencing เห็นเฉพาะของที่ขยับ ผู้เล่นต้องขยับวัตถุช้า ๆ ให้หุ่นตาม
 
+## LLM (ชั้นคิดช้า เหนือสมองแมลง)
+
+สมองแมลงยังคุม reflex 20 Hz เหมือนเดิม LLM ทำงานบน thread แยก ไม่อยู่ใน loop ควบคุม
+สั่งหุ่นได้ผ่านคำสั่งแบบคิว (`look_at` → เป้าหมาย FC2 ให้ PFL3 หันไป, `configure`, `say`) เท่านั้น
+LLM ช้าหรือล่มก็ไม่ทำให้เซอร์โวสะดุด
+
+```bash
+pip install -e .[llm]
+# Claude (ค่าเริ่มต้น claude-opus-5-5, effort low, prompt caching, server-side refusal fallback)
+export ANTHROPIC_API_KEY=...
+python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex --llm anthropic
+# OpenAI-compatible: OpenAI / Ollama / vLLM / LM Studio / Typhoon / OpenRouter
+python -m flybot.mqtt_bridge ... --llm openai --llm-model <โมเดล OpenAI>      # ใช้ OPENAI_API_KEY
+python -m flybot.mqtt_bridge ... --llm openai --llm-base-url http://localhost:11434/v1 --llm-model <โมเดลใน Ollama>
+python -m flybot.mqtt_bridge ... --llm openai --llm-base-url <base URL ของผู้ให้บริการ> \
+    --llm-model <ชื่อโมเดล> --llm-api-key-env <ชื่อ env ที่เก็บ key>
+```
+
+- **ผู้บรรยาย** — ทุกเหตุการณ์ (เว้นระยะ `--narrate-cooldown`) LLM อธิบายว่าวงจรไหนทำงานเพราะอะไร:
+  ภาษาไทยออก `stackchan/chat/out` (`{"type":"narration",...}`), ประโยคอังกฤษสั้นขึ้นบอลลูน; ปิดด้วย `--no-narrate`
+- **แชท + สั่งหุ่น** — ส่งข้อความ (หรือ `{"text": ...}`) ไป `stackchan/chat/in`, คำตอบออก `stackchan/chat/out`
+  tools: `look_at`, `set_personality`, `set_game`, `brain_state`, `say`, `look_and_describe` (ถ้าเปิด vision)
+  ```bash
+  mosquitto_pub -h 192.168.1.10 -t stackchan/chat/in -m 'หันไปทางขวาหน่อย แล้วเปลี่ยนเป็นขี้ตกใจ'
+  mosquitto_sub -h 192.168.1.10 -t stackchan/chat/out
+  ```
+- **ดูแล้วบอกว่าเห็นอะไร** `--llm-vision` — ตอน `presence` bridge ขอภาพ (`stackchan/snapshot/request`
+  → เฟิร์มแวร์ส่ง JPEG 160×120 grayscale ที่ `stackchan/snapshot`) ให้ LLM บรรยาย แล้วส่งเหตุการณ์ `seen`
+  (มี `description`) ไป MQTT/webhook; prompt สั่งไม่ให้ระบุตัวบุคคล **ภาพออกจากหุ่นไปยังผู้ให้บริการ LLM**
+  ถ้าใช้ในโรงพยาบาลให้ใช้โมเดลที่รันในเครือข่ายภายใน (เช่น Ollama ที่รองรับภาพ) หรือผ่านการพิจารณา PDPA ก่อน
+- ฟอนต์บอลลูนของ M5GFX ไม่มีอักษรไทย จึงให้ LLM เขียนข้อความบนจอเป็นภาษาอังกฤษสั้น ๆ ส่วนภาษาไทยออกทาง MQTT
+- โมเดลฝั่ง OpenAI-compatible ต้องรองรับ tool/function calling (และรองรับภาพถ้าเปิด `--llm-vision`)
+
 ## หลักการของแต่ละวงจร
 
 - **Optic Lobe** — `lamina` แยกการเคลื่อนไหวเป็นช่อง ON (L1) / OFF (L2) สี่ทิศ, ensemble T4a–d / T5a–d
@@ -182,6 +215,8 @@ flybot/central_complex.py  E-PG / FC2 / PFL3
 flybot/mushroom_body.py    KC, MBON, dopamine/octopamine, อารมณ์
 flybot/looming.py          LPLC2 / LC4 → Giant Fiber (หลบ)
 flybot/events.py           เหตุการณ์ → MQTT + webhook (cooldown)
+flybot/llm.py              ผู้ให้บริการ LLM: Claude (anthropic SDK) / OpenAI-compatible (openai SDK)
+flybot/cortex.py           ชั้น LLM: บรรยาย, แชท + tools, ดูภาพ (thread แยก)
 flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
 flybot/sim.py              ฉากจำลอง (กล้องอุดมคติ)

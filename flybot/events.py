@@ -20,6 +20,7 @@ MESSAGES = {
     "presence": "StackChan: มีคนเข้ามาใกล้",
     "escape": "StackChan: สะดุ้งหลบสิ่งที่พุ่งเข้ามา",
     "record": "StackChan: สถิติใหม่ในเกมดึงความสนใจ",
+    "seen": "StackChan: เห็นสิ่งที่เข้ามา",
 }
 
 

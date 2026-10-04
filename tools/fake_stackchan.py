@@ -25,6 +25,12 @@ def on_message(client, userdata, msg):
     if msg.topic.endswith("/event"):
         print("EVENT", msg.payload.decode())
         return
+    if msg.topic.endswith("/chat/out"):
+        print("CHAT", msg.payload.decode())
+        return
+    if msg.topic.endswith("/snapshot/request"):  # no camera here: send a placeholder "JPEG"
+        client.publish(f"{args.base_topic}/snapshot", b"\xff\xd8fake-jpeg\xff\xd9")
+        return
     cmd = json.loads(msg.payload)
     state["pan"] = cmd["servo"]["pan_angle"]
     print(json.dumps({k: cmd[k] for k in ("servo", "face", "audio", "text") if k in cmd}, ensure_ascii=False))
@@ -35,6 +41,8 @@ client.on_message = on_message
 client.connect(args.host, args.port)
 client.subscribe(f"{args.base_topic}/command")
 client.subscribe(f"{args.base_topic}/event")
+client.subscribe(f"{args.base_topic}/chat/out")
+client.subscribe(f"{args.base_topic}/snapshot/request")
 client.loop_start()
 cfg, t0 = ControllerConfig(), time.monotonic()
 try:

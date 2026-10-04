@@ -6,6 +6,7 @@
 //            <base>/sensor/proximity  {"ps": LTR-553 raw 0..2047, "als": ambient light counts}
 // subscribes <base>/command           {"servo":{"pan_angle","tilt_angle"},"face":{"expression"},"audio":{...}|null,
 //                                      "text": speech balloon (attention game), optional}
+//            <base>/snapshot/request  -> publishes one JPEG frame on <base>/snapshot (LLM vision)
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include <ArduinoJson.h>
@@ -13,6 +14,7 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include "esp_camera.h"
+#include "img_converters.h"
 
 #if __has_include("flybot_config.h")
 #include "flybot_config.h"
@@ -214,7 +216,31 @@ static Expression toExpression(const char* e) {
   return Expression::Doubt;  // curious
 }
 
+static volatile bool snapshotRequested = false;
+
+// One JPEG of the current frame for the bridge's LLM; streamed so it does not have
+// to fit PubSubClient's buffer.
+static void publishSnapshot() {
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) return;
+  uint8_t* jpg = nullptr;
+  size_t len = 0;
+  bool ok = frame2jpg(fb, 80, &jpg, &len);
+  esp_camera_fb_return(fb);
+  if (!ok) return;
+  String topic = topicBase + "/snapshot";
+  if (mqtt.beginPublish(topic.c_str(), len, false)) {
+    mqtt.write(jpg, len);
+    mqtt.endPublish();
+  }
+  free(jpg);
+}
+
 static void onCommand(char* topic, byte* payload, unsigned int len) {
+  if (topicBase + "/snapshot/request" == topic) {
+    snapshotRequested = true;
+    return;
+  }
   JsonDocument doc;
   if (deserializeJson(doc, payload, len)) return;
 
@@ -260,6 +286,7 @@ static void ensureConnected() {
   bool ok = strlen(MQTT_USER) ? mqtt.connect(id.c_str(), MQTT_USER, MQTT_PASSWORD) : mqtt.connect(id.c_str());
   if (ok) {
     mqtt.subscribe((topicBase + "/command").c_str());
+    mqtt.subscribe((topicBase + "/snapshot/request").c_str());
     M5_LOGI("MQTT connected as %s", id.c_str());
   } else {
     M5_LOGW("MQTT connect failed, state %d", mqtt.state());
@@ -310,6 +337,10 @@ void loop() {
     return;
   }
 
+  if (cameraOk && snapshotRequested) {
+    snapshotRequested = false;
+    publishSnapshot();
+  }
   if (cameraOk) processCamera();
 
   static uint32_t lastImu = 0, lastPs = 0;

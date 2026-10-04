@@ -2,7 +2,9 @@
 
 Subscribes ``<base>/sensor/{camera,imu,proximity}`` and publishes the command
 JSON on ``<base>/command`` at a fixed rate, plus events (presence, escape, game
-record) on ``<base>/event`` and optionally to a webhook.
+record) on ``<base>/event`` and optionally to a webhook. With ``--llm`` an LLM
+cortex narrates events, answers ``<base>/chat/in`` on ``<base>/chat/out`` and
+(``--llm-vision``) asks the robot for a JPEG on ``<base>/snapshot/request``.
 
     python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex
 """
@@ -11,11 +13,15 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import threading
 import time
 
 from .controller import (PERSONALITIES, BrainController, SensorState, apply_overrides, load_connectome,
                          personality)
+from .cortex import Cortex
 from .events import EventSink
+from .llm import make_llm
 from .looming import derive_looming_gains
 from .optic_lobe import derive_gains
 
@@ -42,13 +48,45 @@ class StackChanBridge:
                                 webhook_url, event_cooldown_s)
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
+        self.cortex: Cortex | None = None
+        self._jpeg: bytes | None = None
+        self._jpeg_ready = threading.Event()
+
+    def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
+                      vision: bool = False) -> None:
+        self.cortex = Cortex(llm, self.controller, lambda topic, body: self.client.publish(topic, body, qos=1),
+                             self.base, emit_event=lambda ev: self.events.emit(ev),
+                             snapshot=self.snapshot if vision else None, narrate=narrate,
+                             narrate_cooldown_s=narrate_cooldown_s)
+
+    def snapshot(self, timeout: float) -> bytes | None:
+        """Ask the robot for one JPEG frame (called from the cortex thread)."""
+        self._jpeg_ready.clear()
+        self.client.publish(f"{self.base}/snapshot/request", "1", qos=0)
+        return self._jpeg if self._jpeg_ready.wait(timeout) else None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         log.info("Connected to %s:%d (%s)", self.host, self.port, reason_code)
         for kind in SENSOR_KINDS:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
+        if self.cortex:
+            client.subscribe(f"{self.base}/chat/in", qos=1)
+            client.subscribe(f"{self.base}/snapshot", qos=0)
 
     def _on_message(self, client, userdata, msg):
+        if msg.topic == f"{self.base}/snapshot":
+            self._jpeg = bytes(msg.payload)
+            self._jpeg_ready.set()
+            return
+        if msg.topic == f"{self.base}/chat/in" and self.cortex:
+            text = msg.payload.decode(errors="replace").strip()
+            try:  # plain text or {"text": ...}
+                text = json.loads(text).get("text", "")
+            except (ValueError, AttributeError):
+                pass
+            if text:
+                self.cortex.on_chat(str(text))
+            return
         kind = msg.topic.rsplit("/", 1)[-1]
         try:
             payload = json.loads(msg.payload)
@@ -71,6 +109,8 @@ class StackChanBridge:
                 self.client.publish(topic, json.dumps(cmd, separators=(",", ":")), qos=0)
                 for event in self.controller.pop_events():
                     self.events.emit(event, now=now, brain=cmd.get("brain"))
+                    if self.cortex:
+                        self.cortex.on_event(event, self.controller.snapshot.get("brain"))
                 time.sleep(max(0.0, self.period - (time.monotonic() - now)))
         except KeyboardInterrupt:
             pass
@@ -96,6 +136,17 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--game", action="store_true", help="attention game: score shown on the robot")
     ap.add_argument("--webhook", help="POST every event as JSON to this URL")
     ap.add_argument("--event-cooldown", type=float, default=30.0, help="seconds between events of one type")
+    llm = ap.add_argument_group("LLM cortex (narration, chat, vision)")
+    llm.add_argument("--llm", default="none", choices=["none", "anthropic", "openai"],
+                     help="anthropic = Claude API; openai = any OpenAI-compatible endpoint")
+    llm.add_argument("--llm-model", help="default claude-opus-5-5 for anthropic; required for openai")
+    llm.add_argument("--llm-base-url", help="e.g. http://localhost:11434/v1 (Ollama), https://api.openai.com/v1")
+    llm.add_argument("--llm-api-key-env", help="name of the env var holding the key "
+                                               "(default ANTHROPIC_API_KEY / OPENAI_API_KEY)")
+    llm.add_argument("--llm-vision", action="store_true",
+                     help="send a camera JPEG to the LLM on presence / on request (privacy: images leave the robot)")
+    llm.add_argument("--no-narrate", action="store_true")
+    llm.add_argument("--narrate-cooldown", type=float, default=20.0)
     ap.add_argument("--set", action="append", metavar="KEY=VALUE",
                     help="override a ControllerConfig field, e.g. --set k_position=60 --set tilt_limits=0,30")
     args = ap.parse_args(argv)
@@ -113,8 +164,20 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as e:
         ap.error(str(e))
     log.info("Personality %s | looming LPLC2=%.2f LC4=%.2f", args.personality, looming.lplc2, looming.lc4)
-    StackChanBridge(BrainController(cfg, gains=gains, looming=looming), args.host, args.port, args.base_topic,
-                    args.rate, args.username, args.password, args.webhook, args.event_cooldown).run()
+    try:
+        api_key = os.environ.get(args.llm_api_key_env) if args.llm_api_key_env else None
+        model = make_llm(args.llm, args.llm_model, args.llm_base_url, api_key, vision=args.llm_vision)
+    except ValueError as e:
+        ap.error(str(e))
+    bridge = StackChanBridge(BrainController(cfg, gains=gains, looming=looming), args.host, args.port,
+                             args.base_topic, args.rate, args.username, args.password, args.webhook,
+                             args.event_cooldown)
+    if model:
+        log.info("LLM cortex: %s %s%s", args.llm, getattr(model, "model", ""), " + vision" if args.llm_vision else "")
+        bridge.attach_cortex(model, narrate=not args.no_narrate, narrate_cooldown_s=args.narrate_cooldown,
+                             vision=args.llm_vision)
+        bridge.cortex.personality = args.personality
+    bridge.run()
 
 
 if __name__ == "__main__":
