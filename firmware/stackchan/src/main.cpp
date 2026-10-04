@@ -7,6 +7,7 @@
 // subscribes <base>/command           {"servo":{"pan_angle","tilt_angle"},"face":{"expression"},"audio":{...}|null,
 //                                      "text": speech balloon (attention game), optional}
 //            <base>/snapshot/request  -> publishes one JPEG frame on <base>/snapshot (LLM vision)
+//            <base>/selftest          boot self-test result (retained), see selftest.cpp
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include <ArduinoJson.h>
@@ -15,12 +16,17 @@
 #include <WiFi.h>
 #include "esp_camera.h"
 #include "img_converters.h"
+#include "selftest.h"
+#include "thai_font.h"
 
 #if __has_include("flybot_config.h")
 #include "flybot_config.h"
 #else
 #warning "src/flybot_config.h not found, building with flybot_config.example.h"
 #include "flybot_config.example.h"
+#endif
+#ifndef SELF_TEST_FULL  // configs copied from an older example
+#define SELF_TEST_FULL 0
 #endif
 
 using namespace m5avatar;
@@ -217,6 +223,10 @@ static Expression toExpression(const char* e) {
 }
 
 static volatile bool snapshotRequested = false;
+static String selfTestJson;  // published (retained) once MQTT connects
+// Thai speech-balloon font; marks arrive pre-positioned by flybot.thai_text.shape()
+static lgfx::PointerWrapper thaiFontData;
+static lgfx::VLWfont thaiFont;
 
 // One JPEG of the current frame for the bridge's LLM; streamed so it does not have
 // to fit PubSubClient's buffer.
@@ -287,6 +297,11 @@ static void ensureConnected() {
   if (ok) {
     mqtt.subscribe((topicBase + "/command").c_str());
     mqtt.subscribe((topicBase + "/snapshot/request").c_str());
+    if (selfTestJson.length()) {
+      mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
+                   selfTestJson.length(), true);
+      selfTestJson = "";
+    }
     M5_LOGI("MQTT connected as %s", id.c_str());
   } else {
     M5_LOGW("MQTT connect failed, state %d", mqtt.state());
@@ -314,9 +329,28 @@ void setup() {
   servoX.attach(SERVO_PIN_X, 500, 2400);
   servoY.attach(SERVO_PIN_Y, 500, 2400);
   writeServos(0, 0);
-
   M5.Speaker.begin();
+
+  // touch the screen during the first 1.5 s for the full test (servo sweep)
+  bool full = SELF_TEST_FULL;
+  M5.Display.setFont(&fonts::Font2);
+  M5.Display.drawString("Touch screen for full self-test", 6, 6);
+  for (uint32_t t0 = millis(); !full && millis() - t0 < 1500; delay(20)) {
+    M5.update();
+    full = M5.Touch.getCount() > 0;
+  }
+  SelfTestReport report = runSelfTest(cameraOk, proximityOk, full, writeServos);
+  selfTestJson = report.toJson();
+  Serial.println(selfTestJson);
+  delay(report.allOk() ? 2500 : 10000);  // leave failures on screen long enough to read
+
   avatar.init();
+  thaiFontData.set(thai_font_vlw, thai_font_vlw_len);
+  if (thaiFont.loadFont(&thaiFontData)) {
+    avatar.setSpeechFont(&thaiFont);
+  } else {
+    M5_LOGE("Thai font failed to load");
+  }
   avatar.setExpression(Expression::Doubt);
 
   WiFi.mode(WIFI_STA);

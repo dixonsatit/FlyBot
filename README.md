@@ -178,7 +178,7 @@ python -m flybot.mqtt_bridge ... --llm openai --llm-base-url <base URL ของ
 ```
 
 - **ผู้บรรยาย** — ทุกเหตุการณ์ (เว้นระยะ `--narrate-cooldown`) LLM อธิบายว่าวงจรไหนทำงานเพราะอะไร:
-  ภาษาไทยออก `stackchan/chat/out` (`{"type":"narration",...}`), ประโยคอังกฤษสั้นขึ้นบอลลูน; ปิดด้วย `--no-narrate`
+  ภาษาไทยออก `stackchan/chat/out` (`{"type":"narration",...}`), ข้อความสั้น (≤ 14 ตัวอักษร) ขึ้นบอลลูน; ปิดด้วย `--no-narrate`
 - **แชท + สั่งหุ่น** — ส่งข้อความ (หรือ `{"text": ...}`) ไป `stackchan/chat/in`, คำตอบออก `stackchan/chat/out`
   tools: `look_at`, `set_personality`, `set_game`, `brain_state`, `say`, `look_and_describe` (ถ้าเปิด vision)
   ```bash
@@ -189,7 +189,8 @@ python -m flybot.mqtt_bridge ... --llm openai --llm-base-url <base URL ของ
   → เฟิร์มแวร์ส่ง JPEG 160×120 grayscale ที่ `stackchan/snapshot`) ให้ LLM บรรยาย แล้วส่งเหตุการณ์ `seen`
   (มี `description`) ไป MQTT/webhook; prompt สั่งไม่ให้ระบุตัวบุคคล **ภาพออกจากหุ่นไปยังผู้ให้บริการ LLM**
   ถ้าใช้ในโรงพยาบาลให้ใช้โมเดลที่รันในเครือข่ายภายใน (เช่น Ollama ที่รองรับภาพ) หรือผ่านการพิจารณา PDPA ก่อน
-- ฟอนต์บอลลูนของ M5GFX ไม่มีอักษรไทย จึงให้ LLM เขียนข้อความบนจอเป็นภาษาอังกฤษสั้น ๆ ส่วนภาษาไทยออกทาง MQTT
+- บอลลูนแสดงภาษาไทยด้วยฟอนต์ที่ฝังในเฟิร์มแวร์ (ดูหัวข้อเฟิร์มแวร์) ถ้าใช้เฟิร์มแวร์รุ่นเก่าที่ไม่มีฟอนต์ไทย
+  ให้ `--set screen_lang=en` แล้วข้อความบนจอจะเป็นภาษาอังกฤษ
 - โมเดลฝั่ง OpenAI-compatible ต้องรองรับ tool/function calling (และรองรับภาพถ้าเปิด `--llm-vision`)
 - โมเดลที่ "คิดก่อนตอบ" (เช่น Qwen3 บน vLLM) อาจใช้ token หมดไปกับการคิดจนไม่มีคำตอบ (log จะเตือน)
   ปิดการคิดด้วย `--llm-extra-body '{"chat_template_kwargs": {"enable_thinking": false}}'` หรือเพิ่ม `--llm-max-tokens`
@@ -238,6 +239,14 @@ pio run -t upload && pio device monitor
 - ส่ง `box` (กรอบพิกเซลที่เปลี่ยน) และ `lum` (ความสว่างเฉลี่ยแต่ละครึ่งภาพ) ไปกับทุกเฟรม
 - IMU (BMI270) ~30 Hz, LTR-553 `ps` + `als` 10 Hz
 - `text` จากคำสั่งแสดงในบอลลูนคำพูดของ avatar (อัปเดตไม่เกิน 4 ครั้ง/วินาที)
+- **ฟอนต์ไทยบนจอ** — ฟอนต์ Sarabun (SIL OFL, `fonts/OFL.txt`) แปลงเป็น VLW ฝังในเฟิร์มแวร์ (`src/thai_font.cpp`, ~17 KB)
+  M5GFX วาดอักษรทีละตัวโดยไม่จัดตำแหน่งสระ/วรรณยุกต์ bridge จึงจัดให้ก่อนส่ง (`flybot/thai_text.py`: วรรณยุกต์
+  เหนือสระบนยกสูง, สระ/วรรณยุกต์บน ป ฝ ฟ ฬ เลื่อนซ้าย, สระล่างใต้ ฎ ฏ เลื่อนลง โดยใช้ glyph ใน Private Use Area)
+  สร้างใหม่ได้ด้วย `python tools/make_vlw_font.py --preview preview.png` (ดูภาพตัวอย่างก่อน build)
+- **ตรวจเครื่องตอนเปิด** — ทุกครั้งที่เปิดเครื่องจะเช็ค PSRAM, กล้อง (+ จับภาพได้), IMU และ LTR-553 *หลัง* กล้องเริ่มทำงาน
+  (ใช้บัส I2C ร่วมกัน), ลำโพง แล้วแสดงผล OK/FAIL บนจอ (ถ้ามี FAIL ค้างไว้ 10 วินาที) และส่ง `stackchan/selftest`
+  (retained) ให้ bridge บันทึกใน log; **แตะจอระหว่างเปิดเครื่อง** (หรือ `SELF_TEST_FULL 1`) เพื่อทดสอบเต็ม:
+  หมุนเซอร์โวพร้อมบอกบนจอว่าหัวควรหันไปทางไหน ถ้าหันผิดให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
 - เซอร์โว: `องศา = CENTER + SIGN × มุมจากคำสั่ง` แล้วจำกัดใน MIN..MAX (SG90 แกน Y ขยับได้ ~60–90°)
   ค่าเริ่มต้น Port.C X=17, Y=18 ถ้าหัวหันผิดทางให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
 - เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Doubt

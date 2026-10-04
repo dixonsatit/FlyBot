@@ -15,6 +15,7 @@ from .connectome import Connectome, load_codex, synthetic_codex
 from .looming import GiantFiber, LoomingGains, derive_looming_gains
 from .mushroom_body import MushroomBody, Percept
 from .optic_lobe import CircuitGains, build_optic_lobe, derive_gains
+from .thai_text import shape
 
 # M5.Speaker.tone(freq, ms) sequences for each expression change
 AUDIO = {
@@ -69,6 +70,8 @@ class ControllerConfig:
     # reminders turn the head to where the user usually sits
     home_pan: float = 0.0
     home_tilt: float = 10.0
+    # balloon text language: "th" needs the firmware's Thai font, "en" works on any firmware
+    screen_lang: str = "th"
 
 
 # Presets for --personality, applied before --set overrides
@@ -246,7 +249,10 @@ class BrainController:
             self.mb.hold("alert", hold_s)
             self._audio = AUDIO["reminder"]
             minutes = reminder.get("minutes", 0)
-            screen = f"Meeting in {minutes} min ({reminder.get('start', '')})" if minutes else "Meeting now!"
+            if self.cfg.screen_lang == "th":
+                screen = f"ประชุมใน {minutes} นาที" if minutes else "ได้เวลาประชุม!"
+            else:
+                screen = f"Meeting in {minutes} min ({reminder.get('start', '')})" if minutes else "Meeting now!"
             self._say = (screen, self._clock + max(hold_s, 15.0))
             title = reminder.get("title") or "ประชุม"
             where = f" ที่ {reminder['location']}" if reminder.get("location") else ""
@@ -409,7 +415,7 @@ class BrainController:
         if self._say and self._clock < self._say[1]:
             text = self._say[0]
         if text or self._text_shown:  # one empty text clears the balloon
-            cmd["text"] = text
+            cmd["text"] = shape(text)  # Thai marks pre-positioned for the bitmap font
         self._text_shown = bool(text)
         brain = {
             "HS": round(float(hs), 3), "VS": round(float(vs), 3),

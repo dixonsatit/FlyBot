@@ -70,11 +70,15 @@ class StackChanBridge:
         log.info("Connected to %s:%d (%s)", self.host, self.port, reason_code)
         for kind in SENSOR_KINDS:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
+        client.subscribe(f"{self.base}/selftest", qos=1)
         if self.cortex:
             client.subscribe(f"{self.base}/chat/in", qos=1)
             client.subscribe(f"{self.base}/snapshot", qos=0)
 
     def _on_message(self, client, userdata, msg):
+        if msg.topic == f"{self.base}/selftest":
+            self._log_selftest(msg.payload)
+            return
         if msg.topic == f"{self.base}/snapshot":
             self._jpeg = bytes(msg.payload)
             self._jpeg_ready.set()
@@ -96,6 +100,20 @@ class StackChanBridge:
             return
         if kind in SENSOR_KINDS and isinstance(payload, dict):
             self.sensors.update(kind, payload)
+
+    @staticmethod
+    def _log_selftest(payload: bytes) -> None:
+        try:
+            report = json.loads(payload)
+        except ValueError:
+            log.warning("Unreadable self-test report")
+            return
+        items = report.get("items", [])
+        failed = [f"{i.get('name')} ({i.get('detail')})" for i in items if not i.get("ok")]
+        if failed:
+            log.warning("Robot self-test FAILED: %s", "; ".join(failed))
+        else:
+            log.info("Robot self-test OK: %s", ", ".join(f"{i.get('name')} {i.get('detail')}" for i in items))
 
     def run(self) -> None:
         self.client.connect(self.host, self.port, keepalive=30)

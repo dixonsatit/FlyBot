@@ -29,5 +29,8 @@
 #define MIN_MOTION_PIXELS 40      // fewer changed pixels -> "detected": false
 #define MAX_MOTION_FRACTION 0.30f // more -> whole image moved (head turning / exposure), frame skipped
 
+// 1 = always run the full boot self-test (servo sweep); otherwise touch the screen at boot
+#define SELF_TEST_FULL 0
+
 #define IMU_PERIOD_MS 33
 #define PROXIMITY_PERIOD_MS 100

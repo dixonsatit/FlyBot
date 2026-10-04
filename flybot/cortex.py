@@ -5,8 +5,9 @@ Jobs run one at a time on a worker thread and act on the robot only through the
 controller's queued commands (``look_at``, ``configure``, ``say``), so a slow or
 failing LLM call can delay a reply but never a servo command.
 
-The robot's balloon font has no Thai glyphs, so text for the screen is short
-English; Thai replies go to MQTT (``<base>/chat/out``) and events.
+Text for the robot's speech balloon is very short (Thai with the firmware's Thai
+font, ``screen_lang="th"``, or English for older firmware); full replies go to MQTT
+(``<base>/chat/out``) and events.
 """
 from __future__ import annotations
 
@@ -29,11 +30,19 @@ body that sets the mood with dopamine and octopamine, and a looming detector (LP
 that fires the Giant Fiber to dodge things rushing at it. You can explain what these
 circuits are doing in plain words. The person you talk with speaks Thai: always answer in
 Thai (ตอบเป็นภาษาไทยเสมอ), briefly (one to three sentences), warm and a little playful. Never claim medical or
-therapeutic effects. The robot's screen cannot draw Thai, so text you pass to the `say`
-tool must be short English (ASCII, at most 40 characters)."""
+therapeutic effects. {screen_rule}"""
+
+SCREEN_RULES = {
+    "th": "Text you pass to the `say` tool must be very short Thai (at most 14 characters): the "
+          "speech balloon is small.",
+    "en": "The robot's screen cannot draw Thai, so text you pass to the `say` tool must be short "
+          "English (ASCII, at most 30 characters).",
+}
+SCREEN_LINE = {"th": "very short Thai, at most 14 characters", "en": "short English, at most 30 ASCII characters"}
+SCREEN_MAX = {"th": 16, "en": 32}
 
 NARRATE = """Something just happened to the robot. Write exactly two lines:
-line 1: what the robot would say about it, short English, at most 30 ASCII characters;
+line 1: what the robot would say about it, {screen_line};
 line 2: one sentence in Thai (ภาษาไทย) explaining the cause below in plain words.
 Event: {event}
 Cause (fact, do not change which circuit): {cause}
@@ -52,8 +61,8 @@ CAUSES = {
 URGENT = {"meeting"}  # narrated even inside the narration cooldown
 
 DESCRIBE = """This is a 160x120 grayscale frame from the robot's camera, taken because something
-new moved in front of it. Write exactly two lines: line 1 a short English description
-(at most 30 ASCII characters) of the main thing in view; line 2 the same in Thai. Do not
+new moved in front of it. Write exactly two lines: line 1 a description of the main thing
+in view, {screen_line}; line 2 one Thai sentence describing it. Do not
 try to identify people; describe them only as "a person"."""
 
 
@@ -111,19 +120,28 @@ class Cortex:
                 self._jobs.task_done()
 
     # -- jobs ---------------------------------------------------------------------
-    @staticmethod
-    def _two_lines(reply: str) -> tuple[str, str]:
+    @property
+    def lang(self) -> str:
+        return self.controller.cfg.screen_lang if self.controller.cfg.screen_lang in SCREEN_RULES else "en"
+
+    @property
+    def persona(self) -> str:
+        return PERSONA.format(screen_rule=SCREEN_RULES[self.lang])
+
+    def _two_lines(self, reply: str) -> tuple[str, str]:
         lines = [l.strip() for l in reply.splitlines() if l.strip()]
         if not lines:
             return "", ""
-        screen = lines[0] if lines[0].isascii() else ""
+        fits = self.lang == "th" or lines[0].isascii()  # an English screen can't draw Thai
+        screen = lines[0][:SCREEN_MAX[self.lang]] if fits else ""
         thai = lines[1] if len(lines) > 1 else ("" if screen else lines[0])
-        return screen[:40], thai
+        return screen, thai
 
     def _narrate(self, event: dict, brain: dict) -> None:
         kind = event.get("type", "")
-        reply = self.llm.ask(PERSONA, [], NARRATE.format(event=json.dumps(event, ensure_ascii=False),
-                                                         cause=CAUSES.get(kind, kind), brain=json.dumps(brain)))
+        reply = self.llm.ask(self.persona, [], NARRATE.format(
+            event=json.dumps(event, ensure_ascii=False), cause=CAUSES.get(kind, kind), brain=json.dumps(brain),
+            screen_line=SCREEN_LINE[self.lang]))
         screen, thai = self._two_lines(reply)
         if screen and kind not in URGENT:  # a reminder already shows its own balloon text
             self.controller.say(screen)
@@ -134,7 +152,8 @@ class Cortex:
         jpeg = self.snapshot(2.0) if self.snapshot else None
         if not jpeg:
             return json.dumps({"error": "no camera frame"})
-        screen, thai = self._two_lines(self.vision_llm.ask(PERSONA, [], DESCRIBE, image_jpeg=jpeg))
+        prompt = DESCRIBE.format(screen_line=SCREEN_LINE[self.lang])
+        screen, thai = self._two_lines(self.vision_llm.ask(self.persona, [], prompt, image_jpeg=jpeg))
         if screen:
             self.controller.say(screen)
         if self.emit_event and (screen or thai):
@@ -142,7 +161,7 @@ class Cortex:
         return json.dumps({"seen": thai or screen}, ensure_ascii=False)
 
     def _chat(self, text: str) -> None:
-        reply = self.llm.ask(PERSONA, self.history, text, tools=self.tools())
+        reply = self.llm.ask(self.persona, self.history, text, tools=self.tools())
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "..."}]
         self.history = self.history[-2 * self.history_turns:]
         self._out({"type": "reply", "to": text, "text": reply})
@@ -170,10 +189,11 @@ class Cortex:
             Tool("brain_state", "Current expression, head pose, fly-circuit activity and event counts.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  lambda: {**c.snapshot, "personality": self.personality, "events_so_far": self.event_counts}),
-            Tool("say", "Show short English text (ASCII, <= 40 chars) in the robot's speech balloon.",
+            Tool("say", "Show very short text in the robot's speech balloon ("
+                        + SCREEN_LINE[self.lang] + ").",
                  {"type": "object", "properties": {"text": {"type": "string"}},
                   "required": ["text"], "additionalProperties": False},
-                 lambda text: c.say(text[:40]) or "shown"),
+                 lambda text: c.say(text[:SCREEN_MAX[self.lang]]) or "shown"),
         ]
         if self.snapshot:
             tools.append(Tool("look_and_describe", "Take a camera frame and describe what is in front of the robot.",

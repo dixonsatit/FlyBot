@@ -526,7 +526,7 @@ def test_controller_meeting_reminder(gains):
     cmd = brain.step(s, 0.05, now=0.0)
     events = brain.pop_events()
     assert cmd["face"]["expression"] == "alert" and cmd["audio"]["tones"][0] == [988, 120]
-    assert cmd["text"] == "Meeting in 10 min (10:00)"
+    assert cmd["text"] == "ประชุมใน 10 นาที"  # Thai balloon by default (no marks to reposition here)
     assert [e["type"] for e in events] == ["meeting"]  # no extra "presence" from the alert face
     assert events[0]["message"] == "StackChan: อีก 10 นาที ประชุม ประชุม HIS เวลา 10:00 ที่ ห้อง IT"
     for i in range(1, 200):  # alert held 8 s, then back to normal moods
@@ -542,3 +542,49 @@ def test_event_sink_cooldown_is_per_key():
     assert sink.emit({"type": "meeting", "key": "meeting:b:10", "message": "B"}, now=1)
     assert not sink.emit({"type": "meeting", "key": "meeting:a:10"}, now=2)
     assert all('"key"' not in b for b in sent) and '"message": "A"' in sent[0]
+
+
+def test_bridge_logs_robot_selftest(caplog):
+    import json as _json
+    import logging as _logging
+    from flybot.mqtt_bridge import StackChanBridge
+    report = {"ok": False, "items": [{"name": "camera", "ok": True, "detail": "init ok"},
+                                     {"name": "imu accel", "ok": False, "detail": "no data"}]}
+    with caplog.at_level(_logging.INFO, logger="flybot.mqtt"):
+        StackChanBridge._log_selftest(_json.dumps(report).encode())
+    assert "self-test FAILED: imu accel (no data)" in caplog.text
+
+
+def test_reminder_balloon_in_english_for_old_firmware(gains):
+    brain = BrainController(ControllerConfig(backend="rate", screen_lang="en"), gains=gains)
+    brain.remind({"uid": "u", "title": "x", "start": "10:00", "minutes": 10, "lead": 10})
+    assert brain.step(SensorState(), 0.05, now=0.0)["text"] == "Meeting in 10 min (10:00)"
+
+
+# -- Thai text on the robot's bitmap font ---------------------------------------------
+
+def test_thai_shape_positions_marks():
+    from flybot.thai_text import TONE_HIGH, TONE_HIGH_LEFT, TONE_LEFT, UPPER_LEFT, LOWER_DOWN, shape
+    assert shape("Meeting 10:00") == "Meeting 10:00"
+    assert shape("ที่") == "ท" + "ี" + TONE_HIGH["่"]          # tone above an upper vowel
+    assert shape("ได้") == "ได้"                                  # tone alone stays low
+    assert shape("น้ำ") == "น" + TONE_HIGH["้"] + "ำ"            # sara am has a nikhahit above
+    assert shape("ปี่") == "ป" + UPPER_LEFT["ี"] + TONE_HIGH_LEFT["่"]  # clear of the ascender stem
+    assert shape("ป่า") == "ป" + TONE_LEFT["่"] + "า"
+    assert shape("ฎุ") == "ฎ" + LOWER_DOWN["ุ"]                  # below the descender
+
+
+def test_thai_font_matches_shaper():
+    import re
+    import struct
+    from pathlib import Path
+    from flybot import thai_text as tt
+    cpp = Path(__file__).resolve().parents[1] / "firmware/stackchan/src/thai_font.cpp"
+    data = bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", cpp.read_text().split("PROGMEM")[1]))
+    count, version = struct.unpack(">2i", data[:8])
+    codes = {struct.unpack(">i", data[24 + 28 * i: 28 + 28 * i])[0] for i in range(count)}
+    assert version == 11 and len(data) == int(re.search(r"thai_font_vlw_len = (\d+)", cpp.read_text()).group(1))
+    needed = {ord(c) for c in "กขคงจฉชซญฎฏดตถทนบปผฝพฟภมยรลวศษสหฬอฮะาำิีึืุูเแโใไๆ่้๊๋์ abc123"}
+    for table in (tt.TONE_HIGH, tt.TONE_LEFT, tt.TONE_HIGH_LEFT, tt.UPPER_LEFT, tt.LOWER_DOWN):
+        needed |= {ord(v) for v in table.values()}
+    assert needed <= codes
