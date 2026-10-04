@@ -72,6 +72,9 @@ class StackChanBridge:
         return self._jpeg if self._jpeg_ready.wait(timeout) else None
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
+        if reason_code.is_failure:  # e.g. wrong username/password: paho keeps retrying
+            log.error("MQTT connection to %s:%d refused: %s", self.host, self.port, reason_code)
+            return
         log.info("Connected to %s:%d (%s)", self.host, self.port, reason_code)
         for kind in SENSOR_KINDS:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)

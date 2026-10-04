@@ -30,10 +30,12 @@ spec:
         fsGroup: 1883
         seccompProfile: {type: RuntimeDefault}
       initContainers:
-        # mosquitto needs a hashed password file; build it from the Secret at start
+        # mosquitto needs a hashed password file; build it from the Secret at start. Line breaks
+        # are dropped (a Secret made with --from-file keeps the file's trailing newline) so the
+        # hash matches what the bridge (FLYBOT_PASSWORD, stripped) and the robot send.
         - name: passwd
           image: eclipse-mosquitto:2
-          command: ["sh", "-c", "mosquitto_passwd -b -c /mosquitto/auth/passwd \"$MQTT_USER\" \"$MQTT_PASSWORD\" && chmod 0600 /mosquitto/auth/passwd"]
+          command: ["sh", "-c", "pw=$(printf %s \"$MQTT_PASSWORD\" | tr -d '\\r\\n') && mosquitto_passwd -b -c /mosquitto/auth/passwd \"$MQTT_USER\" \"$pw\" && chmod 0600 /mosquitto/auth/passwd"]
           env:
             - name: MQTT_USER
               valueFrom: {configMapKeyRef: {name: flybot-config, key: FLYBOT_USERNAME}}
