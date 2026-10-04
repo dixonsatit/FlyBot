@@ -38,7 +38,7 @@ Controller details that span modules: an efference copy of the previous pan/tilt
 
 ## Firmware (`firmware/stackchan/`)
 
-PlatformIO project for CoreS3 + SG90 (`pio run` to build; `src/flybot_config.h` is gitignored and falls back to `flybot_config.example.h` with a `#warning`). The config header is deliberately not named `config.h`, because a dependency ships its own `config.h` that would shadow it. PlatformIO isn't installed globally; it was installed into a throwaway venv.
+PlatformIO project for CoreS3 + SG90 (`pio run` to build; `src/flybot_config.h` is gitignored and falls back to `flybot_config.example.h` with a `#warning`). The config header is deliberately not named `config.h`, because a dependency ships its own `config.h` that would shadow it. PlatformIO comes from Homebrew (`pio`).
 
 - The camera is initialised with `esp_camera_init` directly (the released M5CoreS3 1.0.1 `GC0308::begin()` takes no config). Camera SCCB shares the internal I2C bus with IMU/LTR-553/touch: `M5.In_I2C.release()` before init and `M5.In_I2C.begin()` after it. Never call `sensor_t` setters later.
 - Motion detection is frame differencing on 160×120 grayscale. The payload carries `width/height`, so the controller normalises it independently of `ControllerConfig.frame_width`.
