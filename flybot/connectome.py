@@ -43,8 +43,9 @@ GROUP_PATTERNS: list[tuple[str, str]] = [
     *[(f"T4{d}", rf"^T4{d}$") for d in "abcd"],
     *[(f"T5{d}", rf"^T5{d}$") for d in "abcd"],
     # Lobula-plate intrinsic (opponent inhibition) and tangential cells
-    ("LPi_h", r"^LPi\s*2"),
-    ("LPi_v", r"^LPi\s*[34]"),
+    # v783 names LPi cells LPi01..LPi15 without their layers, so they form one
+    # group and the synapse counts select the opponent paths onto HS / VS
+    ("LPi", r"^LPi"),
     ("HS", r"^HS"),
     ("VS", r"^VS"),
     # Lobula columnar object-tracking pathway
@@ -171,12 +172,12 @@ _SYNTHETIC_EDGES: list[tuple[str, str, float, str]] = [
       for m, n in (("Tm1", 20), ("Tm2", 25), ("Tm4", 10), ("Tm9", 25))],
     ("T4a", "HS", 40, "LOP"), ("T5a", "HS", 35, "LOP"),
     ("T4d", "VS", 40, "LOP"), ("T5d", "VS", 38, "LOP"),
-    ("T4b", "LPi_h", 30, "LOP"), ("T5b", "LPi_h", 28, "LOP"), ("LPi_h", "HS", 25, "LOP"),
-    ("T4c", "LPi_v", 30, "LOP"), ("T5c", "LPi_v", 30, "LOP"), ("LPi_v", "VS", 25, "LOP"),
+    ("T4b", "LPi", 30, "LOP"), ("T5b", "LPi", 28, "LOP"), ("LPi", "HS", 25, "LOP"),
+    ("T4c", "LPi", 30, "LOP"), ("T5c", "LPi", 30, "LOP"), ("LPi", "VS", 25, "LOP"),
     ("Tm2", "LC10", 20, "LO"), ("Tm3", "LC10", 10, "LO"),
 ]
-_SYNTHETIC_NT = {"L1": "GLUT", "Mi4": "GABA", "Mi9": "GLUT", "LPi_h": "GLUT", "LPi_v": "GLUT"}
-_SYNTHETIC_TYPE_NAME = {"LPi_h": "LPi2-1", "LPi_v": "LPi4-3"}
+_SYNTHETIC_NT = {"L1": "GLUT", "Mi4": "GABA", "Mi9": "GLUT", "LPi": "GLUT"}
+_SYNTHETIC_TYPE_NAME = {"LPi": "LPi01"}
 
 
 def synthetic_codex(n_per_type: int = 6, side: str = "R", seed: int = 0) -> Connectome:

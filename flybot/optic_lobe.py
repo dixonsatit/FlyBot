@@ -81,14 +81,17 @@ def derive_gains(adj: pd.DataFrame) -> CircuitGains:
     off = {d: path("L2", OFF_MEDULLA, f"T5{d}") for d in DIRECTIONS}
     feed = _normalise({f"on_{d}": v for d, v in on.items()} | {f"off_{d}": v for d, v in off.items()}, "T4/T5 input")
 
+    # one-hop excitation and two-hop (via LPi) inhibition differ in scale, so each
+    # kind is normalised on its own; HS vs VS differences within a kind are kept
     lptc = _normalise(
+        {"hs_exc": w("T4a", "HS") + w("T5a", "HS"), "vs_exc": w("T4d", "VS") + w("T5d", "VS")},
+        "lobula plate excitation",
+    ) | _normalise(
         {
-            "hs_exc": w("T4a", "HS") + w("T5a", "HS"),
-            "hs_inh": path("T4b", ("LPi_h",), "HS") + path("T5b", ("LPi_h",), "HS"),
-            "vs_exc": w("T4d", "VS") + w("T5d", "VS"),
-            "vs_inh": path("T4c", ("LPi_v",), "VS") + path("T5c", ("LPi_v",), "VS"),
+            "hs_inh": path("T4b", ("LPi",), "HS") + path("T5b", ("LPi",), "HS"),
+            "vs_inh": path("T4c", ("LPi",), "VS") + path("T5c", ("LPi",), "VS"),
         },
-        "lobula plate",
+        "lobula plate inhibition (LPi)",
     )
     has_lc10 = "LC10" in adj.columns and adj["LC10"].abs().sum() > 0
     if not has_lc10:

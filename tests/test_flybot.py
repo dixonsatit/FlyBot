@@ -22,7 +22,7 @@ def test_codex_csv_roundtrip(tmp_path):
     adj = loaded.group_adjacency()
     assert adj.loc["Mi1", "T4a"] > 0 and adj.loc["L1", "T4a"] == 0
     signed = loaded.group_adjacency(signed=True)
-    assert signed.loc["LPi_h", "HS"] < 0 < signed.loc["T4a", "HS"]
+    assert signed.loc["LPi", "HS"] < 0 < signed.loc["T4a", "HS"]
 
 
 def test_gains_are_balanced(gains):
@@ -117,3 +117,11 @@ def test_controller_estimates_velocity_without_motion_vector(gains):
         s.update("camera", {"x": 160 + 20 * i, "y": 120}, now=i * 0.05)
         cmd = brain.step(s, 0.05, now=i * 0.05)
     assert cmd["brain"]["HS"] > 0
+
+
+def test_v783_type_names_map_to_groups():
+    import pandas as pd
+    from flybot.connectome import Connectome
+    names = ["T4a", "Mi1", "LPi03", "HSE", "VS1", "VSm", "LC10a", "H1", "Dm3q"]
+    con = Connectome(pd.DataFrame(), pd.Series(names, index=range(len(names))), "test")
+    assert con.groups().tolist() == ["T4a", "Mi1", "LPi", "HS", "VS", "VS", "LC10"]
