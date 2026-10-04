@@ -63,3 +63,7 @@ PlatformIO project for CoreS3 + SG90 (`pio run` to build; `src/flybot_config.h` 
 - v783 type names: HS = `HSE/HSN/HSS`, VS = `VS1–8/VSm`, LC10 = `LC10a–f` (all matched by prefix regexes). LPi cells are `LPi01..LPi15` with no layer info, so they form a single `LPi` group; the opponent paths onto HS/VS are selected by synapse counts. Keep `_SYNTHETIC_TYPE_NAME` in sync if group naming changes.
 - `NT_SIGN` treats glutamate as inhibitory (GluCl) for `signed=True` adjacency.
 - `write_codex_csv` exports a `Connectome` in Codex CSV format (used for round-trip tests).
+
+## Commits and releases
+
+Releases are automated by python-semantic-release (`[tool.semantic_release]` in `pyproject.toml`, `.github/workflows/release.yml`). On each push to the release branch, CI runs the tests and then bumps `project.version` from the Conventional Commit messages since the last `v*` tag: `feat:` → minor, `fix:`/`perf:` → patch, `!`/`BREAKING CHANGE:` → major once ≥ 1.0 (`major_on_zero = false`). It then tags, updates `CHANGELOG.md` and creates the GitHub release. Write commit subjects as `type(scope): summary`, using one of `feat fix perf docs test ci build chore refactor style`. `v0.1.0` is the hand-made baseline tag, because the commits before it are not conventional. Preview the next version with `semantic-release --noop version --print`.
