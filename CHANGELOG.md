@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.2.0 (2026-10-04)
+
+### Features
+
+- **calendar**: Remind upcoming meetings from ICS calendars
+  ([`3e0b356`](https://github.com/dixonsatit/FlyBot/commit/3e0b3569ffd425b594654e59bb3b2e584d8f592c))
+
+
 ## v0.1.0 (2026-10-04)
 
 First pre-release: FlyWire Codex (FAFB v783) fly circuits simulated with Nengo, driving an
