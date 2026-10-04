@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-10-04)
+
+### Features
+
+- **dashboard**: Web dashboard with simulated robot and Thai voice
+  ([`6431c31`](https://github.com/dixonsatit/FlyBot/commit/6431c3198145112081af446d12f370a82103f3b3))
+
+
 ## v0.4.1 (2026-10-04)
 
 ### Bug Fixes
