@@ -15,6 +15,8 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--host", default="localhost")
 ap.add_argument("--port", type=int, default=1883)
 ap.add_argument("--base-topic", default="stackchan")
+ap.add_argument("--username")
+ap.add_argument("--password")
 ap.add_argument("--duration", type=float, default=30.0)
 ap.add_argument("--snapshot-file", help="JPEG sent when the bridge asks for a snapshot (LLM vision)")
 args = ap.parse_args()
@@ -40,6 +42,8 @@ def on_message(client, userdata, msg):
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fake-stackchan")
 client.on_message = on_message
+if args.username:
+    client.username_pw_set(args.username, args.password)
 client.connect(args.host, args.port)
 client.subscribe(f"{args.base_topic}/command")
 client.subscribe(f"{args.base_topic}/event")

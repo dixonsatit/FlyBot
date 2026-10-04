@@ -1,0 +1,16 @@
+# FlyBot on Kubernetes: the MQTT bridge (fly brain + reminders + LLM) and a Mosquitto broker
+# the robot reaches from the LAN. Before `kubectl apply -k deploy/k8s`, create (see README):
+#   - ConfigMap flybot-gains  (gains.json from `python -m flybot.gains_io`)
+#   - Secret    flybot-secrets (mqtt-password, and optionally llm-api-key, calendar-url, webhook-url)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: flybot
+resources:
+  - namespace.yaml
+  - config.yaml
+  - mosquitto.yaml
+  - bridge.yaml
+images:
+  - name: flybot
+    newName: ghcr.io/dixonsatit/flybot
+    newTag: latest

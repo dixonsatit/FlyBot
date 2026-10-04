@@ -6,6 +6,10 @@ record) on ``<base>/event`` and optionally to a webhook. With ``--llm`` an LLM
 cortex narrates events, answers ``<base>/chat/in`` on ``<base>/chat/out`` and
 (``--llm-vision``) asks the robot for a JPEG on ``<base>/snapshot/request``.
 
+Every option can also come from an environment variable ``FLYBOT_<OPTION>`` (e.g.
+``FLYBOT_HOST``, ``FLYBOT_PASSWORD``, ``FLYBOT_CALENDAR``, ``FLYBOT_SET``), which is how
+the Kubernetes manifests pass Secrets; list options take whitespace-separated values.
+
     python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex
 """
 from __future__ import annotations
@@ -21,6 +25,7 @@ from .controller import (PERSONALITIES, BrainController, SensorState, apply_over
                          personality)
 from .cortex import Cortex
 from .events import EventSink
+from .gains_io import load_gains
 from .llm import make_llm
 from .meetings import MeetingReminder
 from .looming import derive_looming_gains
@@ -115,9 +120,11 @@ class StackChanBridge:
         else:
             log.info("Robot self-test OK: %s", ", ".join(f"{i.get('name')} {i.get('detail')}" for i in items))
 
-    def run(self) -> None:
-        self.client.connect(self.host, self.port, keepalive=30)
+    def run(self, heartbeat: str | None = None) -> None:
+        # async connect: a broker that is still starting (or restarting) is retried by paho
+        self.client.connect_async(self.host, self.port, keepalive=30)
         self.client.loop_start()
+        beat = 0.0
         topic = f"{self.base}/command"
         last = time.monotonic()
         try:
@@ -130,6 +137,10 @@ class StackChanBridge:
                     self.events.emit(event, now=now, brain=cmd.get("brain"))
                     if self.cortex:
                         self.cortex.on_event(event, self.controller.snapshot.get("brain"))
+                if heartbeat and now - beat >= 1.0:  # liveness: the control loop is still turning
+                    beat = now
+                    with open(heartbeat, "w") as f:
+                        f.write(str(time.time()))
                 time.sleep(max(0.0, self.period - (time.monotonic() - now)))
         except KeyboardInterrupt:
             pass
@@ -137,6 +148,22 @@ class StackChanBridge:
             self.client.loop_stop()
             self.client.disconnect()
             self.controller.close()
+
+
+def env_defaults(ap: argparse.ArgumentParser, prefix: str = "FLYBOT_") -> None:
+    """Let ``FLYBOT_<DEST>`` environment variables provide option defaults (empty = unset)."""
+    for action in ap._actions:
+        if not action.option_strings or action.dest == "help":
+            continue
+        raw = os.environ.get(prefix + action.dest.upper(), "").strip()
+        if not raw:
+            continue
+        if action.nargs == 0:  # store_true flags
+            action.default = raw.lower() in ("1", "true", "yes", "on")
+        elif isinstance(action, argparse._AppendAction):
+            action.default = raw.split()
+        else:
+            action.default = action.type(raw) if action.type else raw
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -147,6 +174,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--password")
     ap.add_argument("--base-topic", default="stackchan")
     ap.add_argument("--data-dir", help="folder with FlyWire Codex CSV downloads (synthetic data if omitted)")
+    ap.add_argument("--gains", help="gains.json from `python -m flybot.gains_io` (instead of --data-dir)")
+    ap.add_argument("--heartbeat", help="file touched every second while the control loop runs (liveness probe)")
     ap.add_argument("--side", default="R", choices=["L", "R"], help="optic lobe hemisphere")
     ap.add_argument("--rate", type=float, default=20.0, help="command rate (Hz)")
     ap.add_argument("--backend", default="nengo", choices=["nengo", "rate"])
@@ -179,13 +208,19 @@ def main(argv: list[str] | None = None) -> None:
     llm.add_argument("--narrate-cooldown", type=float, default=20.0)
     ap.add_argument("--set", action="append", metavar="KEY=VALUE",
                     help="override a ControllerConfig field, e.g. --set k_position=60 --set tilt_limits=0,30")
+    env_defaults(ap)
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
-    connectome = load_connectome(args.data_dir, side=args.side)
-    gains = derive_gains(connectome.group_adjacency())
-    looming = derive_looming_gains(connectome.group_adjacency(neuropils=None))
-    log.info("Connectome: %s | gains on=%s off=%s", connectome.source,
+    if args.gains:
+        gains, looming, meta = load_gains(args.gains)
+        source = f"{args.gains} ({meta.get('source')}, side {meta.get('side')})"
+    else:
+        connectome = load_connectome(args.data_dir, side=args.side)
+        gains = derive_gains(connectome.group_adjacency())
+        looming = derive_looming_gains(connectome.group_adjacency(neuropils=None))
+        source = connectome.source
+    log.info("Connectome: %s | gains on=%s off=%s", source,
              {k: round(v, 2) for k, v in gains.on.items()}, {k: round(v, 2) for k, v in gains.off.items()})
     try:
         base = personality(args.personality)
@@ -221,7 +256,7 @@ def main(argv: list[str] | None = None) -> None:
         reminder = MeetingReminder(args.calendar, bridge.controller.remind, leads, args.calendar_refresh, tz)
         reminder.start()
         log.info("Meeting reminders: %d calendar(s), %s min before", len(args.calendar), args.remind_minutes)
-    bridge.run()
+    bridge.run(heartbeat=args.heartbeat)
 
 
 if __name__ == "__main__":

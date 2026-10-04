@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flybot-bridge
+  labels: {app: flybot-bridge}
+spec:
+  replicas: 1                # one brain per robot: a second replica would fight over the same MQTT topics
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: flybot-bridge}
+  template:
+    metadata:
+      labels: {app: flybot-bridge}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: bridge
+          image: flybot
+          envFrom:
+            - configMapRef: {name: flybot-config}
+          env:
+            - name: FLYBOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
+            - name: FLYBOT_CALENDAR            # ICS URL(s), whitespace-separated
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: calendar-url, optional: true}}
+            - name: FLYBOT_WEBHOOK
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: webhook-url, optional: true}}
+            - name: LLM_API_KEY
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: llm-api-key, optional: true}}
+            - name: FLYBOT_LLM_API_KEY_ENV
+              value: LLM_API_KEY
+          livenessProbe:             # the 20 Hz control loop touches this file every second
+            exec:
+              command: ["python", "-c", "import os,sys,time; sys.exit(time.time() - os.path.getmtime('/tmp/flybot-heartbeat') > 30)"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: gains, mountPath: /config, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: gains
+          configMap: {name: flybot-gains}
+        - name: tmp
+          emptyDir: {}

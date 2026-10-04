@@ -138,6 +138,33 @@ python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
 - **เกมดึงความสนใจ** `--game` — นับเวลาที่หุ่นมองวัตถุตรงกลางได้ต่อเนื่อง (หลุดสั้นกว่า `game_grace_s` ไม่นับว่าขาด)
   frame differencing เห็นเฉพาะของที่ขยับ ผู้เล่นต้องขยับวัตถุช้า ๆ ให้หุ่นตาม
 
+## รันบน Kubernetes
+
+`deploy/k8s/` (kustomize) มี bridge + Mosquitto (มีรหัสผ่าน) ให้หุ่นต่อจาก LAN ผ่าน NodePort `31883`
+image `ghcr.io/dixonsatit/flybot` สร้างอัตโนมัติทุก release (Dockerfile ที่ root: non-root, read-only root FS)
+
+```bash
+# 1. แปลง connectome เป็นไฟล์ gains เล็ก ๆ (ไม่ต้องเอาข้อมูล Codex 70 MB ขึ้น cluster)
+python -m flybot.gains_io --data-dir data/codex --out data/gains.json
+# 2. namespace, gains, secrets (ค่าที่เป็นความลับไม่อยู่ใน git)
+kubectl create namespace flybot
+kubectl -n flybot create configmap flybot-gains --from-file=gains.json=data/gains.json
+kubectl -n flybot create secret generic flybot-secrets \
+    --from-literal=mqtt-password='<รหัสผ่าน MQTT>' \
+    --from-file=calendar-url=calendar.key          # ไม่บังคับ: webhook-url, llm-api-key
+# 3. ตั้งค่าที่ไม่ลับใน deploy/k8s/config.yaml (FLYBOT_*: personality, LLM, timezone ...) แล้ว
+kubectl apply -k deploy/k8s
+kubectl -n flybot logs deploy/flybot-bridge -f
+```
+
+- ทุก option ของ bridge ตั้งผ่าน env `FLYBOT_<OPTION>` ได้ (เช่น `FLYBOT_LLM=openai`, `FLYBOT_SET="home_pan=0"`)
+- หุ่น: `MQTT_HOST` = IP ของ node, `MQTT_PORT 31883`, `MQTT_USER "stackchan"` + รหัสผ่านเดียวกับ Secret
+  (หรือเปลี่ยน Service เป็น `LoadBalancer` ถ้า cluster มี เช่น MetalLB)
+- bridge มี replica เดียว (หุ่นหนึ่งตัวต่อสมองหนึ่งตัว), liveness probe ดูว่า loop 20 Hz ยังหมุน (heartbeat file),
+  ใช้ ~16% CPU / ~65 MB RAM; ต่อ broker ใหม่เองถ้า broker รีสตาร์ต
+- ถ้า package บน GHCR เป็น private ต้องตั้ง `imagePullSecrets` หรือเปลี่ยน package เป็น public
+- ทดสอบแล้วบน minikube: Mosquitto ปฏิเสธการต่อแบบไม่มีรหัสผ่าน, หุ่นจำลองรับคำสั่ง/เหตุการณ์ผ่าน Service ได้
+
 ## เตือนประชุมจากปฏิทิน
 
 อ่านปฏิทินแบบ iCalendar (ICS) ได้ทุกเจ้า: Google Calendar (Settings → ปฏิทิน → **Secret address in iCal format**),

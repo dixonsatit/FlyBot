@@ -588,3 +588,36 @@ def test_thai_font_matches_shaper():
     for table in (tt.TONE_HIGH, tt.TONE_LEFT, tt.TONE_HIGH_LEFT, tt.UPPER_LEFT, tt.LOWER_DOWN):
         needed |= {ord(v) for v in table.values()}
     assert needed <= codes
+
+
+# -- deployment helpers --------------------------------------------------------------
+
+def test_gains_roundtrip(tmp_path):
+    from flybot.gains_io import load_gains, save_gains
+    from flybot.looming import derive_looming_gains
+    syn = synthetic_codex()
+    optic, looming = derive_gains(syn.group_adjacency()), derive_looming_gains(syn.group_adjacency(neuropils=None))
+    save_gains(tmp_path / "g.json", optic, looming, "synthetic", "R")
+    optic2, looming2, meta = load_gains(tmp_path / "g.json")
+    assert optic2 == optic and looming2 == looming and meta == {"source": "synthetic", "side": "R"}
+
+
+def test_bridge_options_from_environment(monkeypatch):
+    import argparse
+    from flybot.mqtt_bridge import env_defaults
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="localhost")
+    ap.add_argument("--port", type=int, default=1883)
+    ap.add_argument("--game", action="store_true")
+    ap.add_argument("--calendar", action="append")
+    ap.add_argument("--webhook")
+    monkeypatch.setenv("FLYBOT_HOST", "mosquitto")
+    monkeypatch.setenv("FLYBOT_PORT", "8883")
+    monkeypatch.setenv("FLYBOT_GAME", "true")
+    monkeypatch.setenv("FLYBOT_CALENDAR", "https://a/x.ics\nhttps://b/y.ics")
+    monkeypatch.setenv("FLYBOT_WEBHOOK", "")  # empty Secret key = unset
+    env_defaults(ap)
+    args = ap.parse_args([])
+    assert (args.host, args.port, args.game, args.webhook) == ("mosquitto", 8883, True, None)
+    assert args.calendar == ["https://a/x.ics", "https://b/y.ics"]
+    assert ap.parse_args(["--host", "cli"]).host == "cli"  # command line still wins

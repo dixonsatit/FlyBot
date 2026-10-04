@@ -128,6 +128,9 @@ class OpticLobeNetwork:
     def __init__(self, gains: CircuitGains, n_neurons: int = 60, dt: float = 0.001, seed: int = 1):
         import nengo
 
+        # the network solves its decoders in milliseconds; a disk cache only adds a writable-path
+        # requirement (and a noisy first-run warning in read-only containers)
+        nengo.rc.set("decoder_cache", "enabled", "False")
         self.gains = gains
         self.dt = dt
         self._stim = np.zeros(5)

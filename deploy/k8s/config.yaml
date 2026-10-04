@@ -1,0 +1,16 @@
+# Non-secret bridge settings: every FLYBOT_<OPTION> maps to a `python -m flybot.mqtt_bridge` option.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flybot-config
+data:
+  FLYBOT_HOST: mosquitto
+  FLYBOT_USERNAME: stackchan          # same MQTT user as MQTT_USER in the robot's flybot_config.h
+  FLYBOT_TZ: Asia/Bangkok
+  FLYBOT_REMIND_MINUTES: "10,1"
+  FLYBOT_PERSONALITY: curious
+  FLYBOT_LLM: none                    # anthropic | openai | none
+  # FLYBOT_LLM_MODEL: qwen3.5-122b
+  # FLYBOT_LLM_BASE_URL: https://<server>/v1
+  # FLYBOT_LLM_EXTRA_BODY: '{"chat_template_kwargs": {"enable_thinking": false}}'
+  # FLYBOT_SET: "home_pan=0 home_tilt=10"

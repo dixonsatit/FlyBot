@@ -1,0 +1,4 @@
+*
+!pyproject.toml
+!flybot/
+flybot/**/__pycache__
