@@ -1,9 +1,10 @@
 """BrainController: StackChan sensors -> FlyWire circuits -> servo/face/audio JSON."""
 from __future__ import annotations
 
+import bisect
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +39,7 @@ class ControllerConfig:
     tilt_limits: tuple[float, float] = (-45.0, 45.0)
     deadband: float = 0.04
     target_timeout_s: float = 0.5
+    sensor_latency_s: float = 0.1  # camera capture -> bridge (WiFi + broker); 0 for ideal sims
     imu_yaw_sign: float = -1.0  # gyro z is CCW-positive; internal yaw is CW-positive
     proximity_max_mm: float = 400.0
     proximity_raw_max: float = 2047.0  # LTR-553 PS counts
@@ -60,6 +62,25 @@ class SensorState:
         self.stamps[kind] = time.monotonic() if now is None else now
 
 
+def apply_overrides(cfg: ControllerConfig, items: list[str] | None) -> ControllerConfig:
+    """Return a copy of ``cfg`` with ``["key=value", ...]`` applied (tuples as ``a,b``)."""
+    names = {f.name for f in fields(cfg)}
+    changes = {}
+    for item in items or []:
+        key, sep, raw = item.partition("=")
+        key = key.strip()
+        if not sep or key not in names:
+            raise ValueError(f"expected key=value with key in {sorted(names)}, got {item!r}")
+        current = getattr(cfg, key)
+        if isinstance(current, bool):
+            changes[key] = raw.strip().lower() in ("1", "true", "yes", "on")
+        elif isinstance(current, tuple):
+            changes[key] = tuple(float(v) for v in raw.split(","))
+        else:
+            changes[key] = type(current)(raw)
+    return replace(cfg, **changes)
+
+
 def load_connectome(data_dir: str | Path | None, side: str = "R") -> Connectome:
     if data_dir and Path(data_dir).exists():
         return load_codex(data_dir, side=side)
@@ -78,11 +99,13 @@ class BrainController:
         self.mb = MushroomBody()
         self.pan = 0.0
         self.tilt = 0.0
-        self._rates = (0.0, 0.0)
         self._nearness = 0.0
         self._clock = 0.0
         self._last_frame: tuple[float, float, float] | None = None
         self._last_velocity = (0.0, 0.0)
+        # (time, gaze azimuth = heading + pan, tilt, gaze rate, tilt rate) per step, so a
+        # camera frame is compared with where the head was when it was captured
+        self._history: list[tuple[float, float, float, float, float]] = []
 
     # -- sensor decoding --------------------------------------------------
     def _target(self, s: SensorState) -> dict | None:
@@ -115,6 +138,14 @@ class BrainController:
             "polarity": c.get("polarity", 0.0),
         }
 
+    def _head_at(self, t: float) -> tuple[float, float, float, float, float]:
+        """Head state (time, gaze, tilt, gaze rate, tilt rate) at or just before ``t``."""
+        h = self._history
+        if not h:
+            return (t, self.cx.heading + self.pan, self.tilt, 0.0, 0.0)
+        i = bisect.bisect_right(h, t, key=lambda e: e[0])
+        return h[max(i - 1, 0)]
+
     def _nearness_from(self, s: SensorState) -> float:
         p = s.proximity or {}
         if "distance_mm" in p:
@@ -129,13 +160,16 @@ class BrainController:
         self._clock = time.monotonic() if now is None else now
         target = self._target(sensors)
 
-        # optic lobe: remove self-induced image motion (efference copy of the last command)
-        pan_rate, tilt_rate = self._rates
+        # optic lobe: remove self-induced image motion with an efference copy taken at the
+        # frame's capture time, and move the target to where it is relative to the head now
         if target:
-            vx = target["vx"] + pan_rate / (cfg.hfov_deg / 2)
-            vy = target["vy"] - tilt_rate / (cfg.vfov_deg / 2)
+            then = self._head_at(sensors.stamps["camera"] - cfg.sensor_latency_s)
+            x = target["x"] - (self.cx.heading + self.pan - then[1]) / (cfg.hfov_deg / 2)
+            y = target["y"] + (self.tilt - then[2]) / (cfg.vfov_deg / 2)
+            vx = target["vx"] + then[3] / (cfg.hfov_deg / 2)
+            vy = target["vy"] - then[4] / (cfg.vfov_deg / 2)
             stim = np.array([
-                target["x"], target["y"],
+                x, y,
                 np.clip(vx / cfg.v_max, -1, 1), np.clip(vy / cfg.v_max, -1, 1),
                 np.clip(target["polarity"], -1, 1),
             ])
@@ -155,15 +189,21 @@ class BrainController:
         yaw = cfg.imu_yaw_sign * imu["yaw"] if "yaw" in imu else None
         d_heading = self.cx.update_heading(yaw_rate, dt, yaw)
         if target:
-            self.cx.set_goal(self.cx.heading + self.pan + target["x"] * cfg.hfov_deg / 2)
+            self.cx.set_goal(self.cx.heading + self.pan + stim[0] * cfg.hfov_deg / 2)
         else:
             pan_rate += cfg.k_heading * self.cx.steering(self.pan)
 
         pan_rate = float(np.clip(pan_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
         tilt_rate = float(np.clip(tilt_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
+        gaze_before, tilt_before = self.cx.heading - d_heading + self.pan, self.tilt
         self.pan = float(np.clip(self.pan + pan_rate * dt - cfg.vor_gain * d_heading, *cfg.pan_limits))
         self.tilt = float(np.clip(self.tilt + tilt_rate * dt, *cfg.tilt_limits))
-        self._rates = (pan_rate, tilt_rate)
+        gaze = self.cx.heading + self.pan
+        if dt > 0:
+            self._history.append((self._clock, gaze, self.tilt, (gaze - gaze_before) / dt, (self.tilt - tilt_before) / dt))
+            horizon = self._clock - max(1.0, 2 * cfg.sensor_latency_s + cfg.target_timeout_s)
+            while self._history and self._history[0][0] < horizon:
+                self._history.pop(0)
 
         # mushroom body / monoamines
         nearness = self._nearness_from(sensors)

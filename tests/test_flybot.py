@@ -138,3 +138,28 @@ def test_new_object_after_idle_triggers_alert(gains):
         s.update("camera", camera(160 + 60 * np.sin(np.pi * i * 0.05), vx=280.0), now=t)
         faces.append(brain.step(s, 0.05, now=t)["face"]["expression"])
     assert "alert" in faces
+
+
+def test_apply_overrides():
+    from flybot.controller import apply_overrides
+    cfg = apply_overrides(ControllerConfig(), ["k_position=60", "tilt_limits=0,30", "telemetry=false"])
+    assert cfg.k_position == 60.0 and cfg.tilt_limits == (0.0, 30.0) and cfg.telemetry is False
+    with pytest.raises(ValueError):
+        apply_overrides(ControllerConfig(), ["no_such_field=1"])
+
+
+@pytest.mark.parametrize("scenario", ["pursuit", "darts", "body_turn"])
+def test_tracks_simulated_stackchan(scenario, gains):
+    from flybot.plant import PlantConfig
+    from flybot.tune import run
+    r = run(ControllerConfig(backend="rate", telemetry=False), gains, PlantConfig(), scenario)
+    assert r["az"] < 10 and r["el"] < 6
+
+
+def test_latency_compensation_helps_on_slow_network(gains):
+    from flybot.plant import PlantConfig
+    from flybot.tune import run
+    slow = PlantConfig(sensor_latency_s=0.15, command_latency_s=0.06)
+    on = run(ControllerConfig(backend="rate", sensor_latency_s=0.2), gains, slow, "darts")
+    off = run(ControllerConfig(backend="rate", sensor_latency_s=0.0), gains, slow, "darts")
+    assert on["score"] < off["score"]

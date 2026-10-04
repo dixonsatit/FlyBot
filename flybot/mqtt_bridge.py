@@ -12,7 +12,7 @@ import json
 import logging
 import time
 
-from .controller import BrainController, ControllerConfig, SensorState, load_connectome
+from .controller import BrainController, ControllerConfig, SensorState, apply_overrides, load_connectome
 from .optic_lobe import derive_gains
 
 log = logging.getLogger("flybot.mqtt")
@@ -83,6 +83,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--rate", type=float, default=20.0, help="command rate (Hz)")
     ap.add_argument("--backend", default="nengo", choices=["nengo", "rate"])
     ap.add_argument("--no-telemetry", action="store_true")
+    ap.add_argument("--set", action="append", metavar="KEY=VALUE",
+                    help="override a ControllerConfig field, e.g. --set k_position=60 --set tilt_limits=0,30")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
@@ -90,7 +92,10 @@ def main(argv: list[str] | None = None) -> None:
     gains = derive_gains(connectome.group_adjacency())
     log.info("Connectome: %s | gains on=%s off=%s", connectome.source,
              {k: round(v, 2) for k, v in gains.on.items()}, {k: round(v, 2) for k, v in gains.off.items()})
-    cfg = ControllerConfig(backend=args.backend, telemetry=not args.no_telemetry)
+    try:
+        cfg = apply_overrides(ControllerConfig(backend=args.backend, telemetry=not args.no_telemetry), args.set)
+    except ValueError as e:
+        ap.error(str(e))
     StackChanBridge(BrainController(cfg, gains=gains), args.host, args.port, args.base_topic,
                     args.rate, args.username, args.password).run()
 

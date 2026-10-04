@@ -11,7 +11,7 @@ import argparse
 import json
 import math
 
-from .controller import BrainController, ControllerConfig, SensorState, load_connectome
+from .controller import BrainController, ControllerConfig, SensorState, apply_overrides, load_connectome
 from .optic_lobe import derive_gains
 
 
@@ -37,9 +37,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--duration", type=float, default=30.0)
     ap.add_argument("--dt", type=float, default=0.05)
     ap.add_argument("--every", type=int, default=10, help="print every N steps")
+    ap.add_argument("--set", action="append", metavar="KEY=VALUE",
+                    help="override a ControllerConfig field, e.g. --set k_position=60 --set tilt_limits=0,30")
     args = ap.parse_args(argv)
 
-    cfg = ControllerConfig(backend=args.backend)
+    try:
+        # scene() builds frames from the current pan, so there is no latency to compensate
+        cfg = apply_overrides(ControllerConfig(backend=args.backend, sensor_latency_s=0.0), args.set)
+    except ValueError as e:
+        ap.error(str(e))
     brain = BrainController(cfg, gains=derive_gains(load_connectome(args.data_dir).group_adjacency()))
     sensors = SensorState()
     for i in range(int(args.duration / args.dt)):

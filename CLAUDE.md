@@ -19,7 +19,10 @@ pytest -q -k "rate"                        # parametrized backend subset
 python -m flybot.sim                       # offline scene simulation (no robot/broker)
 python -m flybot.mqtt_bridge --host <broker> --data-dir data/codex [--backend nengo|rate] [--side L|R]
 python tools/fake_stackchan.py --host <broker>   # fake robot publishing sensors
+python -m flybot.tune [--search] [--set k=v] [--plant k=v]   # score/tune against flybot.plant
 ```
+
+`sim`, `mqtt_bridge` and `tune` accept `--set key=value` (any `ControllerConfig` field; tuples as `a,b`), parsed by `controller.apply_overrides`.
 
 To test end to end locally, start `mosquitto` (Homebrew, `/opt/homebrew/sbin/mosquitto`) on `127.0.0.1:1883`, then the bridge, then `fake_stackchan.py` (it runs the `sim.scene` for 30 s and prints the received commands). Use `mosquitto_sub -t 'stackchan/#' -v` to capture traffic.
 
@@ -34,7 +37,11 @@ Pipeline per control tick (`BrainController.step` in `flybot/controller.py`, cal
 3. **Central complex** (`central_complex.py`). E-PG ring bump integrates IMU yaw; heading change produces VOR counter-rotation of pan; FC2 goal is stored while a target is visible and PFL3 steering returns the gaze when it is lost.
 4. **Mushroom body** (`mushroom_body.py`). `Percept` → sparse KC code → habituating MBON familiarity; dopamine/octopamine/sleep pressure select the expression (`alert > happy > sleepy > curious`). Audio is emitted only when the expression changes.
 
-Controller details that span modules: an efference copy of the previous pan/tilt rate is added back to image velocity before the optic lobe (to cancel self-motion); image +y is down so tilt is negated; IMU yaw sign is flipped via `ControllerConfig.imu_yaw_sign`. All tunables (FOV, gains, limits, deadband, backend) live in `ControllerConfig`. `SensorState` holds the latest async MQTT messages; the controller estimates `vx, vy` from successive frames when the camera payload omits them.
+Controller details that span modules: the controller keeps a short history of its own gaze (heading + pan) and tilt. A camera frame is compared with the head state at capture time (`stamp − sensor_latency_s`). The head's rate then is the efference copy added back to image velocity, and the head's motion since then moves the target position into the current frame; the goal is stored from that corrected position. Without this, latency turns the efference copy into positive feedback (about 40° overshoot in `flybot.plant`). `sim.py` uses `sensor_latency_s=0` because its scene renders from the current pan. image +y is down so tilt is negated; IMU yaw sign is flipped via `ControllerConfig.imu_yaw_sign`. All tunables (FOV, gains, limits, deadband, backend) live in `ControllerConfig`. `SensorState` holds the latest async MQTT messages; the controller estimates `vx, vy` from successive frames when the camera payload omits them.
+
+## Simulated hardware / tuning
+
+`flybot/plant.py` (`StackChanPlant`) mirrors the firmware, not an ideal camera: SG90 slew + lag with the mechanical tilt range 0..30; frame-differencing detection (a stationary target is invisible, the centroid lags half a frame, frames are dropped while the head turns faster than `ego_motion_deg_s`, firmware-style smoothed `vx, vy`); and sensor/command latency. `flybot/tune.py` scores mean gaze error over 3 scenarios × 3 plant variants. In this sim the default gains (90/30/40) are near-optimal: the grid's best (k_position=160) wins slightly on the rate backend, but loses on nengo and jitters more. Changes to the firmware's detector should be mirrored in `plant.py`.
 
 ## Firmware (`firmware/stackchan/`)
 

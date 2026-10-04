@@ -52,7 +52,23 @@ python tools/fake_stackchan.py --host 192.168.1.10     # หุ่นจำล�
 ```
 
 ตัวเลือก: `--port --username --password --base-topic --side L|R --rate 20 --backend nengo|rate --no-telemetry`
-ค่าปรับจูนอื่น ๆ (FOV, gain, ขีดจำกัดมุม, ทิศ IMU) อยู่ใน `ControllerConfig` (`flybot/controller.py`)
+ค่าปรับจูนอื่น ๆ (FOV, gain, ขีดจำกัดมุม, ทิศ IMU, `sensor_latency_s`) อยู่ใน `ControllerConfig` (`flybot/controller.py`)
+ปรับได้จาก command line ด้วย `--set key=value` เช่น `--set k_position=60 --set tilt_limits=0,30`
+
+### จูนก่อนมีหุ่น
+
+`flybot/plant.py` จำลองหุ่นตามเฟิร์มแวร์: เซอร์โว SG90 (slew rate + lag, tilt 0–30°), กล้อง frame differencing
+(เห็นวัตถุเฉพาะตอนขยับ, ข้ามเฟรมตอนหัวหมุนเร็ว), latency ของ WiFi/broker
+
+```bash
+python -m flybot.tune --data-dir data/codex            # คะแนน = error การมองเฉลี่ย (องศา)
+python -m flybot.tune --search                         # grid search k_position / k_motion / k_heading
+python -m flybot.tune --plant sensor_latency_s=0.2     # ลองเครือข่ายช้า
+```
+
+controller เก็บประวัติท่าหัวของตัวเอง แล้วเทียบภาพกับท่าหัว ณ เวลาที่ถ่าย (เวลาที่ได้รับ − `sensor_latency_s`)
+ทั้ง efference copy และตำแหน่งเป้าหมาย; ถ้าไม่ชดเชยหัวจะเลยเป้าราว 40° ในหุ่นจำลอง
+ตั้ง `sensor_latency_s` ให้ใกล้ latency จริง (ประเมินเกินดีกว่าขาด)
 
 ## MQTT payload
 
@@ -123,7 +139,9 @@ flybot/central_complex.py  E-PG / FC2 / PFL3
 flybot/mushroom_body.py    KC, MBON, dopamine/octopamine, อารมณ์
 flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
-flybot/sim.py              ฉากจำลอง
+flybot/sim.py              ฉากจำลอง (กล้องอุดมคติ)
+flybot/plant.py            หุ่นจำลองตามเฟิร์มแวร์ (เซอร์โว, frame differencing, latency)
+flybot/tune.py             วัด error การมอง + grid search gain
 tools/fake_stackchan.py    หุ่นจำลองฝั่ง MQTT
 firmware/stackchan/        เฟิร์มแวร์ CoreS3 (PlatformIO)
 tests/                     pytest
