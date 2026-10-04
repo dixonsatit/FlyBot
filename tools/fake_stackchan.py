@@ -15,25 +15,30 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--host", default="localhost")
 ap.add_argument("--port", type=int, default=1883)
 ap.add_argument("--base-topic", default="stackchan")
+ap.add_argument("--duration", type=float, default=30.0)
 args = ap.parse_args()
 
 state = {"pan": 0.0}
 
 
 def on_message(client, userdata, msg):
+    if msg.topic.endswith("/event"):
+        print("EVENT", msg.payload.decode())
+        return
     cmd = json.loads(msg.payload)
     state["pan"] = cmd["servo"]["pan_angle"]
-    print(json.dumps({k: cmd[k] for k in ("servo", "face", "audio")}))
+    print(json.dumps({k: cmd[k] for k in ("servo", "face", "audio", "text") if k in cmd}, ensure_ascii=False))
 
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="fake-stackchan")
 client.on_message = on_message
 client.connect(args.host, args.port)
 client.subscribe(f"{args.base_topic}/command")
+client.subscribe(f"{args.base_topic}/event")
 client.loop_start()
 cfg, t0 = ControllerConfig(), time.monotonic()
 try:
-    while (t := time.monotonic() - t0) < 30:
+    while (t := time.monotonic() - t0) < args.duration:
         for kind, payload in scene(t, cfg, state["pan"]).items():
             client.publish(f"{args.base_topic}/sensor/{kind}", json.dumps(payload))
         time.sleep(1 / 30)

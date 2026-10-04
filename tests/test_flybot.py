@@ -163,3 +163,126 @@ def test_latency_compensation_helps_on_slow_network(gains):
     on = run(ControllerConfig(backend="rate", sensor_latency_s=0.2), gains, slow, "darts")
     off = run(ControllerConfig(backend="rate", sensor_latency_s=0.0), gains, slow, "darts")
     assert on["score"] < off["score"]
+
+
+# -- looming escape, phototaxis, personalities, events, game ---------------------
+
+def test_giant_fiber_type_from_consolidated_table(tmp_path):
+    import pandas as pd
+    syn = synthetic_codex(side="R")
+    write_codex_csv(syn, tmp_path)
+    # Giant Fiber only named in the whole-brain table, like Codex v783
+    visual = pd.read_csv(tmp_path / "visual_neuron_types.csv.gz")
+    gf = visual["type"] == "DNp01"
+    visual[~gf].to_csv(tmp_path / "visual_neuron_types.csv.gz", index=False)
+    visual[gf].rename(columns={"type": "primary_type"}).to_csv(tmp_path / "consolidated_cell_types.csv.gz", index=False)
+    con = load_codex(tmp_path, side="R")
+    adj = con.group_adjacency(neuropils=None)
+    assert adj.loc["LPLC2", "GF"] > 0 and adj.loc["LC4", "GF"] > 0
+    assert con.group_adjacency().loc["LPLC2", "GF"] == 0  # PVLP is outside the optic-lobe default
+
+
+def test_looming_gains_from_connectome():
+    from flybot.looming import derive_looming_gains
+    g = derive_looming_gains(synthetic_codex().group_adjacency(neuropils=None))
+    assert g.lplc2 > 0 and g.lc4 > 0 and g.lplc2 + g.lc4 == pytest.approx(2.0)
+
+
+def _feed_boxes(gf, boxes, dt=0.04):
+    fired = False
+    for i, box in enumerate(boxes):
+        gf.observe(box, i * dt)
+        fired |= gf.step(dt, i * dt)
+    return fired
+
+
+def test_giant_fiber_fires_on_expansion_not_translation():
+    from flybot.looming import GiantFiber, LoomingGains
+    expand = [(-h, -h, h, h) for h in np.geomspace(6, 30, 15)]
+    slide = [(x - 15, -15, x + 15, 15) for x in np.linspace(-20, 20, 15)]
+    assert _feed_boxes(GiantFiber(LoomingGains()), expand)
+    assert not _feed_boxes(GiantFiber(LoomingGains()), slide)
+
+
+def test_controller_escapes_from_looming_object(gains):
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    s, escaped = SensorState(), None
+    for i in range(30):
+        t = i * 0.05
+        half = 10 * 1.12 ** i  # px, object right of centre rushing in
+        s.update("camera", {"x": 220, "y": 120, "vx": 0, "vy": 0,
+                            "box": [220 - half, 120 - half, 220 + half, 120 + half]}, now=t)
+        cmd = brain.step(s, 0.05, now=t)
+        events = brain.pop_events()
+        if any(e["type"] == "escape" for e in events) and escaped is None:
+            escaped, pan_at_escape = cmd, brain.pan
+    assert escaped is not None and escaped["audio"]["volume"] == 200
+    assert brain.pan < pan_at_escape  # turned away (left) from the object on the right
+
+
+@pytest.mark.parametrize("name, sign", [("bold", 1), ("skittish", -1)])
+def test_phototaxis_follows_personality(name, sign, gains):
+    from dataclasses import replace
+    from flybot.controller import personality
+    brain = BrainController(replace(personality(name), backend="rate"), gains=gains)
+    s = SensorState()
+    for i in range(20):
+        s.update("camera", {"detected": False, "lum": [60, 160, 100, 100]}, now=i * 0.05)  # light on the right
+        brain.step(s, 0.05, now=i * 0.05)
+    assert sign * brain.pan > 5
+
+
+def test_unknown_personality():
+    from flybot.controller import personality
+    with pytest.raises(ValueError):
+        personality("grumpy")
+
+
+def test_attention_game_records_streak(gains):
+    brain = BrainController(ControllerConfig(backend="rate", game=True), gains=gains)
+    s = SensorState()
+    for i in range(80):  # 2 s centred target, then nothing
+        t = i * 0.05
+        if i < 40:
+            s.update("camera", camera(162, 121, vx=5.0), now=t)
+        else:
+            s.update("camera", {"detected": False}, now=t)
+        cmd = brain.step(s, 0.05, now=t)
+    records = [e for e in brain.pop_events() if e["type"] == "record"]
+    assert records and records[0]["seconds"] >= 1.5
+    assert "best" in cmd["text"] and cmd["game"]["best"] >= 1.5
+
+
+def test_event_sink_cooldown_and_webhook():
+    import http.server
+    import json as _json
+    import threading
+    from flybot.events import EventSink
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append(_json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    published = []
+    sink = EventSink(lambda topic, body: published.append((topic, body)), "stackchan",
+                     f"http://127.0.0.1:{server.server_port}/hook", cooldown_s=10)
+    assert sink.emit({"type": "presence"}, now=0.0)
+    assert not sink.emit({"type": "presence"}, now=5.0)  # cooling down
+    assert sink.emit({"type": "escape"}, now=5.0)  # other types are independent
+    for _ in range(150):  # posts run on their own threads, in any order
+        if len(received) == 2:
+            break
+        threading.Event().wait(0.02)
+    server.shutdown()
+    server.server_close()
+    assert [t for t, _ in published] == ["stackchan/event", "stackchan/event"]
+    assert sorted(r["type"] for r in received) == ["escape", "presence"]
+    assert all(r["robot"] == "stackchan" and "time" not in r for r in received)

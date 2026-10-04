@@ -19,6 +19,7 @@ from dataclasses import fields, replace
 import numpy as np
 
 from .controller import BrainController, ControllerConfig, SensorState, apply_overrides, load_connectome
+from .looming import LoomingGains, derive_looming_gains
 from .optic_lobe import CircuitGains, derive_gains
 from .plant import PlantConfig, StackChanPlant, World
 
@@ -57,9 +58,10 @@ PLANTS = {
 }
 
 
-def run(cfg: ControllerConfig, gains: CircuitGains, plant_cfg: PlantConfig, scenario: str) -> dict:
+def run(cfg: ControllerConfig, gains: CircuitGains, plant_cfg: PlantConfig, scenario: str,
+        looming: LoomingGains | None = None) -> dict:
     world_at, duration = SCENARIOS[scenario]
-    brain = BrainController(cfg, gains=gains)
+    brain = BrainController(cfg, gains=gains, looming=looming)
     plant = StackChanPlant(plant_cfg)
     sensors = SensorState()
     errs, pans = [], []
@@ -85,8 +87,8 @@ def run(cfg: ControllerConfig, gains: CircuitGains, plant_cfg: PlantConfig, scen
 
 
 def evaluate(cfg: ControllerConfig, gains: CircuitGains, plant_cfg: PlantConfig,
-             plants: dict[str, dict] = PLANTS) -> dict:
-    table = {(p, s): run(cfg, gains, replace(plant_cfg, **overrides), s)
+             plants: dict[str, dict] = PLANTS, looming: LoomingGains | None = None) -> dict:
+    table = {(p, s): run(cfg, gains, replace(plant_cfg, **overrides), s, looming)
              for p, overrides in plants.items() for s in SCENARIOS}
     return {"score": float(np.mean([r["score"] for r in table.values()])),
             "jitter": float(np.mean([r["jitter"] for r in table.values()])), "table": table}
@@ -128,9 +130,11 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as e:
         ap.error(str(e))
     cfg = replace(cfg, hfov_deg=plant_cfg.hfov_deg, vfov_deg=plant_cfg.vfov_deg)
-    gains = derive_gains(load_connectome(args.data_dir).group_adjacency())
+    connectome = load_connectome(args.data_dir)
+    gains = derive_gains(connectome.group_adjacency())
+    looming = derive_looming_gains(connectome.group_adjacency(neuropils=None))
 
-    base = evaluate(cfg, gains, plant_cfg)
+    base = evaluate(cfg, gains, plant_cfg, looming=looming)
     print("== current config:", {k: getattr(cfg, k) for k in ("k_position", "k_motion", "k_heading", "tilt_limits")})
     _print_table(base)
     if not args.search:
@@ -140,7 +144,7 @@ def main(argv: list[str] | None = None) -> None:
     results = []
     for values in itertools.product(*grid.values()):
         trial = replace(cfg, **dict(zip(grid, map(float, values))))
-        r = evaluate(trial, gains, plant_cfg)
+        r = evaluate(trial, gains, plant_cfg, looming=looming)
         results.append((r["score"], r["jitter"], dict(zip(grid, values))))
     results.sort(key=lambda r: r[0])
     print(f"\n== top {args.top} of {len(results)} (score deg, jitter)")
@@ -154,7 +158,7 @@ def main(argv: list[str] | None = None) -> None:
         except ImportError:
             return
         print("\n== best config re-checked with the nengo backend")
-        _print_table(evaluate(replace(best, backend="nengo"), gains, plant_cfg))
+        _print_table(evaluate(replace(best, backend="nengo"), gains, plant_cfg, looming=looming))
 
 
 if __name__ == "__main__":

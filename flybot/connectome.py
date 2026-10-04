@@ -6,9 +6,11 @@ FlyWire Codex (https://codex.flywire.ai, "Download Data") provides, among others
 * ``visual_neuron_types*.csv.gz`` - optic-lobe cell types (``root_id, type, family, ...``)
 * ``consolidated_cell_types*.csv.gz`` / ``classification*.csv.gz`` - whole-brain types
 
-Only the optic-lobe neuropils (LA, ME, AME, LO, LOP) of one hemisphere are kept,
-then every neuron is mapped to one of the functional groups in ``GROUP_PATTERNS``
-and synapse counts are summed into a ``pre_group x post_group`` matrix.
+The optic-lobe neuropils (LA, ME, AME, LO, LOP) plus the ventrolateral protocerebrum
+(PVLP, PLP, where the looming pathway LPLC2/LC4 -> Giant Fiber connects) of one
+hemisphere are kept, every neuron is mapped to one of the functional groups in
+``GROUP_PATTERNS`` and synapse counts are summed into a ``pre_group x post_group``
+matrix. Cell types are merged from every type table present (visual types first).
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 OPTIC_LOBE_NEUROPILS = ("LA", "ME", "AME", "LO", "LOP")
+LOOMING_NEUROPILS = ("LOP", "LO", "PVLP", "PLP")
 
 # Ordered (group, regex on cell type); first match wins.
 GROUP_PATTERNS: list[tuple[str, str]] = [
@@ -50,6 +53,11 @@ GROUP_PATTERNS: list[tuple[str, str]] = [
     ("VS", r"^VS"),
     # Lobula columnar object-tracking pathway
     ("LC10", r"^LC10"),
+    # Looming: lobula plate-lobula columnar LPLC2 (expansion) and LC4 (edge speed)
+    # converge on the Giant Fiber descending neuron (DNp01) in PVLP
+    ("LPLC2", r"^LPLC2$"),
+    ("LC4", r"^LC4$"),
+    ("GF", r"^DNp01$"),
 ]
 
 # Sign of a synapse by predicted neurotransmitter. Fly glutamate acts mostly
@@ -64,6 +72,7 @@ _CONN_ALIASES = {
     "nt_type": "nt_type", "nt": "nt_type",
 }
 _TYPE_COLUMNS = ("type", "primary_type", "cell_type", "hemibrain_type")
+_TYPE_TABLES = ("visual_neuron_types", "consolidated_cell_types", "cell_types", "classification")
 
 
 @dataclass
@@ -84,17 +93,23 @@ class Connectome:
         return group.dropna()
 
     def group_adjacency(
-        self, patterns: list[tuple[str, str]] = GROUP_PATTERNS, signed: bool = False
+        self, patterns: list[tuple[str, str]] = GROUP_PATTERNS, signed: bool = False,
+        neuropils: tuple[str, ...] | None = OPTIC_LOBE_NEUROPILS,
     ) -> pd.DataFrame:
         """Sum synapses into a square ``pre_group x post_group`` matrix.
 
+        Only synapses in ``neuropils`` (any side; ``None`` = all loaded) count, so the
+        optic-lobe gains are unaffected by the central-brain synapses kept for looming.
         With ``signed=True`` each synapse is weighted by ``NT_SIGN`` of its
         neurotransmitter prediction.
         """
         group = self.groups(patterns)
-        df = self.connections.assign(
-            pre_g=self.connections["pre"].map(group),
-            post_g=self.connections["post"].map(group),
+        conn = self.connections
+        if neuropils is not None:
+            conn = conn[conn["neuropil"].astype(str).str.match(_neuropil_regex(neuropils, None))]
+        df = conn.assign(
+            pre_g=conn["pre"].map(group),
+            post_g=conn["post"].map(group),
         ).dropna(subset=["pre_g", "post_g"])
         weight = df["syn_count"].astype(float)
         if signed:
@@ -123,15 +138,15 @@ def _neuropil_regex(neuropils: tuple[str, ...], side: str | None) -> re.Pattern:
 def load_codex(
     data_dir: str | Path,
     side: str | None = "R",
-    neuropils: tuple[str, ...] = OPTIC_LOBE_NEUROPILS,
+    neuropils: tuple[str, ...] = OPTIC_LOBE_NEUROPILS + ("PVLP", "PLP"),
     min_syn: int = 1,
     chunksize: int = 2_000_000,
 ) -> Connectome:
-    """Read Codex CSV exports from ``data_dir`` and keep optic-lobe synapses of ``side``."""
+    """Read Codex CSV exports from ``data_dir`` and keep the synapses of ``side`` in ``neuropils``."""
     data_dir = Path(data_dir)
     conn_path = _find(data_dir, ("connections",))
-    type_path = _find(data_dir, ("visual_neuron_types", "consolidated_cell_types", "cell_types", "classification"))
-    if conn_path is None or type_path is None:
+    type_paths = [p for p in (_find(data_dir, (prefix,)) for prefix in _TYPE_TABLES) if p is not None]
+    if conn_path is None or not type_paths:
         raise FileNotFoundError(
             f"Expected connections*.csv(.gz) and a cell-type table in {data_dir}; "
             "download them from https://codex.flywire.ai (Download Data)."
@@ -147,13 +162,19 @@ def load_codex(
         chunks.append(chunk.loc[keep, ["pre", "post", "neuropil", "syn_count", "nt_type"]])
     connections = pd.concat(chunks, ignore_index=True)
 
-    types = pd.read_csv(type_path)
-    type_col = next((c for c in _TYPE_COLUMNS if c in types.columns), None)
-    if type_col is None:
-        raise ValueError(f"No cell-type column ({', '.join(_TYPE_COLUMNS)}) in {type_path}")
-    cell_types = types.dropna(subset=[type_col]).drop_duplicates("root_id").set_index("root_id")[type_col]
+    # visual_neuron_types names optic-lobe cells; only the whole-brain tables name
+    # central neurons such as the Giant Fiber, so every table found is merged
+    tables = []
+    for path in type_paths:
+        types = pd.read_csv(path)
+        type_col = next((c for c in _TYPE_COLUMNS if c in types.columns), None)
+        if type_col is None:
+            raise ValueError(f"No cell-type column ({', '.join(_TYPE_COLUMNS)}) in {path}")
+        tables.append(types.dropna(subset=[type_col]).drop_duplicates("root_id").set_index("root_id")[type_col])
+    cell_types = pd.concat(tables)
+    cell_types = cell_types[~cell_types.index.duplicated(keep="first")].rename("type")
 
-    log.info("Loaded %d optic-lobe connections from %s", len(connections), conn_path.name)
+    log.info("Loaded %d connections from %s (%s)", len(connections), conn_path.name, ", ".join(neuropils))
     return Connectome(connections, cell_types, source=str(data_dir))
 
 
@@ -175,9 +196,12 @@ _SYNTHETIC_EDGES: list[tuple[str, str, float, str]] = [
     ("T4b", "LPi", 30, "LOP"), ("T5b", "LPi", 28, "LOP"), ("LPi", "HS", 25, "LOP"),
     ("T4c", "LPi", 30, "LOP"), ("T5c", "LPi", 30, "LOP"), ("LPi", "VS", 25, "LOP"),
     ("Tm2", "LC10", 20, "LO"), ("Tm3", "LC10", 10, "LO"),
+    *[(f"T{k}{d}", "LPLC2", 12, "LOP") for k in "45" for d in "abcd"],
+    ("Tm2", "LC4", 15, "LO"), ("T5a", "LC4", 8, "LO"),
+    ("LPLC2", "GF", 900, "PVLP"), ("LC4", "GF", 600, "PVLP"),
 ]
 _SYNTHETIC_NT = {"L1": "GLUT", "Mi4": "GABA", "Mi9": "GLUT", "LPi": "GLUT"}
-_SYNTHETIC_TYPE_NAME = {"LPi": "LPi01"}
+_SYNTHETIC_TYPE_NAME = {"LPi": "LPi01", "GF": "DNp01"}
 
 
 def synthetic_codex(n_per_type: int = 6, side: str = "R", seed: int = 0) -> Connectome:

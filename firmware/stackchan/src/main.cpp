@@ -1,9 +1,11 @@
 // StackChan (CoreS3 + SG90) <-> FlyBot brain over MQTT.
 //
-// publishes  <base>/sensor/camera     {"x","y","vx","vy","width","height","polarity"} | {"detected":false}
+// publishes  <base>/sensor/camera     {"x","y","vx","vy","box":[l,t,r,b],"width","height","polarity","lum":[l,r,t,b]}
+//                                     | {"detected":false,"lum":[...]}
 //            <base>/sensor/imu        {"gyro":[deg/s x3],"accel":[g x3]}
-//            <base>/sensor/proximity  {"ps": LTR-553 raw 0..2047}
-// subscribes <base>/command           {"servo":{"pan_angle","tilt_angle"},"face":{"expression"},"audio":{...}|null}
+//            <base>/sensor/proximity  {"ps": LTR-553 raw 0..2047, "als": ambient light counts}
+// subscribes <base>/command           {"servo":{"pan_angle","tilt_angle"},"face":{"expression"},"audio":{...}|null,
+//                                      "text": speech balloon (attention game), optional}
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include <ArduinoJson.h>
@@ -97,7 +99,9 @@ static inline uint8_t luma(const camera_fb_t* fb, int i) {
 }
 
 // Frame differencing ~ the fly's motion detectors: the centroid of changed pixels is the
-// target, the sign of the change (brighter/darker) is its ON/OFF polarity.
+// target, the sign of the change (brighter/darker) is its ON/OFF polarity, the bounding
+// box of the changed pixels feeds the looming detector (LPLC2 watches its four edges
+// move outward) and the mean brightness of each image half drives phototaxis.
 static void processCamera() {
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) return;
@@ -108,9 +112,13 @@ static void processCamera() {
   const uint32_t now = millis();
   uint32_t count = 0;
   int32_t sumX = 0, sumY = 0, sumSign = 0;
+  int minX = FRAME_W, minY = FRAME_H, maxX = -1, maxY = -1;
+  uint32_t lumL = 0, lumR = 0, lumT = 0, lumB = 0;
   for (int y = 0, i = 0; y < FRAME_H; ++y) {
     for (int x = 0; x < FRAME_W; ++x, ++i) {
       uint8_t v = luma(fb, i);
+      (x < FRAME_W / 2 ? lumL : lumR) += v;
+      (y < FRAME_H / 2 ? lumT : lumB) += v;
       int d = int(v) - int(prevFrame[i]);
       prevFrame[i] = v;
       if (havePrev && abs(d) > DIFF_THRESHOLD) {
@@ -118,6 +126,10 @@ static void processCamera() {
         sumX += x;
         sumY += y;
         sumSign += d > 0 ? 1 : -1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
       }
     }
   }
@@ -154,8 +166,19 @@ static void processCamera() {
     doc["width"] = FRAME_W;
     doc["height"] = FRAME_H;
     doc["polarity"] = float(sumSign) / count;
+    JsonArray box = doc["box"].to<JsonArray>();
+    box.add(minX);
+    box.add(minY);
+    box.add(maxX);
+    box.add(maxY);
   }
-  char buf[192];
+  const float half = FRAME_W * FRAME_H / 2.0f;
+  JsonArray lum = doc["lum"].to<JsonArray>();
+  lum.add(int(lumL / half));
+  lum.add(int(lumR / half));
+  lum.add(int(lumT / half));
+  lum.add(int(lumB / half));
+  char buf[256];
   size_t n = serializeJson(doc, buf);
   mqtt.publish((topicBase + "/sensor/camera").c_str(), (const uint8_t*)buf, n);
 }
@@ -172,8 +195,9 @@ static void publishImu() {
 }
 
 static void publishProximity() {
-  char buf[32];
-  int n = snprintf(buf, sizeof buf, "{\"ps\":%u}", CoreS3.Ltr553.getPsValue());
+  char buf[48];
+  int n = snprintf(buf, sizeof buf, "{\"ps\":%u,\"als\":%u}", CoreS3.Ltr553.getPsValue(),
+                   CoreS3.Ltr553.getAlsValue());
   mqtt.publish((topicBase + "/sensor/proximity").c_str(), (const uint8_t*)buf, n);
 }
 
@@ -202,6 +226,15 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
   if (face && lastFace != face) {
     lastFace = face;
     avatar.setExpression(toExpression(face));
+  }
+
+  static String lastText;
+  const char* text = doc["text"];
+  static uint32_t lastTextMs = 0;
+  if (text && lastText != text && millis() - lastTextMs > 250) {  // balloon redraw is slow
+    lastText = text;
+    lastTextMs = millis();
+    avatar.setSpeechText(text);
   }
 
   JsonObject audio = doc["audio"];
@@ -241,7 +274,10 @@ void setup() {
   ltr.ps_led_pulse_freq = LTR5XX_LED_PULSE_FREQ_40KHZ;
   ltr.ps_measurement_rate = LTR5XX_PS_MEASUREMENT_RATE_50MS;
   proximityOk = CoreS3.Ltr553.begin(&ltr);
-  if (proximityOk) CoreS3.Ltr553.setPsMode(LTR5XX_PS_ACTIVE_MODE);
+  if (proximityOk) {
+    CoreS3.Ltr553.setPsMode(LTR5XX_PS_ACTIVE_MODE);
+    CoreS3.Ltr553.setAlsMode(LTR5XX_ALS_ACTIVE_MODE);
+  }
 
   cameraOk = initCamera();
   if (!cameraOk) M5_LOGE("camera init failed");

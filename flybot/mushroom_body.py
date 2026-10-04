@@ -8,7 +8,8 @@
 * Octopamine (arousal) follows novelty x intensity, looming and shaking.
 * Dopamine (positive valence) follows gentle close interaction and successful
   tracking, and gates faster recovery of the KC->MBON synapses.
-* Sleep pressure builds while nothing new happens.
+* Sleep pressure builds while nothing new happens, faster in the dark.
+* A Giant Fiber escape releases a burst of octopamine (``startle``).
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ class Percept:
     approach: float = 0.0  # d(nearness)/dt, >0 approaching
     shake: float = 0.0  # IMU disturbance, 0..1
     centered: float = 0.0  # 1 when the target is in the middle of the frame
+    dark: float = 0.0  # 0 lit .. 1 dark (ambient light sensor)
 
 
 @dataclass
@@ -49,6 +51,7 @@ class MushroomBody:
         recovery_s: float = 30.0,
         hold_s: float = 1.0,
         alert_threshold: float = 0.5,
+        sleep_time_s: float = 20.0,
         seed: int = 3,
     ):
         rng = np.random.default_rng(seed)
@@ -64,6 +67,7 @@ class MushroomBody:
         # a new object after a long idle period peaks near 0.56 (the empty scene
         # habituates overlapping KCs); rotation/petting stay below ~0.32
         self.alert_threshold = alert_threshold
+        self.sleep_time_s = sleep_time_s
         self.state = Neuromodulators()
         self.expression = "curious"
         self._since_change = 0.0
@@ -97,8 +101,8 @@ class MushroomBody:
 
         s.octopamine += dt / 0.5 * (oa_drive - s.octopamine)
         s.dopamine += dt / 2.0 * (da_drive - s.dopamine)
-        boredom = (1.0 - intensity) * (1.0 - s.octopamine)
-        s.sleep_pressure += dt / 20.0 * (boredom - s.sleep_pressure)
+        boredom = min(1.0, (1.0 - intensity) * (1.0 - s.octopamine) * (1.0 + p.dark))
+        s.sleep_pressure += dt / (self.sleep_time_s / (1.0 + p.dark)) * (boredom - s.sleep_pressure)
         if s.octopamine > 0.5:
             s.sleep_pressure *= 0.5  # startle wakes the robot
 
@@ -109,6 +113,11 @@ class MushroomBody:
 
         changed = self._choose(dt)
         return s, self.expression, changed
+
+    def startle(self) -> None:
+        """Giant Fiber escape: octopamine surge, wake up."""
+        self.state.octopamine = 1.0
+        self.state.sleep_pressure = 0.0
 
     def _choose(self, dt: float) -> bool:
         s = self.state

@@ -87,9 +87,9 @@ controller เก็บประวัติท่าหัวของตัว
 
 | topic | ตัวอย่าง | หมายเหตุ |
 |---|---|---|
-| `stackchan/sensor/camera` | `{"x":200,"y":110,"vx":35,"vy":-4,"width":320,"height":240}` | พิกัด/ความเร็วเป็นพิกเซล(/วินาที) ไม่ส่ง `vx,vy` ก็ได้ (คำนวณจากเฟรมต่อเนื่อง), `"detected":false` เมื่อไม่เจอวัตถุ, `polarity` (-1..1) ถ้ารู้ว่าเป็นขอบสว่าง/มืด |
+| `stackchan/sensor/camera` | `{"x":200,"y":110,"vx":35,"vy":-4,"width":320,"height":240,"box":[180,90,220,130],"lum":[90,120,110,100]}` | พิกัด/ความเร็วเป็นพิกเซล(/วินาที) ไม่ส่ง `vx,vy` ก็ได้ (คำนวณจากเฟรมต่อเนื่อง), `"detected":false` เมื่อไม่เจอวัตถุ, `polarity` (-1..1) ถ้ารู้ว่าเป็นขอบสว่าง/มืด, `box` = กรอบ [ซ้าย,บน,ขวา,ล่าง] ของพิกเซลที่เปลี่ยน (looming), `lum` = ความสว่างเฉลี่ยครึ่ง ซ้าย/ขวา/บน/ล่าง (phototaxis, ส่งมากับ `detected:false` ได้) |
 | `stackchan/sensor/imu` | `{"gyro":[gx,gy,gz],"accel":[ax,ay,az]}` | gyro °/s, accel หน่วย g, ใส่ `"yaw"` (°) แทนได้ถ้ามี sensor fusion |
-| `stackchan/sensor/proximity` | `{"distance_mm":120}` หรือ `{"ps":850}` | `ps` = ค่าดิบ LTR-553 (0–2047) |
+| `stackchan/sensor/proximity` | `{"distance_mm":120}` หรือ `{"ps":850,"als":45}` | `ps` = ค่าดิบ LTR-553 (0–2047), `als` = แสงรอบตัว (มืดกว่า `als_dark` → ง่วงเร็วขึ้น) |
 
 **เอาต์พุต** `stackchan/command`
 
@@ -99,14 +99,44 @@ controller เก็บประวัติท่าหัวของตัว
   "face":  {"expression": "curious"},
   "audio": {"tones": [[600, 60], [900, 60], [1200, 90]], "volume": 120},
   "brain": {"HS": 0.41, "VS": 0.0, "LC10": [0.2, 0.0], "heading": 0.0,
-            "dopamine": 0.1, "octopamine": 0.3, "novelty": 0.8, "sleep_pressure": 0.0}
+            "dopamine": 0.1, "octopamine": 0.3, "novelty": 0.8, "sleep_pressure": 0.0,
+            "LPLC2": 0.0, "LC4": 0.0, "GF": 0.0},
+  "game": {"streak": 1.2, "best": 4.0}, "text": "1.2s / best 4.0s"
 }
 ```
 
 - `pan_angle` −90…90 (บวก = หันขวา), `tilt_angle` −45…45 (บวก = เงยขึ้น)
 - `expression`: `curious | alert | sleepy | happy`
-- `audio` ส่งเฉพาะตอนอารมณ์เปลี่ยน (นอกนั้นเป็น `null`): `tones` = `[ความถี่ Hz, มิลลิวินาที]` ใช้กับ `M5.Speaker.tone()`
+- `audio` ส่งเฉพาะตอนอารมณ์เปลี่ยนหรือตอนสะดุ้ง (นอกนั้นเป็น `null`): `tones` = `[ความถี่ Hz, มิลลิวินาที]` ใช้กับ `M5.Speaker.tone()`
 - `brain` เป็น telemetry สำหรับ debug ปิดได้ด้วย `--no-telemetry`
+- `game` / `text` มีเฉพาะเมื่อรันด้วย `--game` (เฟิร์มแวร์แสดง `text` ในบอลลูนคำพูด)
+
+**เหตุการณ์** `stackchan/event` (และ POST ไป `--webhook URL` ถ้าตั้งไว้; ชนิดเดียวกันส่งห่างกันอย่างน้อย `--event-cooldown` วินาที)
+
+```json
+{"type": "escape", "from": "right", "robot": "stackchan", "at": "2026-10-04T06:50:58+00:00",
+ "message": "StackChan: สะดุ้งหลบสิ่งที่พุ่งเข้ามา", "brain": {...}}
+```
+
+`type`: `presence` (มีอะไรใหม่เข้ามา → alert), `escape` (Giant Fiber ยิง), `record` (สถิติใหม่ในเกม, มี `seconds`)
+
+## พฤติกรรมเพิ่มเติม
+
+```bash
+python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
+    --personality skittish --game --webhook https://example.com/hook --event-cooldown 60
+```
+
+- **หลบสิ่งที่พุ่งเข้าหา (looming escape)** — LPLC2 (มี 4 แขน ชอบการเคลื่อนที่ออกจากศูนย์กลาง) ตอบสนองเมื่อขอบทั้ง 4
+  ของ `box` ขยายออกพร้อมกัน (วัตถุเลื่อนข้างไม่นับ) เทียบกับขนาด = 1/เวลาถึงตัว; LC4 ตอบความเร็วการขยาย;
+  Giant Fiber (DNp01) รวมสองทางด้วยน้ำหนักจากสัดส่วน synapse จริง (v783 ซีกขวา: LC4 1634, LPLC2 658 synapse)
+  แล้วยิงเมื่อเกิน `gf_threshold` → หันหนีด้านตรงข้าม + เงยขึ้น `escape_s` วินาที, octopamine พุ่ง (หน้า alert),
+  เสียงสะดุ้ง แล้ว PFL3 พาหันกลับมาดูจุดเดิม; ไม่ตอบวัตถุเล็กกว่า ~10° หรือเข้ามาช้า ๆ
+- **Phototaxis** — `phototaxis` +1 หันเข้าหาแสง / −1 หนีแสง (ใช้เมื่อไม่มีวัตถุ) จาก `lum` ซ้าย/ขวา/บน/ล่าง
+- **นิสัย** `--personality`: `curious` (ค่าเริ่มต้น), `skittish` (ตกใจง่าย, หนีแสง, ลืมเร็ว), `bold` (ใจกล้า, เข้าหาแสง),
+  `sleepy` (ง่วงเร็ว, ชอบที่มืด) — เป็นชุดค่า `ControllerConfig` (`PERSONALITIES` ใน `flybot/controller.py`) แล้วค่อยทับด้วย `--set`
+- **เกมดึงความสนใจ** `--game` — นับเวลาที่หุ่นมองวัตถุตรงกลางได้ต่อเนื่อง (หลุดสั้นกว่า `game_grace_s` ไม่นับว่าขาด)
+  frame differencing เห็นเฉพาะของที่ขยับ ผู้เล่นต้องขยับวัตถุช้า ๆ ให้หุ่นตาม
 
 ## หลักการของแต่ละวงจร
 
@@ -136,7 +166,9 @@ pio run -t upload && pio device monitor
 - กล้อง GC0308 แบบ grayscale 160×120: หาวัตถุด้วย frame differencing (จุดศูนย์กลางของพิกเซลที่เปลี่ยน)
   แล้วคำนวณ `vx, vy` บนบอร์ด `polarity` = ทิศของการเปลี่ยนความสว่าง (ON/OFF)
   ถ้าภาพเปลี่ยนเกิน `MAX_MOTION_FRACTION` (หัวกำลังหมุน/แสงเปลี่ยน) จะข้ามเฟรมนั้น
-- IMU (BMI270) ~30 Hz, LTR-553 `ps` 10 Hz
+- ส่ง `box` (กรอบพิกเซลที่เปลี่ยน) และ `lum` (ความสว่างเฉลี่ยแต่ละครึ่งภาพ) ไปกับทุกเฟรม
+- IMU (BMI270) ~30 Hz, LTR-553 `ps` + `als` 10 Hz
+- `text` จากคำสั่งแสดงในบอลลูนคำพูดของ avatar (อัปเดตไม่เกิน 4 ครั้ง/วินาที)
 - เซอร์โว: `องศา = CENTER + SIGN × มุมจากคำสั่ง` แล้วจำกัดใน MIN..MAX (SG90 แกน Y ขยับได้ ~60–90°)
   ค่าเริ่มต้น Port.C X=17, Y=18 ถ้าหัวหันผิดทางให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
 - เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Doubt
@@ -148,6 +180,8 @@ flybot/connectome.py       โหลด Codex CSV → adjacency matrix (+ connec
 flybot/optic_lobe.py       derive_gains() + เครือข่าย Nengo / rate model
 flybot/central_complex.py  E-PG / FC2 / PFL3
 flybot/mushroom_body.py    KC, MBON, dopamine/octopamine, อารมณ์
+flybot/looming.py          LPLC2 / LC4 → Giant Fiber (หลบ)
+flybot/events.py           เหตุการณ์ → MQTT + webhook (cooldown)
 flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
 flybot/sim.py              ฉากจำลอง (กล้องอุดมคติ)

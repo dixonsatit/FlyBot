@@ -11,6 +11,7 @@ import numpy as np
 
 from .central_complex import CentralComplex
 from .connectome import Connectome, load_codex, synthetic_codex
+from .looming import GiantFiber, LoomingGains, derive_looming_gains
 from .mushroom_body import MushroomBody, Percept
 from .optic_lobe import CircuitGains, build_optic_lobe, derive_gains
 
@@ -20,6 +21,7 @@ AUDIO = {
     "curious": {"tones": [[600, 60], [900, 60], [1200, 90]], "volume": 120},
     "happy": {"tones": [[880, 90], [1320, 140]], "volume": 140},
     "sleepy": {"tones": [[500, 150], [350, 200], [250, 300]], "volume": 60},
+    "startle": {"tones": [[2400, 40], [1200, 40], [2400, 60]], "volume": 200},
 }
 
 
@@ -46,6 +48,33 @@ class ControllerConfig:
     backend: str = "nengo"
     n_neurons: int = 60
     telemetry: bool = True
+    # mushroom body / emotion
+    alert_threshold: float = 0.5
+    habituation_recovery_s: float = 30.0
+    sleep_time_s: float = 20.0
+    als_dark: float = 20.0  # LTR-553 ALS counts below which the room counts as dark
+    # looming escape (LPLC2 / LC4 -> Giant Fiber)
+    gf_threshold: float = 1.0
+    gf_refractory_s: float = 2.0
+    escape_s: float = 0.5
+    # phototaxis from the camera's left/right/top/bottom brightness: +1 seek light, -1 avoid
+    phototaxis: float = 0.0
+    k_light: float = 30.0  # deg/s at full left/right contrast
+    # attention game: time the robot keeps a target centred
+    game: bool = False
+    game_lock: float = 0.3  # |x| (half-frames) counted as "looking at it"
+    game_grace_s: float = 0.8  # gaps shorter than this keep the streak
+
+
+# Presets for --personality, applied before --set overrides
+PERSONALITIES: dict[str, dict] = {
+    "curious": {},
+    "skittish": {"alert_threshold": 0.35, "gf_threshold": 0.6, "habituation_recovery_s": 10.0,
+                 "phototaxis": -1.0},
+    "bold": {"alert_threshold": 0.7, "gf_threshold": 1.6, "habituation_recovery_s": 60.0,
+             "phototaxis": 1.0},
+    "sleepy": {"sleep_time_s": 6.0, "alert_threshold": 0.6, "phototaxis": -0.5},
+}
 
 
 @dataclass
@@ -81,6 +110,12 @@ def apply_overrides(cfg: ControllerConfig, items: list[str] | None) -> Controlle
     return replace(cfg, **changes)
 
 
+def personality(name: str) -> ControllerConfig:
+    if name not in PERSONALITIES:
+        raise ValueError(f"unknown personality {name!r}; choose from {sorted(PERSONALITIES)}")
+    return replace(ControllerConfig(), **PERSONALITIES[name])
+
+
 def load_connectome(data_dir: str | Path | None, side: str = "R") -> Connectome:
     if data_dir and Path(data_dir).exists():
         return load_codex(data_dir, side=side)
@@ -89,14 +124,26 @@ def load_connectome(data_dir: str | Path | None, side: str = "R") -> Connectome:
 
 class BrainController:
     def __init__(self, config: ControllerConfig | None = None, gains: CircuitGains | None = None,
-                 connectome: Connectome | None = None):
-        self.cfg = config or ControllerConfig()
-        if gains is None:
-            gains = derive_gains((connectome or synthetic_codex()).group_adjacency())
+                 connectome: Connectome | None = None, looming: LoomingGains | None = None):
+        self.cfg = cfg = config or ControllerConfig()
+        if gains is None or (looming is None and connectome is not None):
+            connectome = connectome or synthetic_codex()
+            gains = gains or derive_gains(connectome.group_adjacency())
+            looming = looming or derive_looming_gains(connectome.group_adjacency(neuropils=None))
         self.gains = gains
-        self.optic = build_optic_lobe(gains, backend=self.cfg.backend, n_neurons=self.cfg.n_neurons)
+        self.optic = build_optic_lobe(gains, backend=cfg.backend, n_neurons=cfg.n_neurons)
         self.cx = CentralComplex()
-        self.mb = MushroomBody()
+        self.mb = MushroomBody(recovery_s=cfg.habituation_recovery_s, alert_threshold=cfg.alert_threshold,
+                               sleep_time_s=cfg.sleep_time_s)
+        self.gf = GiantFiber(looming or LoomingGains(), threshold=cfg.gf_threshold,
+                             refractory_s=cfg.gf_refractory_s)
+        self._escape_until = -math.inf
+        self._escape_dir = 1.0
+        self._tilt_home: float | None = None  # tilt to settle back to after an escape
+        self.events: list[dict] = []
+        self._game_start: float | None = None
+        self._game_last = -math.inf
+        self.game_best = 0.0
         self.pan = 0.0
         self.tilt = 0.0
         self._nearness = 0.0
@@ -136,6 +183,7 @@ class BrainController:
             "vx": vx / (w / 2),
             "vy": vy / (h / 2),
             "polarity": c.get("polarity", 0.0),
+            "box_deg": [v * self.cfg.hfov_deg / w for v in c["box"]] if "box" in c else None,
         }
 
     def _head_at(self, t: float) -> tuple[float, float, float, float, float]:
@@ -145,6 +193,39 @@ class BrainController:
             return (t, self.cx.heading + self.pan, self.tilt, 0.0, 0.0)
         i = bisect.bisect_right(h, t, key=lambda e: e[0])
         return h[max(i - 1, 0)]
+
+    def _light(self, s: SensorState) -> tuple[float, float] | None:
+        """(right-left, top-bottom) brightness contrast in -1..1 from the latest frame."""
+        c = s.camera or {}
+        lum = c.get("lum")
+        if not lum or self._clock - s.stamps.get("camera", -math.inf) > self.cfg.target_timeout_s:
+            return None
+        left, right, top, bottom = (float(v) for v in lum)
+        return (right - left) / (right + left + 1.0), (top - bottom) / (top + bottom + 1.0)
+
+    def pop_events(self) -> list[dict]:
+        events, self.events = self.events, []
+        return events
+
+    def _game(self, target_x: float | None, target_y: float | None) -> dict:
+        cfg, now = self.cfg, self._clock
+        locked = target_x is not None and abs(target_x) < cfg.game_lock and abs(target_y) < 1.5 * cfg.game_lock
+        if locked:
+            if self._game_start is None:
+                self._game_start = now
+            self._game_last = now
+        elif self._game_start is not None and now - self._game_last > cfg.game_grace_s:
+            streak = self._game_last - self._game_start
+            if streak > self.game_best:
+                self.game_best = streak
+                self.events.append({"type": "record", "seconds": round(streak, 1)})
+            self._game_start = None
+        current = self._game_last - self._game_start if self._game_start is not None else 0.0
+        return {"streak": round(current, 1), "best": round(max(self.game_best, current), 1)}
+
+    def _darkness(self, s: SensorState) -> float:
+        als = (s.proximity or {}).get("als")
+        return float(np.clip(1.0 - als / self.cfg.als_dark, 0.0, 1.0)) if als is not None else 0.0
 
     def _nearness_from(self, s: SensorState) -> float:
         p = s.proximity or {}
@@ -182,15 +263,45 @@ class BrainController:
         pan_rate = cfg.k_position * px + cfg.k_motion * hs
         tilt_rate = -(cfg.k_position * py + cfg.k_motion * vs)
 
+        # looming: LPLC2 / LC4 -> Giant Fiber; an escape turns away from the object and up
+        nearness = self._nearness_from(sensors)
+        approach = (nearness - self._nearness) / dt if dt > 0 else 0.0
+        self._nearness = nearness
+        if target and target["box_deg"] is not None:
+            self.gf.observe(target["box_deg"], sensors.stamps["camera"])
+        elif not target:
+            self.gf.observe(None, None)
+        escape = self.gf.step(dt, self._clock, approach)
+        if escape:
+            self._escape_until = self._clock + cfg.escape_s
+            self._escape_dir = -1.0 if (stim[0] if target else self.pan) >= 0 else 1.0
+            if self._tilt_home is None:
+                self._tilt_home = self.tilt
+            self.mb.startle()
+            self.events.append({"type": "escape", "from": "right" if self._escape_dir < 0 else "left"})
+        escaping = self._clock < self._escape_until
+        if escaping:
+            pan_rate = self._escape_dir * cfg.max_rate_deg_s
+            tilt_rate = 0.5 * cfg.max_rate_deg_s
+        elif target:
+            self._tilt_home = None
+        else:
+            if self._tilt_home is not None:
+                tilt_rate += 2.0 * (self._tilt_home - self.tilt)  # settle back down
+            light = self._light(sensors) if cfg.phototaxis else None
+            if light:
+                pan_rate += cfg.k_light * cfg.phototaxis * light[0]
+                tilt_rate += cfg.k_light * cfg.phototaxis * light[1]
+
         # central complex: heading ring, VOR counter-rotation, goal memory
         imu = sensors.imu or {}
         gyro = imu.get("gyro")
         yaw_rate = cfg.imu_yaw_sign * gyro[2] if gyro else None
         yaw = cfg.imu_yaw_sign * imu["yaw"] if "yaw" in imu else None
         d_heading = self.cx.update_heading(yaw_rate, dt, yaw)
-        if target:
+        if target and not escaping:
             self.cx.set_goal(self.cx.heading + self.pan + stim[0] * cfg.hfov_deg / 2)
-        else:
+        elif not escaping:
             pan_rate += cfg.k_heading * self.cx.steering(self.pan)
 
         pan_rate = float(np.clip(pan_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
@@ -206,9 +317,6 @@ class BrainController:
                 self._history.pop(0)
 
         # mushroom body / monoamines
-        nearness = self._nearness_from(sensors)
-        approach = (nearness - self._nearness) / dt if dt > 0 else 0.0
-        self._nearness = nearness
         accel = imu.get("accel")
         shake = 0.0
         if accel:
@@ -220,14 +328,21 @@ class BrainController:
             x=float(stim[0]), y=float(stim[1]), target=target is not None,
             nearness=nearness, approach=float(approach), shake=float(min(shake, 1.0)),
             centered=float(max(0.0, 1.0 - np.hypot(*stim[:2]))) if target else 0.0,
+            dark=self._darkness(sensors),
         )
         mods, expression, changed = self.mb.step(percept, dt)
+        if changed and expression == "alert" and not escape:
+            self.events.append({"type": "presence"})
 
         cmd = {
             "servo": {"pan_angle": round(self.pan, 2), "tilt_angle": round(self.tilt, 2)},
             "face": {"expression": expression},
-            "audio": AUDIO[expression] if changed else None,
+            "audio": AUDIO["startle"] if escape else AUDIO[expression] if changed else None,
         }
+        if cfg.game:
+            game = self._game(stim[0] if target else None, stim[1] if target else None)
+            cmd["game"] = game
+            cmd["text"] = f"{game['streak']:.1f}s / best {game['best']:.1f}s"
         if cfg.telemetry:
             cmd["brain"] = {
                 "HS": round(float(hs), 3), "VS": round(float(vs), 3),
@@ -235,7 +350,10 @@ class BrainController:
                 "heading": round(self.cx.heading, 1),
                 "dopamine": round(mods.dopamine, 3), "octopamine": round(mods.octopamine, 3),
                 "novelty": round(mods.novelty, 3), "sleep_pressure": round(mods.sleep_pressure, 3),
+                "LPLC2": round(self.gf.lplc2, 3), "LC4": round(self.gf.lc4, 3), "GF": round(self.gf.v, 3),
             }
+        for event in self.events:
+            event.setdefault("time", round(self._clock, 3))
         return cmd
 
     def close(self) -> None:
