@@ -23,6 +23,7 @@ AUDIO = {
     "happy": {"tones": [[880, 90], [1320, 140]], "volume": 140},
     "sleepy": {"tones": [[500, 150], [350, 200], [250, 300]], "volume": 60},
     "startle": {"tones": [[2400, 40], [1200, 40], [2400, 60]], "volume": 200},
+    "reminder": {"tones": [[988, 120], [0, 60], [1319, 120], [0, 60], [1568, 220]], "volume": 170},
 }
 
 
@@ -65,6 +66,9 @@ class ControllerConfig:
     game: bool = False
     game_lock: float = 0.3  # |x| (half-frames) counted as "looking at it"
     game_grace_s: float = 0.8  # gaps shorter than this keep the streak
+    # reminders turn the head to where the user usually sits
+    home_pan: float = 0.0
+    home_tilt: float = 10.0
 
 
 # Presets for --personality, applied before --set overrides
@@ -149,6 +153,7 @@ class BrainController:
         self._inbox: queue.SimpleQueue = queue.SimpleQueue()
         self._say: tuple[str, float] | None = None
         self._text_shown = False
+        self._audio: dict | None = None  # one-shot sound queued by a command
         self.snapshot: dict = {}  # latest expression / pose / brain state, for readers on other threads
         self.pan = 0.0
         self.tilt = 0.0
@@ -232,6 +237,24 @@ class BrainController:
     def say(self, text: str, seconds: float = 6.0) -> None:
         """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
         self._inbox.put(lambda: setattr(self, "_say", (text, self._clock + seconds)))
+
+    def remind(self, reminder: dict, hold_s: float = 8.0) -> None:
+        """Meeting reminder: look at the user, alert face, chime, balloon, and an event."""
+        def apply():
+            self.cx.set_goal(self.cx.heading + self.cfg.home_pan)
+            self._tilt_home = self.cfg.home_tilt
+            self.mb.hold("alert", hold_s)
+            self._audio = AUDIO["reminder"]
+            minutes = reminder.get("minutes", 0)
+            screen = f"Meeting in {minutes} min ({reminder.get('start', '')})" if minutes else "Meeting now!"
+            self._say = (screen, self._clock + max(hold_s, 15.0))
+            title = reminder.get("title") or "ประชุม"
+            where = f" ที่ {reminder['location']}" if reminder.get("location") else ""
+            when = f"อีก {minutes} นาที" if minutes else "ถึงเวลาแล้ว"
+            self.events.append({"type": "meeting", **reminder,
+                                "key": f"meeting:{reminder.get('uid')}:{reminder.get('lead')}",
+                                "message": f"StackChan: {when} ประชุม {title} เวลา {reminder.get('start', '')}{where}"})
+        self._inbox.put(apply)
 
     def _apply_inbox(self) -> None:
         while True:
@@ -375,8 +398,9 @@ class BrainController:
         cmd = {
             "servo": {"pan_angle": round(self.pan, 2), "tilt_angle": round(self.tilt, 2)},
             "face": {"expression": expression},
-            "audio": AUDIO["startle"] if escape else AUDIO[expression] if changed else None,
+            "audio": AUDIO["startle"] if escape else self._audio or (AUDIO[expression] if changed else None),
         }
+        self._audio = None
         text = ""
         if cfg.game:
             game = self._game(stim[0] if target else None, stim[1] if target else None)

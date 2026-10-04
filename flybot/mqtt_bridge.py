@@ -22,6 +22,7 @@ from .controller import (PERSONALITIES, BrainController, SensorState, apply_over
 from .cortex import Cortex
 from .events import EventSink
 from .llm import make_llm
+from .meetings import MeetingReminder
 from .looming import derive_looming_gains
 from .optic_lobe import derive_gains
 
@@ -136,6 +137,13 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--game", action="store_true", help="attention game: score shown on the robot")
     ap.add_argument("--webhook", help="POST every event as JSON to this URL")
     ap.add_argument("--event-cooldown", type=float, default=30.0, help="seconds between events of one type")
+    cal = ap.add_argument_group("meeting reminders (iCalendar / ICS)")
+    cal.add_argument("--calendar", action="append", metavar="URL_OR_FILE",
+                     help="ICS feed (Google 'secret address in iCal format', Outlook published calendar, "
+                          "webcal://, or a .ics file); repeatable")
+    cal.add_argument("--remind-minutes", default="10,1", help="minutes before start, comma-separated")
+    cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
+    cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     llm = ap.add_argument_group("LLM cortex (narration, chat, vision)")
     llm.add_argument("--llm", default="none", choices=["none", "anthropic", "openai"],
                      help="anthropic = Claude API; openai = any OpenAI-compatible endpoint")
@@ -185,6 +193,16 @@ def main(argv: list[str] | None = None) -> None:
         bridge.attach_cortex(model, narrate=not args.no_narrate, narrate_cooldown_s=args.narrate_cooldown,
                              vision=args.llm_vision, vision_llm=vision_model)
         bridge.cortex.personality = args.personality
+    if args.calendar:
+        from zoneinfo import ZoneInfo
+        try:
+            leads = tuple(float(v) for v in args.remind_minutes.split(","))
+            tz = ZoneInfo(args.tz) if args.tz else None
+        except Exception as e:
+            ap.error(f"--remind-minutes / --tz: {e}")
+        reminder = MeetingReminder(args.calendar, bridge.controller.remind, leads, args.calendar_refresh, tz)
+        reminder.start()
+        log.info("Meeting reminders: %d calendar(s), %s min before", len(args.calendar), args.remind_minutes)
     bridge.run()
 
 

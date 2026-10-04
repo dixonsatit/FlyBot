@@ -439,3 +439,106 @@ def test_cortex_narrates_chats_and_describes(gains):
     cortex.on_event({"type": "presence"})
     _drain(cortex)
     assert events and events[-1]["type"] == "seen" and events[-1]["description"] == "แก้วกาแฟ"
+
+
+# -- meeting reminders (ICS) --------------------------------------------------------
+
+_ICS = b"""BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:standup
+SUMMARY:Daily standup
+DTSTART;TZID=Asia/Bangkok:20261005T090000
+DTEND;TZID=Asia/Bangkok:20261005T091500
+RRULE:FREQ=DAILY;COUNT=5
+EXDATE;TZID=Asia/Bangkok:20261006T090000
+LOCATION:IT room
+END:VEVENT
+BEGIN:VEVENT
+UID:review
+SUMMARY:\xe0\xb8\x9b\xe0\xb8\xa3\xe0\xb8\xb0\xe0\xb8\x8a\xe0\xb8\xb8\xe0\xb8\xa1 HIS review
+DTSTART:20261005T030000Z
+DTEND:20261005T040000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:floating
+SUMMARY:Floating time
+DTSTART:20261005T140000
+END:VEVENT
+BEGIN:VEVENT
+UID:holiday
+SUMMARY:All day
+DTSTART;VALUE=DATE:20261005
+END:VEVENT
+BEGIN:VEVENT
+UID:cancelled
+SUMMARY:Cancelled one
+STATUS:CANCELLED
+DTSTART:20261005T050000Z
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+def _bkk(*args):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime(*args, tzinfo=ZoneInfo("Asia/Bangkok"))
+
+
+def test_parse_meetings_expands_recurrence_and_skips_all_day():
+    pytest.importorskip("recurring_ical_events")
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from flybot.meetings import parse_meetings
+    start = _bkk(2026, 10, 5, 0, 0)
+    found = parse_meetings(_ICS, start, start + timedelta(days=2), ZoneInfo("Asia/Bangkok"))
+    assert [(m.uid, m.start.strftime("%d %H:%M")) for m in found] == [
+        ("standup", "05 09:00"), ("review", "05 10:00"), ("floating", "05 14:00")]  # 6th excluded by EXDATE
+    assert found[1].title == "ประชุม HIS review" and found[0].location == "IT room"
+
+
+def test_meeting_reminder_fires_once_per_lead(tmp_path):
+    pytest.importorskip("recurring_ical_events")
+    from zoneinfo import ZoneInfo
+    from flybot.meetings import MeetingReminder
+    path = tmp_path / "cal.ics"
+    path.write_bytes(_ICS)
+    clock = {"now": _bkk(2026, 10, 5, 8, 49, 30)}
+    r = MeetingReminder([str(path)], lambda _: None, tz=ZoneInfo("Asia/Bangkok"), now=lambda: clock["now"])
+    r.refresh()
+    assert r.check() == []
+    clock["now"] = _bkk(2026, 10, 5, 8, 50, 5)
+    first = r.check()
+    assert [(d["uid"], d["minutes"], d["lead"]) for d in first] == [("standup", 10, 10)]
+    assert r.check() == []  # once only
+    clock["now"] = _bkk(2026, 10, 5, 8, 59, 0)
+    assert [(d["uid"], d["minutes"]) for d in r.check()] == [("standup", 1)]
+    clock["now"] = _bkk(2026, 10, 5, 9, 55, 0)  # 10:00 review: the 10-min mark passed 5 min ago -> stale
+    assert r.check() == []
+
+
+def test_controller_meeting_reminder(gains):
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    s = SensorState()
+    brain.remind({"uid": "u1", "title": "ประชุม HIS", "start": "10:00", "minutes": 10, "location": "ห้อง IT", "lead": 10})
+    cmd = brain.step(s, 0.05, now=0.0)
+    events = brain.pop_events()
+    assert cmd["face"]["expression"] == "alert" and cmd["audio"]["tones"][0] == [988, 120]
+    assert cmd["text"] == "Meeting in 10 min (10:00)"
+    assert [e["type"] for e in events] == ["meeting"]  # no extra "presence" from the alert face
+    assert events[0]["message"] == "StackChan: อีก 10 นาที ประชุม ประชุม HIS เวลา 10:00 ที่ ห้อง IT"
+    for i in range(1, 200):  # alert held 8 s, then back to normal moods
+        cmd = brain.step(s, 0.05, now=i * 0.05)
+    assert cmd["face"]["expression"] != "alert" and brain.pop_events() == []
+
+
+def test_event_sink_cooldown_is_per_key():
+    from flybot.events import EventSink
+    sent = []
+    sink = EventSink(lambda topic, body: sent.append(body), cooldown_s=60)
+    assert sink.emit({"type": "meeting", "key": "meeting:a:10", "message": "A"}, now=0)
+    assert sink.emit({"type": "meeting", "key": "meeting:b:10", "message": "B"}, now=1)
+    assert not sink.emit({"type": "meeting", "key": "meeting:a:10"}, now=2)
+    assert all('"key"' not in b for b in sent) and '"message": "A"' in sent[0]

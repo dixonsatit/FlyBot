@@ -138,6 +138,27 @@ python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
 - **เกมดึงความสนใจ** `--game` — นับเวลาที่หุ่นมองวัตถุตรงกลางได้ต่อเนื่อง (หลุดสั้นกว่า `game_grace_s` ไม่นับว่าขาด)
   frame differencing เห็นเฉพาะของที่ขยับ ผู้เล่นต้องขยับวัตถุช้า ๆ ให้หุ่นตาม
 
+## เตือนประชุมจากปฏิทิน
+
+อ่านปฏิทินแบบ iCalendar (ICS) ได้ทุกเจ้า: Google Calendar (Settings → ปฏิทิน → **Secret address in iCal format**),
+Outlook / Microsoft 365 (Publish calendar → ICS), iCloud, `webcal://` หรือไฟล์ `.ics`
+รองรับนัดซ้ำ (RRULE/EXDATE) และ timezone; ข้ามนัดทั้งวันและนัดที่ยกเลิก
+
+```bash
+pip install -e .[calendar]
+python -m flybot.mqtt_bridge --host 192.168.1.10 --data-dir data/codex \
+    --calendar "https://calendar.google.com/calendar/ical/.../basic.ics" \
+    --remind-minutes 10,1 --tz Asia/Bangkok --webhook https://example.com/hook
+```
+
+ก่อนเริ่มประชุม 10 และ 1 นาที (ปรับด้วย `--remind-minutes`): หุ่นหันมาหาที่นั่งคุณ (`--set home_pan=0 --set home_tilt=10`),
+หน้า alert 8 วินาที, เสียงเตือน 3 โน้ต, บอลลูน `Meeting in 10 min (14:00)` และส่งเหตุการณ์ `meeting`
+(`title`, `start`, `minutes`, `location`, `message` ภาษาไทย) ไป MQTT/webhook — ประชุมต่างนัดไม่ติด cooldown กัน
+ถ้าเปิด `--llm` จะได้คำเตือนภาษาไทยที่ `stackchan/chat/out` ด้วย; อ่านปฏิทินใหม่ทุก `--calendar-refresh` วินาที (300)
+
+> ลิงก์ ICS แบบ secret ใครมีลิงก์ก็อ่านปฏิทินได้ เก็บไว้ในไฟล์ `*.key` (ถูก ignore) อย่าใส่ในโค้ดหรือ commit
+> ชื่อ/สถานที่ประชุมจะถูกส่งไป webhook และ LLM (ถ้าเปิด) ด้วย
+
 ## LLM (ชั้นคิดช้า เหนือสมองแมลง)
 
 สมองแมลงยังคุม reflex 20 Hz เหมือนเดิม LLM ทำงานบน thread แยก ไม่อยู่ใน loop ควบคุม
@@ -232,6 +253,7 @@ flybot/looming.py          LPLC2 / LC4 → Giant Fiber (หลบ)
 flybot/events.py           เหตุการณ์ → MQTT + webhook (cooldown)
 flybot/llm.py              ผู้ให้บริการ LLM: Claude (anthropic SDK) / OpenAI-compatible (openai SDK)
 flybot/cortex.py           ชั้น LLM: บรรยาย, แชท + tools, ดูภาพ (thread แยก)
+flybot/meetings.py         อ่านปฏิทิน ICS → เตือนประชุม
 flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
 flybot/sim.py              ฉากจำลอง (กล้องอุดมคติ)

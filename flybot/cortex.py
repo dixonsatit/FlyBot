@@ -46,7 +46,10 @@ CAUSES = {
     "escape": "an object expanded fast in view: LPLC2 (expansion) and LC4 (edge speed) drove the "
               "Giant Fiber (DNp01) over threshold, so the head jumped away and octopamine surged",
     "record": "attention game: the optic lobe (LC10, HS) kept a moving object centred for a new best time",
+    "meeting": "calendar reminder. Line 2: remind the user in Thai of the meeting title, the minutes "
+               "until it starts, the start time and the place if given; talk only about the meeting",
 }
+URGENT = {"meeting"}  # narrated even inside the narration cooldown
 
 DESCRIBE = """This is a 160x120 grayscale frame from the robot's camera, taken because something
 new moved in front of it. Write exactly two lines: line 1 a short English description
@@ -82,7 +85,7 @@ class Cortex:
         kind = event.get("type", "event")
         self.event_counts[kind] = self.event_counts.get(kind, 0) + 1
         now = time.monotonic()
-        if self.narrate and now - self._last_narration >= self.narrate_cooldown_s:
+        if self.narrate and (kind in URGENT or now - self._last_narration >= self.narrate_cooldown_s):
             self._last_narration = now
             self._submit(self._narrate, event, brain or {})
         if self.snapshot and kind == "presence":
@@ -122,7 +125,7 @@ class Cortex:
         reply = self.llm.ask(PERSONA, [], NARRATE.format(event=json.dumps(event, ensure_ascii=False),
                                                          cause=CAUSES.get(kind, kind), brain=json.dumps(brain)))
         screen, thai = self._two_lines(reply)
-        if screen:
+        if screen and kind not in URGENT:  # a reminder already shows its own balloon text
             self.controller.say(screen)
         if thai:
             self._out({"type": "narration", "event": event.get("type"), "text": thai, "screen": screen})

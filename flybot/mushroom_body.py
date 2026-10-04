@@ -71,6 +71,7 @@ class MushroomBody:
         self.state = Neuromodulators()
         self.expression = "curious"
         self._since_change = 0.0
+        self._held_s = 0.0
 
     def _pn(self, p: Percept) -> np.ndarray:
         # coarse place code for position plus intensity channels (glomeruli)
@@ -119,8 +120,17 @@ class MushroomBody:
         self.state.octopamine = 1.0
         self.state.sleep_pressure = 0.0
 
+    def hold(self, expression: str, seconds: float) -> None:
+        """Show ``expression`` for ``seconds`` regardless of the monoamines (e.g. a reminder)."""
+        self.expression = expression
+        self._held_s = seconds
+        self._since_change = 0.0
+
     def _choose(self, dt: float) -> bool:
         s = self.state
+        if self._held_s > 0:
+            self._held_s -= dt
+            return False
         if s.octopamine > self.alert_threshold:
             want = "alert"
         elif s.dopamine > 0.45:

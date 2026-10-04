@@ -21,6 +21,7 @@ MESSAGES = {
     "escape": "StackChan: สะดุ้งหลบสิ่งที่พุ่งเข้ามา",
     "record": "StackChan: สถิติใหม่ในเกมดึงความสนใจ",
     "seen": "StackChan: เห็นสิ่งที่เข้ามา",
+    "meeting": "StackChan: ใกล้ถึงเวลาประชุม",
 }
 
 
@@ -38,15 +39,16 @@ class EventSink:
         """Send ``event`` unless its type is cooling down; return whether it was sent."""
         now = time.monotonic() if now is None else now
         kind = event.get("type", "event")
-        if now - self._last.get(kind, -float("inf")) < self.cooldown_s:
+        key = event.get("key", kind)  # e.g. one key per meeting reminder, so two meetings both get through
+        if now - self._last.get(key, -float("inf")) < self.cooldown_s:
             return False
-        self._last[kind] = now
+        self._last[key] = now
         payload = {
-            **{k: v for k, v in event.items() if k != "time"},  # controller clock, meaningless outside
+            **{k: v for k, v in event.items() if k not in ("time", "key")},  # internal fields
             "robot": self.robot,
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "message": MESSAGES.get(kind, kind),
         }
+        payload.setdefault("message", MESSAGES.get(kind, kind))
         if brain:
             payload["brain"] = brain
         body = json.dumps(payload, ensure_ascii=False)
