@@ -1,0 +1,5 @@
+numpy>=1.24
+pandas>=2.0
+nengo>=4.0
+scipy>=1.10        # optional, speeds up the Nengo builder
+paho-mqtt>=2.0
