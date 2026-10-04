@@ -108,7 +108,8 @@ class OpenAICompatLLM(LLM):
     """Chat Completions API: api.openai.com or any compatible server (set ``base_url``)."""
 
     def __init__(self, model: str, base_url: str | None = None, api_key: str | None = None,
-                 max_tokens: int = 1024, supports_images: bool = True, timeout: float = 60.0):
+                 max_tokens: int = 4096, supports_images: bool = True, timeout: float = 120.0,
+                 extra_body: dict | None = None):
         import openai
 
         # local servers (Ollama, vLLM, LM Studio) accept any key
@@ -117,6 +118,9 @@ class OpenAICompatLLM(LLM):
         self.model = model
         self.max_tokens = max_tokens
         self.supports_images = supports_images
+        # server-specific options, e.g. {"chat_template_kwargs": {"enable_thinking": false}} for
+        # Qwen3 on vLLM: reasoning models otherwise spend the token budget thinking
+        self.extra_body = extra_body or {}
 
     def ask(self, system, history, text, tools=None, image_jpeg=None, max_steps=4):
         if image_jpeg and self.supports_images:
@@ -133,8 +137,13 @@ class OpenAICompatLLM(LLM):
                 "name": t.name, "description": t.description, "parameters": t.parameters}} for t in tools]
         for _ in range(max_steps):
             response = self.client.chat.completions.create(model=self.model, messages=messages,
-                                                           max_tokens=self.max_tokens, **params)
-            msg = response.choices[0].message
+                                                           max_tokens=self.max_tokens, extra_body=self.extra_body,
+                                                           **params)
+            choice = response.choices[0]
+            msg = choice.message
+            if choice.finish_reason == "length" and not msg.content and not msg.tool_calls:
+                log.warning("LLM used all %d tokens without answering (reasoning?); raise --llm-max-tokens "
+                            "or turn thinking off via --llm-extra-body", self.max_tokens)
             calls = msg.tool_calls or []
             if not calls:
                 return (msg.content or "").strip()
@@ -156,14 +165,17 @@ class OpenAICompatLLM(LLM):
 
 
 def make_llm(provider: str, model: str | None = None, base_url: str | None = None,
-             api_key: str | None = None, vision: bool = True) -> LLM | None:
+             api_key: str | None = None, vision: bool = True, max_tokens: int | None = None,
+             extra_body: dict | None = None) -> LLM | None:
     """Build a provider from CLI options; ``none`` disables the cortex layer."""
     if provider == "none":
         return None
     if provider == "anthropic":
-        return AnthropicLLM(model or DEFAULT_ANTHROPIC_MODEL, api_key=api_key, base_url=base_url)
+        return AnthropicLLM(model or DEFAULT_ANTHROPIC_MODEL, api_key=api_key, base_url=base_url,
+                            **({"max_tokens": max_tokens} if max_tokens else {}))
     if provider == "openai":
         if not model:
             raise ValueError("--llm-model is required for an OpenAI-compatible provider")
-        return OpenAICompatLLM(model, base_url=base_url, api_key=api_key, supports_images=vision)
+        return OpenAICompatLLM(model, base_url=base_url, api_key=api_key, supports_images=vision,
+                               extra_body=extra_body, **({"max_tokens": max_tokens} if max_tokens else {}))
     raise ValueError(f"unknown LLM provider {provider!r}")

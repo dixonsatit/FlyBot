@@ -53,11 +53,11 @@ class StackChanBridge:
         self._jpeg_ready = threading.Event()
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
-                      vision: bool = False) -> None:
+                      vision: bool = False, vision_llm=None) -> None:
         self.cortex = Cortex(llm, self.controller, lambda topic, body: self.client.publish(topic, body, qos=1),
                              self.base, emit_event=lambda ev: self.events.emit(ev),
                              snapshot=self.snapshot if vision else None, narrate=narrate,
-                             narrate_cooldown_s=narrate_cooldown_s)
+                             narrate_cooldown_s=narrate_cooldown_s, vision_llm=vision_llm)
 
     def snapshot(self, timeout: float) -> bytes | None:
         """Ask the robot for one JPEG frame (called from the cortex thread)."""
@@ -145,6 +145,10 @@ def main(argv: list[str] | None = None) -> None:
                                                "(default ANTHROPIC_API_KEY / OPENAI_API_KEY)")
     llm.add_argument("--llm-vision", action="store_true",
                      help="send a camera JPEG to the LLM on presence / on request (privacy: images leave the robot)")
+    llm.add_argument("--llm-max-tokens", type=int, help="output token cap (default 2048 Claude / 4096 OpenAI-compatible)")
+    llm.add_argument("--llm-extra-body", help="JSON merged into OpenAI-compatible requests, e.g. "
+                                              "'{\"chat_template_kwargs\": {\"enable_thinking\": false}}' (Qwen3 on vLLM)")
+    llm.add_argument("--llm-vision-model", help="separate model for images (same provider/endpoint/key)")
     llm.add_argument("--no-narrate", action="store_true")
     llm.add_argument("--narrate-cooldown", type=float, default=20.0)
     ap.add_argument("--set", action="append", metavar="KEY=VALUE",
@@ -166,8 +170,12 @@ def main(argv: list[str] | None = None) -> None:
     log.info("Personality %s | looming LPLC2=%.2f LC4=%.2f", args.personality, looming.lplc2, looming.lc4)
     try:
         api_key = os.environ.get(args.llm_api_key_env) if args.llm_api_key_env else None
-        model = make_llm(args.llm, args.llm_model, args.llm_base_url, api_key, vision=args.llm_vision)
-    except ValueError as e:
+        extra_body = json.loads(args.llm_extra_body) if args.llm_extra_body else None
+        llm_options = dict(max_tokens=args.llm_max_tokens, extra_body=extra_body)
+        model = make_llm(args.llm, args.llm_model, args.llm_base_url, api_key, vision=args.llm_vision, **llm_options)
+        vision_model = (make_llm(args.llm, args.llm_vision_model, args.llm_base_url, api_key, **llm_options)
+                        if args.llm_vision and args.llm_vision_model else None)
+    except ValueError as e:  # includes invalid --llm-extra-body JSON
         ap.error(str(e))
     bridge = StackChanBridge(BrainController(cfg, gains=gains, looming=looming), args.host, args.port,
                              args.base_topic, args.rate, args.username, args.password, args.webhook,
@@ -175,7 +183,7 @@ def main(argv: list[str] | None = None) -> None:
     if model:
         log.info("LLM cortex: %s %s%s", args.llm, getattr(model, "model", ""), " + vision" if args.llm_vision else "")
         bridge.attach_cortex(model, narrate=not args.no_narrate, narrate_cooldown_s=args.narrate_cooldown,
-                             vision=args.llm_vision)
+                             vision=args.llm_vision, vision_llm=vision_model)
         bridge.cortex.personality = args.personality
     bridge.run()
 

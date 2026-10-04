@@ -170,6 +170,21 @@ python -m flybot.mqtt_bridge ... --llm openai --llm-base-url <base URL ของ
   ถ้าใช้ในโรงพยาบาลให้ใช้โมเดลที่รันในเครือข่ายภายใน (เช่น Ollama ที่รองรับภาพ) หรือผ่านการพิจารณา PDPA ก่อน
 - ฟอนต์บอลลูนของ M5GFX ไม่มีอักษรไทย จึงให้ LLM เขียนข้อความบนจอเป็นภาษาอังกฤษสั้น ๆ ส่วนภาษาไทยออกทาง MQTT
 - โมเดลฝั่ง OpenAI-compatible ต้องรองรับ tool/function calling (และรองรับภาพถ้าเปิด `--llm-vision`)
+- โมเดลที่ "คิดก่อนตอบ" (เช่น Qwen3 บน vLLM) อาจใช้ token หมดไปกับการคิดจนไม่มีคำตอบ (log จะเตือน)
+  ปิดการคิดด้วย `--llm-extra-body '{"chat_template_kwargs": {"enable_thinking": false}}'` หรือเพิ่ม `--llm-max-tokens`
+- ถ้า server ให้ภาพได้เฉพาะบางโมเดล ใช้ `--llm-vision-model` แยกโมเดลสำหรับดูภาพ (endpoint/key เดียวกัน)
+- คำบรรยายแนบ "สาเหตุจริง" ของแต่ละเหตุการณ์ (`CAUSES` ใน `flybot/cortex.py`) และ `set_personality` คืนค่าที่เปลี่ยนจริง
+  ให้ LLM อธิบายตามข้อเท็จจริงแทนการเดา
+
+ตัวอย่าง (ทดสอบแล้วกับ server vLLM ภายในที่มี Qwen3.5-122B แบบตัวอักษร + Qwen3.8-27B ที่รับภาพได้):
+
+```bash
+export QWEN_API_KEY=...
+python -m flybot.mqtt_bridge --host 127.0.0.1 --data-dir data/codex \
+    --llm openai --llm-base-url https://<server>/v1 --llm-api-key-env QWEN_API_KEY \
+    --llm-model qwen3.5-122b --llm-extra-body '{"chat_template_kwargs": {"enable_thinking": false}}' \
+    --llm-vision --llm-vision-model qwen3.8-27b
+```
 
 ## หลักการของแต่ละวงจร
 

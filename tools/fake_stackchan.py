@@ -16,6 +16,7 @@ ap.add_argument("--host", default="localhost")
 ap.add_argument("--port", type=int, default=1883)
 ap.add_argument("--base-topic", default="stackchan")
 ap.add_argument("--duration", type=float, default=30.0)
+ap.add_argument("--snapshot-file", help="JPEG sent when the bridge asks for a snapshot (LLM vision)")
 args = ap.parse_args()
 
 state = {"pan": 0.0}
@@ -28,8 +29,9 @@ def on_message(client, userdata, msg):
     if msg.topic.endswith("/chat/out"):
         print("CHAT", msg.payload.decode())
         return
-    if msg.topic.endswith("/snapshot/request"):  # no camera here: send a placeholder "JPEG"
-        client.publish(f"{args.base_topic}/snapshot", b"\xff\xd8fake-jpeg\xff\xd9")
+    if msg.topic.endswith("/snapshot/request"):  # no camera here: a file, or placeholder bytes
+        jpeg = open(args.snapshot_file, "rb").read() if args.snapshot_file else b"\xff\xd8fake-jpeg\xff\xd9"
+        client.publish(f"{args.base_topic}/snapshot", jpeg)
         return
     cmd = json.loads(msg.payload)
     state["pan"] = cmd["servo"]["pan_angle"]
