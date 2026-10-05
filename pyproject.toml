@@ -10,6 +10,7 @@ fast = ["scipy>=1.10"]
 dev = ["pytest>=7", "pillow>=10"]  # pillow: tools/make_vlw_font.py
 llm = ["anthropic>=1.11", "openai>=3"]
 calendar = ["icalendar>=6", "recurring-ical-events>=3", "tzdata"]
+his = ["pymysql>=1.1", "tzdata"]
 
 [project.scripts]
 flybot-mqtt = "flybot.mqtt_bridge:main"

@@ -850,3 +850,49 @@ def test_twin_replays_aggregated_his_arrivals(tmp_path):
     assert "Q4U" in state["assumptions"][0]
     # every world sees the same arrivals; the no-action world is never better than the best agent
     assert state["mean_index"]["none"] >= min(state["mean_index"]["fly"], state["mean_index"]["autopilot"])
+
+
+class FakeQ4U:
+    """Stands in for the Q4U database: X-RAY gets a 3/min rush 08:00-09:00."""
+
+    def __init__(self):
+        self.calls = []
+
+    def points(self, today):
+        return [(10, "X-RAY"), (12, "ห้องยา")]
+
+    def capacities(self, today):
+        return {10: 1.0, 12: 0.5}
+
+    def arrivals(self, day, from_minute, to_minute):
+        self.calls.append((day, from_minute, to_minute))
+        return {10: {m: 3 for m in range(max(from_minute, 8 * 60), min(to_minute, 9 * 60))}}
+
+
+def test_twin_follows_live_q4u_counts():
+    from datetime import date
+    from flybot.twin import LiveFeed, Twin
+    clock = {"now": (date(2026, 10, 5), 9 * 60 + 30)}
+    source = FakeQ4U()
+    twin = Twin(None, minute=6 * 60, live=LiveFeed(source, clock=lambda: clock["now"]))
+    steps = 0
+    while twin.live_step():
+        steps += 1
+    assert steps == 3 * 60 + 29  # up to 09:28, one minute behind the wall clock
+    assert len(source.calls) == 1  # the catch-up is a single query
+    state = twin.state()
+    assert state["live"] and state["clock"].startswith("สด 2026-10-05 09:29")
+    assert next(d for d in state["depts"] if d["name"] == "X-RAY")["queue"] > 0
+    clock["now"] = (date(2026, 10, 5), 9 * 60 + 31)
+    assert twin.live_step() and not twin.live_step()
+    assert source.calls[-1] == (date(2026, 10, 5), 9 * 60 + 29, 9 * 60 + 30)
+    clock["now"] = (date(2026, 10, 6), 5)  # midnight: a fresh day with empty queues
+    assert twin.live_step()
+    assert twin.state()["clock"].startswith("สด 2026-10-06 06:00") and not twin.live_step()
+
+
+def test_parse_his_dsn():
+    from flybot.his import parse_dsn
+    p = parse_dsn("mysql://flybot_ro:p%40ss@db.local:3307/app_queue")
+    assert (p["user"], p["password"], p["host"], p["port"], p["database"]) == ("flybot_ro", "p@ss", "db.local", 3307, "app_queue")
+    assert parse_dsn("mysql://u:p@h")["database"] == "app_queue"

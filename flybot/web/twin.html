@@ -133,7 +133,7 @@ async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
     $("clock").textContent = s.clock;
-    $("datasrc").textContent = s.data ? `คิวจริง Q4U วันที่ ${s.data.date} (นับรวม)` : "คิวสมมติ";
+    $("datasrc").textContent = s.live ? "คิวสด Q4U (นับรวม ช้า 1 นาที)" : s.data ? `คิวจริง Q4U วันที่ ${s.data.date} (นับรวม)` : "คิวสมมติ";
     drawMap(s); drawChart(s);
     const f = s.agents.fly || {}, a = s.agents.autopilot, m = s.mean_index;
     $("stats").innerHTML = [

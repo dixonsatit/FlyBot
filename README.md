@@ -186,6 +186,10 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
   จึงประมาณจากช่วงที่คนมามากของจุดนั้น — คิวในภาพเป็นค่าประมาณ; ไฟล์อยู่ใน `data/` (ไม่เข้า git)
   ตัวอย่าง query: `SELECT service_point_id, HOUR(time_serv)*60+MINUTE(time_serv) AS minute, COUNT(*) FROM
   app_queue.q4u_queue WHERE date_serv = ? AND (is_cancel IS NULL OR is_cancel != 'Y') GROUP BY 1, 2`
+- **โหมดสด** `--live` (ต้องมี `pip install -e ".[his]"`): ดึงจำนวนผู้มารับบริการวันนี้จาก Q4U ทุก 1 นาที
+  (ช้ากว่าจริง 1 นาที) เวลาในโลกจำลองเดินตามนาฬิกาจริง เริ่มไล่จาก 06:00 แล้วตามให้ทัน ขึ้นวันใหม่ล้างคิว;
+  ความเร็วให้บริการประมาณจากข้อมูลย้อนหลัง 4 สัปดาห์ การเชื่อมต่อมาจาก env `FLYBOT_HIS_DSN=mysql://user:pass@host:3306/app_queue`
+  — ใช้บัญชีอ่านอย่างเดียวที่เห็นแค่ `q4u_queue` กับ `q4u_service_points` (query ทั้งหมดเป็น `COUNT(*) ... GROUP BY`)
 - ทุกตัว (แมลงหวี่/autopilot) ใช้กฎเดียวกัน: อยู่ที่จุดที่เพิ่งช่วย 10 นาที และเกาะนิ่งเมื่อไม่มีจุดวิกฤต (< 0.2)
   ระยะบินจึงนับเฉพาะตอนบินจริง และสมองไม่ต้องรันตอนพัก
 
@@ -198,6 +202,13 @@ kubectl -n flybot run brain-loader --image=busybox --restart=Never --overrides='
 kubectl -n flybot cp data/codex/wholebrain.npz brain-loader:/data/wholebrain.npz
 kubectl -n flybot cp data/his/q4u-2026-10-02.json brain-loader:/data/q4u-2026-10-02.json   # ถ้าใช้ --replay
 kubectl -n flybot delete pod brain-loader && kubectl -n flybot rollout restart deploy/flybot-twin
+```
+
+โหมดสดบน K8s: เก็บ DSN เป็น Secret แล้ว patch ใน overlay ของไซต์ให้ command ใช้ `--live` และ env
+`FLYBOT_HIS_DSN` จาก `secretKeyRef` (ต้องให้ pod ต่อถึง MySQL ของ HIS ได้)
+
+```bash
+kubectl -n flybot create secret generic flybot-his --from-file=dsn=his.key   # his.key = mysql://flybot_ro:...@host:3306/app_queue
 ```
 
 ## รันบน Kubernetes

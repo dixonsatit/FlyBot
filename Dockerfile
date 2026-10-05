@@ -10,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
 WORKDIR /app
 COPY pyproject.toml ./
 COPY flybot ./flybot
-RUN pip install ".[llm,calendar]" && useradd --uid 10001 --no-create-home flybot
+RUN pip install ".[llm,calendar,his]" && useradd --uid 10001 --no-create-home flybot
 # nengo keeps a decoder cache under $XDG_CACHE_HOME; /tmp is the only writable path (emptyDir in K8s)
 USER 10001
 

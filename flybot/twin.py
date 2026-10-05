@@ -161,6 +161,70 @@ class ReplayHospital(Hospital):
             d.queue = max(0.0, d.queue + self.arrivals[d.id][m] - d.capacity_per_min(minute))
 
 
+class LiveFeed:
+    """Today's per-minute arrivals from Q4U, fetched once and shared by every world."""
+
+    LAG_MIN = 1  # tickets of a minute may be written a little after it ends; read it one minute later
+
+    def __init__(self, source, clock=None):
+        from .his import now_minute
+        self.source, self.clock = source, clock or now_minute
+        self.day = None
+        self.cache: dict[int, dict[int, int]] = {}
+        self.fetched_to = 0
+
+    def arrivals(self, day, minute: int) -> dict[int, int]:
+        """{service point: tickets} in ``minute`` of ``day`` (only call for minutes already over)."""
+        if day != self.day:
+            self.day, self.cache, self.fetched_to = day, {}, 0
+        if minute >= self.fetched_to:  # one query covers everything up to now (fast catch-up at start)
+            today, now = self.clock()
+            upto = max(minute + 1, now - self.LAG_MIN if today == day else 24 * 60)
+            for sp, per_min in self.source.arrivals(day, self.fetched_to, upto).items():
+                self.cache.setdefault(sp, {}).update(per_min)
+            self.fetched_to = upto
+        return {sp: per_min.get(minute, 0) for sp, per_min in self.cache.items()}
+
+
+class LiveHospital(Hospital):
+    """Live arrivals from the Q4U queue system (aggregate counts); capacities from the past 4 weeks."""
+
+    COLUMNS = 5
+
+    def __init__(self, feed: LiveFeed, day):
+        self.feed, self.day = feed, day
+        self.source, self.date = "app_queue.q4u_queue (live, counts per service point per minute)", str(day)
+        points = feed.source.points(day)
+        caps = feed.source.capacities(day)
+        rows = max(1, math.ceil(len(points) / self.COLUMNS))
+        self.depts = []
+        for i, (sp, name) in enumerate(points):
+            col, row = i % self.COLUMNS, i // self.COLUMNS
+            x = 20 + col * (MAP_W - 40) / max(1, self.COLUMNS - 1)
+            y = 20 + row * (MAP_H - 40) / max(1, rows - 1)
+            self.depts.append(Dept(str(sp), name, x, y, 4, 4.0 / caps.get(sp, 0.1), 0.0))
+        self.rng = np.random.default_rng(0)
+        self.surge = {}
+
+    def clone(self) -> "LiveHospital":
+        h = LiveHospital.__new__(LiveHospital)
+        h.feed, h.day, h.source, h.date, h.rng, h.surge = self.feed, self.day, self.source, self.date, self.rng, {}
+        h.depts = [Dept(**{k: getattr(d, k) for k in d.__dataclass_fields__}) for d in self.depts]
+        return h
+
+    def step(self, minute: float) -> None:
+        m = int(minute) % (24 * 60)
+        arrivals = self.feed.arrivals(self.day, m)
+        for d in self.depts:
+            d.queue = max(0.0, d.queue + arrivals.get(int(d.id), 0) - d.capacity_per_min(minute))
+
+
+LIVE_ASSUMPTIONS = [
+    "จำนวนผู้มารับบริการเป็นข้อมูลสดจากระบบคิว Q4U ทุก 1 นาที (ช้ากว่าจริง 1 นาที, นับรวมต่อจุดบริการ ไม่มีข้อมูลรายบุคคล)",
+    "ตำแหน่งบนแผนผังเป็นการจัดวางสมมติ ไม่ใช่ตำแหน่งจริงของห้อง",
+    "ความเร็วในการให้บริการประมาณจากข้อมูลย้อนหลัง 4 สัปดาห์ของแต่ละจุด — คิวในภาพเป็นค่าประมาณ ไม่ใช่จำนวนคนที่รออยู่จริง",
+]
+
 REPLAY_ASSUMPTIONS = [
     "จำนวนผู้มารับบริการรายนาทีเป็นข้อมูลจริงจากระบบคิว Q4U (นับรวมต่อจุดบริการ ไม่มีข้อมูลรายบุคคล) เล่นซ้ำทั้งวัน",
     "ตำแหน่งบนแผนผังเป็นการจัดวางสมมติ ไม่ใช่ตำแหน่งจริงของห้อง",
@@ -272,16 +336,24 @@ def autopilot_turn(agent: Agent, depts: list[Dept]) -> float:
 
 class Twin:
     def __init__(self, navigator: FlyNavigator | None, seed: int = 1, minute: float = 7 * 60,
-                 replay: str | None = None):
-        self.minute = minute
-        base = ReplayHospital(replay) if replay else Hospital(seed)
-        self.replay = base if replay else None
-        self.worlds = {"fly": base, "autopilot": base.clone(), "none": base.clone()}
-        self.agents = {"fly": Agent("แมลงหวี่"), "autopilot": Agent("autopilot")}
-        self.nav = navigator
-        self.history: list[dict] = []
-        self.log: list[dict] = []
+                 replay: str | None = None, live: LiveFeed | None = None):
+        self.nav, self.live = navigator, live
         self.lock = threading.Lock()
+        if live is not None:
+            base = LiveHospital(live, live.clock()[0])
+        else:
+            base = ReplayHospital(replay) if replay else Hospital(seed)
+        self._start(base, minute)
+        self.replay = base if (replay or live is not None) else None
+
+    def _start(self, base: Hospital, minute: float) -> None:
+        with self.lock:
+            self.minute = minute
+            self.replay = base
+            self.worlds = {"fly": base, "autopilot": base.clone(), "none": base.clone()}
+            self.agents = {"fly": Agent("แมลงหวี่"), "autopilot": Agent("autopilot")}
+            self.history: list[dict] = []
+            self.log: list[dict] = []
 
     DWELL_MIN = 10.0  # minutes spent at a department after acting there
     REST_BELOW = 0.2  # no department this bad: stay put instead of patrolling
@@ -316,6 +388,8 @@ class Twin:
 
     def clock(self) -> str:
         m = int(self.minute) % (24 * 60)
+        if self.live is not None:
+            return f"สด {self.replay.date} {m // 60:02d}:{m % 60:02d}"
         return f"วัน {int(self.minute // 1440) + 1} {m // 60:02d}:{m % 60:02d}"
 
     def state(self) -> dict:
@@ -334,9 +408,32 @@ class Twin:
                 "history": self.history[-240:], "log": self.log[-12:],
                 "brain": self.nav.last if self.nav else None,
                 "calibration": self.nav.calibration if self.nav else None,
-                "assumptions": (REPLAY_ASSUMPTIONS + ASSUMPTIONS[1:]) if self.replay else ASSUMPTIONS,
+                "assumptions": ((LIVE_ASSUMPTIONS if self.live else REPLAY_ASSUMPTIONS) + ASSUMPTIONS[1:])
+                               if self.replay else ASSUMPTIONS,
+                "live": self.live is not None,
                 "data": ({"source": self.replay.source, "date": self.replay.date} if self.replay else None),
             }
+
+    def live_step(self) -> bool:
+        """Advance one minute if the wall clock allows; False when caught up."""
+        day, now = self.live.clock()
+        if self.replay.day != day:  # a new day: fresh points, capacities and empty queues
+            self._start(LiveHospital(self.live, day), 6 * 60)
+            return True
+        if int(self.minute) % (24 * 60) >= now - self.live.LAG_MIN:
+            return False
+        self.tick()
+        return True
+
+    def run_live(self) -> None:
+        """Follow the wall clock, catching up from 06:00 at start."""
+        while True:
+            try:
+                if not self.live_step():
+                    time.sleep(5)
+            except Exception:
+                log.exception("live tick failed (database?)")
+                time.sleep(30)
 
     def run_forever(self, tick_s: float = 0.0) -> None:
         """One simulated minute per tick; ``tick_s`` is the minimum wall time per tick (pacing)."""
@@ -386,11 +483,24 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--no-brain", action="store_true", help="skip the fly (autopilot and no-action worlds only)")
     ap.add_argument("--replay", help="JSON of real per-minute arrivals per service point (aggregated HIS queue counts)")
+    ap.add_argument("--live", action="store_true",
+                    help="live Q4U arrivals; connection from $FLYBOT_HIS_DSN (mysql://user:pass@host:port/app_queue)")
     ap.add_argument("--tick-seconds", type=float, default=1.0,
                     help="minimum wall seconds per simulated minute (0 = as fast as the brain runs)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     nav = None if args.no_brain else FlyNavigator(args.data_dir)
+    if args.live:
+        import os
+        from .his import Q4USource
+        dsn = os.environ.get("FLYBOT_HIS_DSN")
+        if not dsn:
+            ap.error("--live needs FLYBOT_HIS_DSN")
+        twin = Twin(nav, minute=6 * 60, live=LiveFeed(Q4USource(dsn)))
+        serve(twin, args.port)
+        log.info("Twin (live Q4U) on http://0.0.0.0:%d", args.port)
+        twin.run_live()
+        return
     twin = Twin(nav, seed=args.seed, minute=6 * 60 if args.replay else 7 * 60, replay=args.replay)
     serve(twin, args.port)
     log.info("Twin on http://0.0.0.0:%d", args.port)
