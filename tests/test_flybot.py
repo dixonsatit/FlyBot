@@ -829,3 +829,24 @@ def test_hospital_twin_without_brain_is_deterministic():
     # the three worlds share arrivals: with no agent acting yet they start identical
     assert a.history[0]["fly"] == a.history[0]["autopilot"] == a.history[0]["none"]
     assert "สมมติ" in " ".join(sa["assumptions"])
+
+
+def test_twin_replays_aggregated_his_arrivals(tmp_path):
+    import json as _json
+    from flybot.twin import Twin
+    arrivals = {str(m): 3 for m in range(8 * 60, 9 * 60)}  # a 3/min rush 08:00-09:00
+    arrivals.update({str(m): 1 for m in range(9 * 60, 15 * 60)})
+    path = tmp_path / "replay.json"
+    path.write_text(_json.dumps({"date": "2026-10-02", "source": "test",
+                                 "points": [{"sp": 10, "name": "X-RAY", "arrivals": arrivals},
+                                            {"sp": 12, "name": "ห้องยา", "arrivals": {"600": 2}}]}))
+    twin = Twin(None, replay=str(path), minute=6 * 60)
+    for _ in range(3 * 60 + 30):  # until 09:30
+        twin.tick()
+    state = twin.state()
+    xray = next(d for d in state["depts"] if d["name"] == "X-RAY")
+    assert xray["queue"] > 0  # the rush exceeds the busy-hour capacity
+    assert state["data"]["date"] == "2026-10-02"
+    assert "Q4U" in state["assumptions"][0]
+    # every world sees the same arrivals; the no-action world is never better than the best agent
+    assert state["mean_index"]["none"] >= min(state["mean_index"]["fly"], state["mean_index"]["autopilot"])

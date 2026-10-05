@@ -181,7 +181,13 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
 - ไม่กระตุ้น = DN เงียบ; ตาซ้าย → DNa02/DNa01 ขวาทำงานมากกว่า, ตาขวา → กลับข้าง (มีความเอียงไปขวาเมื่อกระตุ้นสองตา)
 - ต่ำกว่า ~100 Hz สัญญาณไม่ถึง DN; ตาขวาต้อง ~240 Hz จึงได้ทิศถูกแน่นอน → ตัวแปลงจึงส่งแค่ "ทิศ" ไม่ส่งความรุนแรง
 - ถ้ากระตุ้นตาข้างเดียวตลอดแมลงจะบินวนรอบเป้า จึงมี "โซนตรงหน้า" ±20° ให้บินตรง
-- แผนผัง/คิวเป็นข้อมูลสมมติ — ข้อมูลจริง (เช่น คิวรายแผนกจาก HIS) ยังไม่ได้ต่อ
+- **โหมดข้อมูลจริง** `--replay data/his/<วัน>.json`: เล่นซ้ำจำนวนผู้มารับบริการ**รายนาทีต่อจุดบริการ**จากระบบคิว Q4U
+  (`app_queue.q4u_queue`, นับรวมเท่านั้น ไม่มี HN/VN/ชื่อ) ความเร็วให้บริการไม่มีในข้อมูล (หลายจุดไม่บันทึกว่าเสร็จ)
+  จึงประมาณจากช่วงที่คนมามากของจุดนั้น — คิวในภาพเป็นค่าประมาณ; ไฟล์อยู่ใน `data/` (ไม่เข้า git)
+  ตัวอย่าง query: `SELECT service_point_id, HOUR(time_serv)*60+MINUTE(time_serv) AS minute, COUNT(*) FROM
+  app_queue.q4u_queue WHERE date_serv = ? AND (is_cancel IS NULL OR is_cancel != 'Y') GROUP BY 1, 2`
+- ทุกตัว (แมลงหวี่/autopilot) ใช้กฎเดียวกัน: อยู่ที่จุดที่เพิ่งช่วย 10 นาที และเกาะนิ่งเมื่อไม่มีจุดวิกฤต (< 0.2)
+  ระยะบินจึงนับเฉพาะตอนบินจริง และสมองไม่ต้องรันตอนพัก
 
 บน K8s (`deploy/k8s/twin/`, NodePort 31890): ไฟล์ `wholebrain.npz` สร้างจากข้อมูล FlyWire จึงไม่ใส่ใน image สาธารณะ
 คัดลอกขึ้น PVC `flybot-brain-data` ครั้งเดียว:
@@ -190,6 +196,7 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
 kubectl apply -k deploy/k8s/twin            # PVC + twin (pod รอไฟล์จนกว่าจะมี)
 kubectl -n flybot run brain-loader --image=busybox --restart=Never --overrides='{"spec":{"containers":[{"name":"l","image":"busybox","command":["sleep","600"],"volumeMounts":[{"name":"d","mountPath":"/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"flybot-brain-data"}}]}}'
 kubectl -n flybot cp data/codex/wholebrain.npz brain-loader:/data/wholebrain.npz
+kubectl -n flybot cp data/his/q4u-2026-10-02.json brain-loader:/data/q4u-2026-10-02.json   # ถ้าใช้ --replay
 kubectl -n flybot delete pod brain-loader && kubectl -n flybot rollout restart deploy/flybot-twin
 ```
 

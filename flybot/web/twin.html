@@ -43,6 +43,7 @@
   <h1>🏥 Hospital Twin · สมองแมลงหวี่นำทาง</h1>
   <span class="pill" id="clock">-</span>
   <span class="pill">แผนผังสมมติ</span>
+  <span class="pill" id="datasrc">คิวสมมติ</span>
 </header>
 <main>
   <section class="col">
@@ -132,6 +133,7 @@ async function poll() {
   try {
     const s = await (await fetch("/api/state")).json();
     $("clock").textContent = s.clock;
+    $("datasrc").textContent = s.data ? `คิวจริง Q4U วันที่ ${s.data.date} (นับรวม)` : "คิวสมมติ";
     drawMap(s); drawChart(s);
     const f = s.agents.fly || {}, a = s.agents.autopilot, m = s.mean_index;
     $("stats").innerHTML = [
