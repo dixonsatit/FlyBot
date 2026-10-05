@@ -797,3 +797,35 @@ def _http_raw(port, path, data):
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
+
+
+# -- whole brain + hospital twin --------------------------------------------------------
+
+def test_whole_brain_from_codex_files(tmp_path):
+    from flybot.wholebrain import WholeBrain
+    write_codex_csv(synthetic_codex(side="R"), tmp_path)
+    brain = WholeBrain.load(tmp_path)
+    assert (tmp_path / "wholebrain.npz").exists() and brain.n > 0
+    assert WholeBrain.load(tmp_path).n == brain.n  # cached
+    l1 = brain.select(type="L1")
+    mi1 = brain.select(type="Mi1")
+    assert l1 and mi1 and set(brain.sides[list(l1)]) == {"R"}
+    quiet = brain.run(50)
+    assert quiet.sum() == 0  # no input, no spontaneous activity
+    brain.reset()
+    counts = brain.run(100, {l1: 400.0}, probe=mi1)
+    assert counts[list(l1)].sum() > 0  # driven neurons spike
+    assert brain.drive.shape == (len(mi1),)
+
+
+def test_hospital_twin_without_brain_is_deterministic():
+    from flybot.twin import Twin
+    a, b = Twin(None, seed=3), Twin(None, seed=3)
+    for _ in range(300):
+        a.tick()
+        b.tick()
+    sa, sb = a.state(), b.state()
+    assert sa["index"] == sb["index"] and sa["agents"]["autopilot"]["km"] == sb["agents"]["autopilot"]["km"]
+    # the three worlds share arrivals: with no agent acting yet they start identical
+    assert a.history[0]["fly"] == a.history[0]["autopilot"] == a.history[0]["none"]
+    assert "สมมติ" in " ".join(sa["assumptions"])

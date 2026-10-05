@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flybot-brain-data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources:
+    requests: {storage: 1Gi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flybot-twin
+  labels: {app: flybot-twin}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # RWO volume
+  selector:
+    matchLabels: {app: flybot-twin}
+  template:
+    metadata:
+      labels: {app: flybot-twin}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: twin
+          image: flybot
+          command: ["python", "-m", "flybot.twin", "--data-dir", "/data", "--port", "8090", "--tick-seconds", "1"]
+          ports:
+            - {name: http, containerPort: 8090}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:            # one simulated minute per second keeps it near half a core
+            requests: {cpu: 500m, memory: 256Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: brain, mountPath: /data, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: brain
+          persistentVolumeClaim: {claimName: flybot-brain-data}
+        - name: tmp
+          emptyDir: {}
+---
+# Read-only view of simulated data: http://<node IP>:31890
+apiVersion: v1
+kind: Service
+metadata:
+  name: flybot-twin
+spec:
+  type: NodePort
+  selector: {app: flybot-twin}
+  ports:
+    - {name: http, port: 8090, targetPort: http, nodePort: 31890}

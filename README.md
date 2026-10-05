@@ -164,6 +164,35 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
 - **ใช้บริการเสียงร่วมกับ kiosk บน cluster เดียวกัน**: `FLYBOT_TTS_URL=http://wayu-tts.stackchan-interview.svc:7860`,
   `FLYBOT_STT_URL=http://asr-typhoon.stackchan-interview.svc:7871` — ไม่ต้องติดตั้งหรือดึง image private ซ้ำ
 
+## สมองทั้งก้อน + Hospital Twin
+
+`flybot/wholebrain.py` รัน connectome ทั้งหมด (v783: 138,584 เซลล์, 3.66 ล้านการเชื่อมต่อ, 50.7 ล้าน synapse)
+เป็นเซลล์ LIF ตามพารามิเตอร์ของโมเดลสมองแมลงหวี่ทั้งก้อนที่ตีพิมพ์ (Shiu et al. 2024) — ACh กระตุ้น, GABA/Glu ยับยั้ง,
+ไม่เรียนรู้ กระตุ้นด้วย spike Poisson ที่เซลล์รับสัมผัส อ่านผลจากเซลล์สั่งการ (DN) ได้ทั้งจำนวน spike และกระแสสะสม
+ครั้งแรกสร้าง cache `data/codex/wholebrain.npz` (~14 MB, ~7 วินาที) · CPU ของ Mac: ช้ากว่าเวลาจริง ~4 เท่าที่ dt 0.1 ms
+
+`python -m flybot.twin --data-dir data/codex --port 8090` → http://localhost:8090 — โรงพยาบาลจำลองที่แมลงหวี่บินตรวจ:
+1. **ตัวแปลงข้อมูลเข้า (ของเรา)**: จุดวิกฤตด้านซ้าย/ขวา → กระตุ้นตาซ้าย/ขวา (R1-6)
+2. **สมอง (connectome)**: รันทีละ 100 ms อ่านความต่างของ DNa01/DNa02 ขวา−ซ้าย เป็นคำสั่งเลี้ยว (ปรับเทียบตอนเริ่ม)
+3. **ตัดสินใจ (กฎของเรา)**: ถึงแผนกที่วิกฤต → เปิดช่องบริการเพิ่ม 45 นาที
+เทียบ 3 โลกที่ผู้ป่วยมาเหมือนกัน: แมลงหวี่ / autopilot (บินตรงไปจุดแย่สุด) / ไม่มีใครทำอะไร พร้อมกล่องสมมติฐาน/ข้อจำกัด
+
+สิ่งที่วัดได้กับ connectome นี้ (ดูเพิ่มที่ docstring ของ `twin.py`):
+- ไม่กระตุ้น = DN เงียบ; ตาซ้าย → DNa02/DNa01 ขวาทำงานมากกว่า, ตาขวา → กลับข้าง (มีความเอียงไปขวาเมื่อกระตุ้นสองตา)
+- ต่ำกว่า ~100 Hz สัญญาณไม่ถึง DN; ตาขวาต้อง ~240 Hz จึงได้ทิศถูกแน่นอน → ตัวแปลงจึงส่งแค่ "ทิศ" ไม่ส่งความรุนแรง
+- ถ้ากระตุ้นตาข้างเดียวตลอดแมลงจะบินวนรอบเป้า จึงมี "โซนตรงหน้า" ±20° ให้บินตรง
+- แผนผัง/คิวเป็นข้อมูลสมมติ — ข้อมูลจริง (เช่น คิวรายแผนกจาก HIS) ยังไม่ได้ต่อ
+
+บน K8s (`deploy/k8s/twin/`, NodePort 31890): ไฟล์ `wholebrain.npz` สร้างจากข้อมูล FlyWire จึงไม่ใส่ใน image สาธารณะ
+คัดลอกขึ้น PVC `flybot-brain-data` ครั้งเดียว:
+
+```bash
+kubectl apply -k deploy/k8s/twin            # PVC + twin (pod รอไฟล์จนกว่าจะมี)
+kubectl -n flybot run brain-loader --image=busybox --restart=Never --overrides='{"spec":{"containers":[{"name":"l","image":"busybox","command":["sleep","600"],"volumeMounts":[{"name":"d","mountPath":"/data"}]}],"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"flybot-brain-data"}}]}}'
+kubectl -n flybot cp data/codex/wholebrain.npz brain-loader:/data/wholebrain.npz
+kubectl -n flybot delete pod brain-loader && kubectl -n flybot rollout restart deploy/flybot-twin
+```
+
 ## รันบน Kubernetes
 
 `deploy/k8s/` (kustomize) มี bridge + Mosquitto (มีรหัสผ่าน) ให้หุ่นต่อจาก LAN ผ่าน NodePort `31883`
@@ -316,6 +345,8 @@ flybot/events.py           เหตุการณ์ → MQTT + webhook (coold
 flybot/llm.py              ผู้ให้บริการ LLM: Claude (anthropic SDK) / OpenAI-compatible (openai SDK)
 flybot/cortex.py           ชั้น LLM: บรรยาย, แชท + tools, ดูภาพ (thread แยก)
 flybot/meetings.py         อ่านปฏิทิน ICS → เตือนประชุม
+flybot/wholebrain.py       สมองทั้งก้อน (LIF ทั้ง connectome)
+flybot/twin.py             Hospital twin: แมลงหวี่นำทางด้วยสมองทั้งก้อน
 flybot/controller.py       BrainController: sensors → command JSON
 flybot/mqtt_bridge.py      MQTT loop
 flybot/sim.py              ฉากจำลอง (กล้องอุดมคติ)

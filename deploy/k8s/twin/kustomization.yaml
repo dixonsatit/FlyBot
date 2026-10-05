@@ -1,0 +1,11 @@
+# Optional: the hospital digital twin patrolled by the whole fly brain.
+# Needs wholebrain.npz (built from FlyWire Codex data, ~14 MB) on the PVC first - see README.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: flybot
+resources:
+  - twin.yaml
+images:
+  - name: flybot
+    newName: ghcr.io/dixonsatit/flybot
+    newTag: latest

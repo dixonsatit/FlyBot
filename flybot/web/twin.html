@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlyBot Hospital Twin</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1d2330; --muted:#6b7385; --line:#e2e5eb; --fly:#3b6ef6; --auto:#9aa3b5;
+          --none:#d64545; --ok:#1f9d63; --warn:#f0a020; --bad:#d64545; --bar:#eef0f4; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#11141a; --card:#1a1f28; --ink:#e8ebf1; --muted:#9aa3b5; --line:#2a313d; --fly:#6b93ff; --auto:#7d869a;
+            --none:#ff6b6b; --ok:#3cc68a; --warn:#ffb340; --bad:#ff6b6b; --bar:#252b36; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "Sarabun","Noto Sans Thai","Leelawadee UI",Tahoma,system-ui,sans-serif; }
+  header { display:flex; gap:12px; align-items:center; padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  .pill { font-size:13px; padding:2px 10px; border-radius:999px; background:var(--bar); color:var(--muted); font-variant-numeric:tabular-nums; }
+  main { display:grid; grid-template-columns:minmax(360px,1fr) 380px; gap:16px; padding:16px 20px; }
+  @media (max-width: 980px) { main { grid-template-columns:1fr; padding:12px; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--muted); font-weight:600; }
+  .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  canvas { width:100%; height:auto; display:block; border-radius:8px; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .stat { background:var(--bar); border-radius:8px; padding:8px 10px; }
+  .stat .k { font-size:12px; color:var(--muted); } .stat .v { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .legend { display:flex; gap:14px; font-size:13px; color:var(--muted); flex-wrap:wrap; margin-top:6px; }
+  .sw { display:inline-block; width:12px; height:3px; vertical-align:middle; margin-right:5px; border-radius:2px; }
+  .bar { display:grid; grid-template-columns:110px 1fr 60px; gap:8px; align-items:center; font-size:13px; margin:5px 0; }
+  .track { position:relative; height:10px; background:var(--bar); border-radius:5px; overflow:hidden; }
+  .fill { position:absolute; top:0; bottom:0; border-radius:5px; background:var(--fly); transition:all .2s; }
+  .val { text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  ul.assume { margin:0; padding-left:18px; font-size:13px; color:var(--muted); }
+  .hint { font-size:13px; color:var(--muted); margin:6px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏥 Hospital Twin · สมองแมลงหวี่นำทาง</h1>
+  <span class="pill" id="clock">-</span>
+  <span class="pill">แผนผังสมมติ</span>
+</header>
+<main>
+  <section class="col">
+    <div class="card">
+      <h2>แผนผัง (วงกลมใหญ่/แดง = วิกฤต · ✚ = เปิดช่องบริการเพิ่ม)</h2>
+      <canvas id="map" width="900" height="585"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--fly)"></span>แมลงหวี่ (สมองทั้งก้อน)</span>
+        <span><span class="sw" style="background:var(--auto)"></span>autopilot (บินตรงไปจุดแย่สุด)</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>ดัชนีวิกฤตเฉลี่ย เทียบ 3 โลก (ต่ำ = ดี)</h2>
+      <canvas id="chart" width="900" height="220"></canvas>
+      <div class="legend">
+        <span><span class="sw" style="background:var(--fly)"></span>แมลงหวี่</span>
+        <span><span class="sw" style="background:var(--auto)"></span>autopilot</span>
+        <span><span class="sw" style="background:var(--none)"></span>ไม่มีใครทำอะไร</span>
+      </div>
+    </div>
+  </section>
+  <section class="col">
+    <div class="card">
+      <h2>สรุป</h2>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="card">
+      <h2>สมองตอนนี้ (หน้าต่าง 100 ms)</h2>
+      <div id="brain"></div>
+      <p class="hint" id="calib"></p>
+    </div>
+    <div class="card">
+      <h2>สิ่งที่แมลงหวี่ทำ</h2>
+      <table><thead><tr><th>เวลา</th><th>ที่</th><th>action</th><th>กม.</th></tr></thead><tbody id="log"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>สมมติฐาน / ข้อจำกัด</h2>
+      <ul class="assume" id="assume"></ul>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const map = $("map"), mctx = map.getContext("2d"), chart = $("chart"), cctx = chart.getContext("2d");
+
+function drawMap(s) {
+  const sx = map.width / s.map.w, sy = map.height / s.map.h;
+  mctx.clearRect(0, 0, map.width, map.height);
+  mctx.fillStyle = css("--bar"); mctx.fillRect(0, 0, map.width, map.height);
+  for (const d of s.depts) {
+    const c = d.crisis, r = 14 + 26 * Math.min(1.5, c);
+    mctx.fillStyle = c > 0.7 ? css("--bad") : c > 0.35 ? css("--warn") : css("--ok");
+    mctx.globalAlpha = 0.25; mctx.beginPath(); mctx.arc(d.x * sx, d.y * sy, r, 0, 2 * Math.PI); mctx.fill();
+    mctx.globalAlpha = 1; mctx.beginPath(); mctx.arc(d.x * sx, d.y * sy, 6, 0, 2 * Math.PI); mctx.fill();
+    mctx.fillStyle = css("--ink"); mctx.font = "14px sans-serif"; mctx.textAlign = "center";
+    mctx.fillText(`${d.name}${d.extra ? " ✚" : ""}`, d.x * sx, d.y * sy - r - 4);
+    mctx.fillStyle = css("--muted"); mctx.font = "12px sans-serif"; mctx.fillText(`คิว ${d.queue}`, d.x * sx, d.y * sy + r + 14);
+  }
+  for (const [key, color] of [["autopilot", css("--auto")], ["fly", css("--fly")]]) {
+    const a = s.agents[key]; if (!a) continue;
+    mctx.strokeStyle = color; mctx.lineWidth = key === "fly" ? 2.5 : 1.5; mctx.globalAlpha = 0.7; mctx.beginPath();
+    a.trail.forEach(([x, y], i) => i ? mctx.lineTo(x * sx, y * sy) : mctx.moveTo(x * sx, y * sy)); mctx.stroke();
+    mctx.globalAlpha = 1; mctx.save(); mctx.translate(a.x * sx, a.y * sy); mctx.rotate(a.heading * Math.PI / 180);
+    mctx.fillStyle = color; mctx.beginPath(); mctx.moveTo(12, 0); mctx.lineTo(-8, -7); mctx.lineTo(-8, 7); mctx.closePath(); mctx.fill();
+    mctx.restore();
+  }
+}
+function drawChart(s) {
+  const h = s.history, W = chart.width, H = chart.height, pad = 28;
+  cctx.clearRect(0, 0, W, H);
+  if (h.length < 2) return;
+  const max = Math.max(0.2, ...h.flatMap(p => [p.fly, p.autopilot, p.none]));
+  cctx.strokeStyle = css("--line"); cctx.fillStyle = css("--muted"); cctx.font = "12px sans-serif";
+  for (const f of [0, 0.5, 1]) { const y = H - pad - f * (H - 2 * pad); cctx.beginPath(); cctx.moveTo(pad, y); cctx.lineTo(W - 8, y); cctx.stroke(); cctx.fillText((f * max).toFixed(2), 2, y + 4); }
+  for (const [k, c] of [["none", css("--none")], ["autopilot", css("--auto")], ["fly", css("--fly")]]) {
+    cctx.strokeStyle = c; cctx.lineWidth = k === "fly" ? 2.5 : 1.5; cctx.beginPath();
+    h.forEach((p, i) => { const x = pad + i / (h.length - 1) * (W - pad - 8), y = H - pad - p[k] / max * (H - 2 * pad);
+      i ? cctx.lineTo(x, y) : cctx.moveTo(x, y); }); cctx.stroke();
+  }
+}
+function bar(label, v, max, color) {
+  const w = Math.max(0, Math.min(1, v / max)) * 100;
+  return `<div class="bar"><span>${label}</span><span class="track"><span class="fill" style="width:${w}%;background:${color}"></span></span><span class="val">${v}</span></div>`;
+}
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    $("clock").textContent = s.clock;
+    drawMap(s); drawChart(s);
+    const f = s.agents.fly || {}, a = s.agents.autopilot, m = s.mean_index;
+    $("stats").innerHTML = [
+      ["ระยะบินแมลงหวี่", (f.km ?? 0) + " กม."], ["action แมลงหวี่", f.actions ?? 0], ["action autopilot", a.actions],
+      ["ดัชนีเฉลี่ย แมลงหวี่", m.fly], ["ดัชนีเฉลี่ย autopilot", m.autopilot], ["ดัชนีเฉลี่ย ไม่ทำอะไร", m.none],
+    ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    const b = s.brain;
+    $("brain").innerHTML = b ? bar("ตาซ้าย (Hz)", b.left_hz, 180, css("--fly")) + bar("ตาขวา (Hz)", b.right_hz, 180, css("--fly")) +
+      bar("DNa01/02 ซ้าย (mV)", b.drive_l, 30, css("--warn")) + bar("DNa01/02 ขวา (mV)", b.drive_r, 30, css("--warn")) +
+      `<div class="bar"><span>คำสั่งเลี้ยว</span><span></span><span class="val">${b.turn > 0 ? "ขวา" : b.turn < 0 ? "ซ้าย" : "ตรง"} ${Math.abs(b.turn)}°</span></div>`
+      : "<p class='hint'>ไม่ได้เปิดสมอง (--no-brain)</p>";
+    $("calib").textContent = s.calibration ? `ปรับเทียบตอนเริ่ม: กระตุ้นตาซ้าย → ความต่าง R−L ${s.calibration.left_eye} mV, ตาขวา → ${s.calibration.right_eye} mV` : "";
+    $("log").innerHTML = s.log.slice().reverse().map(l => `<tr><td>${l.at}</td><td>${l.dept}</td><td>${l.action}</td><td>${l.km}</td></tr>`).join("")
+      || "<tr><td colspan=4 class='hint'>ยังไม่มี</td></tr>";
+    $("assume").innerHTML = s.assumptions.map(t => `<li>${t}</li>`).join("");
+  } catch (e) { $("clock").textContent = "เชื่อมต่อไม่ได้"; }
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>
