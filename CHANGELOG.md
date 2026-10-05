@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.9.0 (2026-10-05)
+
+### Features
+
+- **twin**: Live Q4U queue counts following the wall clock
+  ([`a592c4c`](https://github.com/dixonsatit/FlyBot/commit/a592c4c612df5eb3e291e102443a08b3ce85da68))
+
+
 ## v0.8.0 (2026-10-05)
 
 ### Features
