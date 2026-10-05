@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.8.0 (2026-10-05)
+
+### Features
+
+- **twin**: Replay real per-minute queue arrivals from Q4U
+  ([`0a92961`](https://github.com/dixonsatit/FlyBot/commit/0a929611e8301e62f1145241017295a38e2117f2))
+
+
 ## v0.7.0 (2026-10-05)
 
 ### Features
