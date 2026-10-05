@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-10-05)
+
+### Features
+
+- **voice**: Thai speech in and out through the hospital's own services
+  ([`16cd641`](https://github.com/dixonsatit/FlyBot/commit/16cd641b706c8a6e77962aa2e6ae84b7aeae07e1))
+
+
 ## v0.5.0 (2026-10-04)
 
 ### Features
