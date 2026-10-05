@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-10-05)
+
+### Features
+
+- **twin**: Hospital digital twin navigated by the whole fly brain
+  ([`96aa4aa`](https://github.com/dixonsatit/FlyBot/commit/96aa4aa7d22d6fea71610659339ca81ef79f124b))
+
+
 ## v0.6.0 (2026-10-05)
 
 ### Features
