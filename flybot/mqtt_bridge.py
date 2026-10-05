@@ -210,6 +210,9 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--dashboard-password", help="HTTP basic auth password (no auth if unset)")
     dash.add_argument("--dashboard-sim", action="store_true",
                       help="start with the simulated robot on (turn off when a real robot is connected)")
+    dash.add_argument("--tts-url", help="Wayu-TTS server for Thai speech, e.g. http://wayu-tts:7860")
+    dash.add_argument("--tts-voice", help="default Wayu voice id (e.g. f_young_clear, m_young_clear)")
+    dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
     llm = ap.add_argument_group("LLM cortex (narration, chat, vision)")
     llm.add_argument("--llm", default="none", choices=["none", "anthropic", "openai"],
                      help="anthropic = Claude API; openai = any OpenAI-compatible endpoint")
@@ -278,8 +281,16 @@ def main(argv: list[str] | None = None) -> None:
         log.info("Meeting reminders: %d calendar(s), %s min before", len(args.calendar), args.remind_minutes)
     if args.dashboard_port:
         from .dashboard import Dashboard
+        tts = None
+        if args.tts_url:
+            from .tts import WayuTTS
+            tts = WayuTTS(args.tts_url, args.tts_voice)
+        stt = None
+        if args.stt_url:
+            from .stt import AsrClient
+            stt = AsrClient(args.stt_url)
         bridge.dashboard = Dashboard(bridge, args.dashboard_port, args.dashboard_user, args.dashboard_password,
-                                     sim=args.dashboard_sim)
+                                     sim=args.dashboard_sim, tts=tts, stt=stt)
         bridge.dashboard.start()
     bridge.run(heartbeat=args.heartbeat)
 

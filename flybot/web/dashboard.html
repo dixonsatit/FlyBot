@@ -240,36 +240,73 @@ function moveTarget(e) {
 }
 $("el").addEventListener("input", () => state && post("/api/sim", { target: { az: state.sim.target.az, el: +$("el").value } }, "err2"));
 
-// ---- Thai speech (Web Speech API, voices installed on this computer) ------------
-let speakOn = false, talking = false, thaiVoices = [];
+// ---- Thai speech: Wayu voices on the server (/api/tts) or this browser's voices --------
+let speakOn = false, talking = false, thaiVoices = [], serverVoices = [], serverDefault = null, audioEl = null;
 const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
                 set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+function fillVoices() {
+  const sel = $("voice"), previous = sel.value;
+  sel.innerHTML = "";
+  if (serverVoices.length) {
+    const g = document.createElement("optgroup"); g.label = "Wayu (เซิร์ฟเวอร์ในโรงพยาบาล)";
+    serverVoices.forEach(v => g.append(new Option(v.name, "wayu:" + v.id))); sel.append(g);
+  }
+  if (thaiVoices.length) {
+    const g = document.createElement("optgroup"); g.label = "เครื่องนี้";
+    thaiVoices.forEach(v => g.append(new Option(v.name.replace(/\s*\(.*\)/, "") +
+      (/Enhanced|Premium/.test(v.name) ? " ★" : ""), "local:" + v.name))); sel.append(g);
+  }
+  // the user's saved choice, else the server's default voice, else whatever was showing
+  const values = [...sel.options].map(o => o.value);
+  const pick = [store.get("flybot-voice"), serverDefault && "wayu:" + serverDefault, previous].find(v => values.includes(v));
+  if (pick) sel.value = pick;
+  sel.style.display = values.length ? "" : "none";
+  $("speak").title = values.length ? "อ่านคำตอบออกเสียงภาษาไทย (ไม่ส่งข้อความออกนอกเครือข่าย)"
+    : "ไม่มีเสียงพูดภาษาไทย: ตั้ง --tts-url (Wayu) หรือติดตั้งเสียงไทยในเครื่อง";
+}
 function loadVoices() {
+  if (!("speechSynthesis" in window)) return;
   thaiVoices = speechSynthesis.getVoices().filter(v => v.lang.replace("_", "-").startsWith("th"))
     .sort((a, b) => (b.localService - a.localService) || (/Enhanced|Premium/.test(b.name) - /Enhanced|Premium/.test(a.name)));
-  const sel = $("voice"), keep = store.get("flybot-voice") || sel.value;
-  sel.innerHTML = ""; thaiVoices.forEach(v => sel.add(new Option(v.name.replace(/\s*\(.*\)/, "") +
-    (/Enhanced|Premium/.test(v.name) ? " ★" : ""), v.name)));
-  if (thaiVoices.some(v => v.name === keep)) sel.value = keep;
-  sel.style.display = thaiVoices.length ? "" : "none";
-  $("speak").title = thaiVoices.length  // voices often arrive after the first call (voiceschanged)
-    ? "อ่านคำตอบออกเสียง (เสียงไทยในเครื่อง ไม่ส่งข้อความออกไปไหน)"
-    : "เครื่องนี้ไม่มีเสียงพูดภาษาไทย (macOS: ตั้งค่า > การช่วยการเข้าถึง > เนื้อหาที่พูด)";
+  fillVoices();  // voices often arrive after the first call (voiceschanged)
 }
 if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-else { $("speak").disabled = true; $("voice").style.display = "none"; }
+fetch("/api/tts/voices").then(r => r.json()).then(d => {
+  serverVoices = d.voices || [];
+  serverDefault = d.default || null;
+  fillVoices();
+}).catch(() => {});
+function stopSpeaking() {
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  if (audioEl) { audioEl.pause(); audioEl = null; }
+  talking = false;
+}
 function setSpeak(on) {
   speakOn = on; $("speak").textContent = on ? "🔊 เสียงเปิด" : "🔇 เสียงปิด"; $("speak").className = on ? "on" : "";
-  if (!on) { speechSynthesis.cancel(); talking = false; }
+  if (!on) stopSpeaking();
 }
 $("speak").onclick = () => { setSpeak(!speakOn); if (speakOn) say("เปิดเสียงแล้วครับ"); };  // the click unlocks audio
-$("voice").onchange = (e) => { store.set("flybot-voice", e.target.value); if (speakOn) { speechSynthesis.cancel(); say("สวัสดีครับ"); } };
-function say(text) {
-  if (!speakOn || !text) return;
-  if (speechSynthesis.pending) return;  // don't pile up a backlog of old lines
-  const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ""));
+$("voice").onchange = (e) => { store.set("flybot-voice", e.target.value); if (speakOn) { stopSpeaking(); say("สวัสดีครับ"); } };
+const clean = (t) => t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "").trim();
+async function say(text) {
+  if (!speakOn || !text || talking) return;  // never pile up a backlog of old lines
+  const choice = $("voice").value || "";
+  if (choice.startsWith("wayu:")) {
+    talking = true;
+    try {
+      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ text: clean(text), voice: choice.slice(5) }) });
+      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
+      const url = URL.createObjectURL(await r.blob());
+      audioEl = new Audio(url);
+      audioEl.onended = audioEl.onerror = () => { talking = false; URL.revokeObjectURL(url); audioEl = null; };
+      await audioEl.play();
+    } catch (e) { talking = false; $("err3").textContent = "เสียงพูด: " + e.message; }
+    return;
+  }
+  const u = new SpeechSynthesisUtterance(clean(text));
   u.lang = "th-TH"; u.rate = 1.0; u.pitch = 1.15;
-  const v = thaiVoices.find(v => v.name === $("voice").value) || thaiVoices[0]; if (v) u.voice = v;
+  const v = thaiVoices.find(v => "local:" + v.name === choice) || thaiVoices[0]; if (v) u.voice = v;
   u.onstart = () => { talking = true; }; u.onend = u.onerror = () => { talking = false; };
   speechSynthesis.speak(u);
 }
@@ -307,17 +344,57 @@ $("personality").onchange = (e) => post("/api/personality", { name: e.target.val
 $("chat").onsubmit = (e) => { e.preventDefault(); const m = $("msg").value.trim(); if (!m) return;
   $("msg").value = ""; post("/api/chat", { text: m }, "err3"); };
 
-// ---- Thai speech input (Chrome's recognizer: the audio is processed by Google) ----
+// ---- Thai speech input -----------------------------------------------------------
+// With an ASR server (--stt-url, the hospital's asr-typhoon) the page records 16 kHz PCM and
+// /api/stt transcribes it inside the network. Without one it falls back to Chrome's
+// recognizer, whose audio goes to Google.
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null;
-if (!Recognition) { $("mic").disabled = true; $("mic").title = "browser นี้ไม่รองรับการพูดแทนพิมพ์ (ใช้ Chrome หรือ Edge)"; }
-$("mic").onclick = () => {
-  if (rec) { rec.stop(); return; }
-  if (!window.isSecureContext) {  // browsers only open the microphone on https:// or localhost
-    $("err3").textContent = "ไมค์ใช้ได้เฉพาะ https หรือ localhost: รัน kubectl -n flybot port-forward svc/flybot-dashboard 8080 แล้วเปิด http://localhost:8080";
-    return;
+let rec = null, recorder = null;
+const MIC_HINT = "พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย";
+function micTitle() {
+  $("mic").title = state && state.stt ? "กดเพื่อพูด กดอีกครั้งเพื่อส่ง (ถอดเสียงด้วย ASR ในโรงพยาบาล)"
+    : Recognition ? "กดแล้วพูด (ใช้ตัวรู้จำเสียงของ Chrome: เสียงถูกส่งไปประมวลผลที่ Google)"
+    : "ไม่มีบริการถอดเสียง: ตั้ง --stt-url หรือใช้ Chrome";
+}
+function sendHeard(text) {
+  if (text && text.trim()) { $("msg").value = ""; post("/api/chat", { text: text.trim() }, "err3"); }
+  else $("err3").textContent = "ไม่ได้ยินเสียงพูด ลองใหม่อีกครั้ง";
+}
+function toPcm16k(chunks, rate) {  // Float32 at the context rate -> Int16 at 16 kHz (linear interpolation)
+  const n = chunks.reduce((a, c) => a + c.length, 0), src = new Float32Array(n);
+  let o = 0; for (const c of chunks) { src.set(c, o); o += c.length; }
+  const ratio = rate / 16000, out = new Int16Array(Math.floor(n / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const x = i * ratio, j = Math.floor(x), f = x - j;
+    const v = Math.max(-1, Math.min(1, (src[j] || 0) * (1 - f) + (src[j + 1] || 0) * f));
+    out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
   }
-  if (speakOn) speechSynthesis.cancel();  // don't let the robot hear itself
+  return out;
+}
+async function recordToAsr() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  const ctx = new AudioContext(), src = ctx.createMediaStreamSource(stream);
+  const proc = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
+  proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(ctx.destination);
+  $("mic").className = "rec"; $("msg").placeholder = "กำลังฟัง… กด 🎤 อีกครั้งเมื่อพูดจบ"; $("err3").textContent = "";
+  const timer = setTimeout(() => recorder && recorder.stop(), 15000);  // the ASR takes at most 60 s
+  recorder = { stop: async () => {
+    clearTimeout(timer); recorder = null;
+    proc.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
+    const rate = ctx.sampleRate; await ctx.close();
+    $("mic").className = ""; $("msg").placeholder = "กำลังถอดเสียง…";
+    try {
+      const r = await fetch("/api/stt", { method: "POST", headers: { "Content-Type": "application/octet-stream" },
+                                          body: toPcm16k(chunks, rate).buffer });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      sendHeard(j.text);
+    } catch (e) { $("err3").textContent = "ถอดเสียงไม่สำเร็จ: " + e.message; }
+    $("msg").placeholder = MIC_HINT;
+  } };
+}
+function recognizeInBrowser() {
   rec = new Recognition(); rec.lang = "th-TH"; rec.interimResults = true; rec.continuous = false;
   let finalText = "";
   rec.onstart = () => { $("mic").className = "rec"; $("err3").textContent = ""; $("msg").placeholder = "กำลังฟัง… พูดได้เลย"; };
@@ -331,11 +408,26 @@ $("mic").onclick = () => {
       "no-speech": "ไม่ได้ยินเสียง ลองใหม่อีกครั้ง", "network": "รู้จำเสียงไม่ได้: ต้องต่ออินเทอร์เน็ต (ใช้บริการของ Google)",
       "audio-capture": "ไม่พบไมค์" }[e.error] || ("รู้จำเสียงผิดพลาด: " + e.error);
   };
-  rec.onend = () => {
-    rec = null; $("mic").className = ""; $("msg").placeholder = "พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย";
-    if (finalText.trim()) { $("msg").value = ""; post("/api/chat", { text: finalText.trim() }, "err3"); }
-  };
+  rec.onend = () => { rec = null; $("mic").className = ""; $("msg").placeholder = MIC_HINT; if (finalText.trim()) sendHeard(finalText); };
   rec.start();
+}
+$("mic").onclick = async () => {
+  if (recorder) return recorder.stop();
+  if (rec) return rec.stop();
+  if (!window.isSecureContext) {  // browsers only open the microphone on https:// or localhost
+    $("err3").textContent = "ไมค์ใช้ได้เฉพาะ https หรือ localhost: รัน kubectl -n flybot port-forward svc/flybot-dashboard 8080 แล้วเปิด http://localhost:8080";
+    return;
+  }
+  if (speakOn) stopSpeaking();  // don't let the robot hear itself
+  try {
+    if (state && state.stt) await recordToAsr();
+    else if (Recognition) recognizeInBrowser();
+    else $("err3").textContent = "ไม่มีบริการถอดเสียง: ตั้ง --stt-url หรือใช้ Chrome";
+  } catch (e) {
+    $("mic").className = "";
+    $("err3").textContent = e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้ไมค์ (อนุญาตที่ไอคอนแถบที่อยู่ของ browser)"
+      : "เปิดไมค์ไม่ได้: " + e.message;
+  }
 };
 
 async function poll() {
@@ -343,6 +435,7 @@ async function poll() {
     const r = await fetch("/api/state?since=" + since); state = await r.json();
     state.feed.forEach(addFeed); if (state.feed.length) since = state.feed[state.feed.length - 1].id;
     firstPoll = false;
+    micTitle();
     $("conn").textContent = state.connected ? "MQTT เชื่อมต่อแล้ว" : "MQTT ไม่ได้เชื่อมต่อ";
     $("conn").className = "pill " + (state.connected ? "ok" : "off");
     $("llm").textContent = state.llm ? "LLM เปิด" : "LLM ปิด"; $("llm").className = "pill " + (state.llm ? "ok" : "");

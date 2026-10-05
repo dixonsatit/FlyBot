@@ -150,10 +150,19 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
 - **โลกจำลอง** (`--dashboard-sim` หรือสวิตช์มุมขวาบน): ใช้ `flybot.plant` แทนหุ่น — ลากวัตถุ, ให้วัตถุขยับเอง,
   หมุนตัวหุ่น, ลูบหัว, ของพุ่งเข้าหา; **ปิดเมื่อต่อหุ่นจริง** ไม่งั้นสองแหล่งจะป้อนสมองตัวเดียวกัน
 - **สั่ง**: นิสัย, เกม, หันซ้าย/ขวา/เงย; **แชทกับ LLM** + ฟีดเหตุการณ์
-- **🔊 พูด**: อ่านคำตอบ/คำบรรยาย/เตือนประชุมด้วยเสียงไทยในเครื่อง (Web Speech API, ไม่ส่งข้อความออก) ปากหุ่นขยับตาม
-- **🎤 ฟัง**: พูดแทนพิมพ์ด้วยตัวรู้จำเสียงของ Chrome — **เสียงถูกส่งไป Google** และใช้ได้เฉพาะ `https` หรือ `localhost`
-  (บน K8s: `kubectl -n flybot port-forward svc/flybot-dashboard 8080` แล้วเปิด http://localhost:8080)
-  จะเปลี่ยนไปใช้บริการเสียงของระบบซักประวัติภายในเมื่อมี API
+- **🔊 พูด**: อ่านคำตอบ/คำบรรยาย/เตือนประชุมเป็นภาษาไทย ปากหุ่นขยับตาม — เลือกเสียงได้ 2 แหล่ง:
+  - **Wayu-TTS** (ตัวเดียวกับ kiosk ซักประวัติ, 12 เสียง, รันด้วย CPU ในโรงพยาบาล): `--tts-url http://<wayu>:7860
+    [--tts-voice m_young_clear]` bridge เรียก `POST /api/speak` ให้แล้วส่ง WAV ให้ browser ผ่าน `/api/tts`
+    (โมเดล Wayu เป็น CC-BY-NC-4.0 ไม่ได้รวมใน image นี้ ต้องชี้ไปที่ Wayu ที่รันอยู่)
+  - เสียงไทยของเครื่องที่เปิดหน้าเว็บ (Web Speech API)
+- **🎤 ฟัง**: กดแล้วพูด กดอีกครั้งเพื่อส่ง
+  - `--stt-url http://<asr>:7871` (asr-typhoon ของ kiosk ซักประวัติ, Typhoon ASR บน CPU): หน้าเว็บอัดเสียง
+    แปลงเป็น PCM 16 kHz ส่ง `/api/stt` → ถอดในโรงพยาบาล (~0.3 วินาที) แล้วส่งเข้าแชท — **เสียงไม่ออกนอกเครือข่าย**
+  - ไม่ตั้ง: ใช้ตัวรู้จำเสียงของ Chrome แทน (**เสียงถูกส่งไป Google**)
+  - ไมค์ใช้ได้เฉพาะ `https` หรือ `localhost` (บน K8s: `kubectl -n flybot port-forward svc/flybot-dashboard 8080`
+    แล้วเปิด http://localhost:8080)
+- **ใช้บริการเสียงร่วมกับ kiosk บน cluster เดียวกัน**: `FLYBOT_TTS_URL=http://wayu-tts.stackchan-interview.svc:7860`,
+  `FLYBOT_STT_URL=http://asr-typhoon.stackchan-interview.svc:7871` — ไม่ต้องติดตั้งหรือดึง image private ซ้ำ
 
 ## รันบน Kubernetes
 

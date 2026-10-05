@@ -695,3 +695,105 @@ def test_dashboard_simulator_drives_the_brain(gains):
         assert dash.sim.state()["pan"] != 0  # the simulated head followed the commands
     finally:
         dash.stop()
+
+
+def test_wayu_tts_via_dashboard(gains):
+    import base64 as _b64
+    from flybot.dashboard import Dashboard
+    from flybot.tts import WayuTTS
+    wav = b"RIFF\x24\x00\x00\x00WAVEfake"
+    voices = {"default": "Young man, clear",
+              "voices": [{"id": "m_young_clear", "name": "Young man, clear", "about": "", "line": ""}]}
+
+
+    import http.server
+    import json as _json
+    import threading
+    spoken = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _send(self, obj):
+            data = _json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self._send(voices)
+
+        def do_POST(self):
+            body = _json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            spoken.append(body)
+            self._send({"audio": _b64.b64encode(wav).decode(), "seconds": 1.0})
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    dash = Dashboard(_FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains)), port=0,
+                     tts=WayuTTS(f"http://127.0.0.1:{server.server_port}", "m_young_clear"))
+    dash.start()
+    try:
+        status, body = _http(dash.port, "POST", "/api/tts", {"text": "สวัสดีครับ 🤖"})
+        assert status == 200 and body == wav
+        _http(dash.port, "POST", "/api/tts", {"text": "สวัสดีครับ 🤖"})  # cached: no second render
+        assert spoken == [{"text": "สวัสดีครับ", "speed": 1.0, "voice": "Young man, clear"}]  # id -> name
+        assert _http(dash.port, "POST", "/api/tts", {"text": "🤖"})[0] == 400
+    finally:
+        dash.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_asr_via_dashboard(gains):
+    import http.server
+    import json as _json
+    import threading
+    from flybot.dashboard import Dashboard
+    from flybot.stt import AsrClient
+    received = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received.append((self.path, self.rfile.read(int(self.headers["Content-Length"]))))
+            data = _json.dumps({"text": "หันขวาหน่อย", "ms": 120, "speech_ms": 900}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    dash = Dashboard(_FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains)), port=0,
+                     stt=AsrClient(f"http://127.0.0.1:{server.server_port}"))
+    dash.start()
+    try:
+        pcm = (b"\x10\x00" * 16000)  # 1 s of 16 kHz s16le
+        status, body = _http_raw(dash.port, "/api/stt", pcm)
+        assert status == 200 and _json.loads(body)["text"] == "หันขวาหน่อย"
+        assert received == [("/api/transcribe", pcm)]  # forwarded untouched
+        assert _http_raw(dash.port, "/api/stt", b"\x01")[0] == 400  # odd byte count is not s16le
+        assert _json.loads(_http(dash.port, "GET", "/api/state")[1])["stt"] is True
+    finally:
+        dash.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def _http_raw(port, path, data):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method="POST",
+                                 headers={"Content-Type": "application/octet-stream"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()

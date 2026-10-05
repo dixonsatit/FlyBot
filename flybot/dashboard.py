@@ -12,6 +12,11 @@ feeds its sensor messages into the bridge and takes the bridge's commands, so th
 dashboard behaves like the robot would, before one exists. Turn it off when a real
 robot is connected, or both will feed the same brain.
 
+With ``--tts-url`` (a Wayu-TTS server) the page can speak with the server's Thai voices
+through ``/api/tts``; otherwise it uses the browser's own voices. With ``--stt-url`` (the
+asr-typhoon sidecar) the microphone records 16 kHz PCM that ``/api/stt`` transcribes inside
+the network; otherwise the page falls back to the browser's recognizer.
+
 Only the standard library is used. Optional HTTP basic auth (``--dashboard-password``).
 """
 from __future__ import annotations
@@ -113,8 +118,10 @@ class SimRobot:
 
 class Dashboard:
     def __init__(self, bridge, port: int = 8080, user: str = "stackchan", password: str | None = None,
-                 sim: bool = False):
+                 sim: bool = False, tts=None, stt=None):
         self.bridge = bridge
+        self.tts = tts  # flybot.tts.WayuTTS or None
+        self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
         self.sim = SimRobot(bridge)
         self.sim.enabled = sim
@@ -159,6 +166,7 @@ class Dashboard:
             "personality": c.personality,
             "personalities": sorted(PERSONALITIES), "game_on": c.cfg.game, "llm": cortex is not None,
             "connected": self.bridge.client.is_connected(), "sim": self.sim.state(), "feed": feed,
+            "tts": self.tts is not None, "stt": self.stt is not None,
         }
 
     def post(self, path: str, body: dict) -> dict:
@@ -238,6 +246,13 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path == "/api/tts/voices":
+                    if not dash.tts:
+                        return self._json(200, {"voices": []})
+                    try:
+                        return self._json(200, {"voices": dash.tts.voices(), "default": dash.tts.voice})
+                    except Exception as e:  # TTS server down: the page falls back to browser voices
+                        return self._json(200, {"voices": [], "error": str(e)})
                 if self.path.startswith("/api/state"):
                     since = 0
                     if "since=" in self.path:
@@ -253,7 +268,28 @@ class Dashboard:
                     return
                 try:
                     length = int(self.headers.get("Content-Length") or 0)
+                    if self.path == "/api/stt":  # raw PCM 16 kHz mono s16le from the page's recorder
+                        if not dash.stt:
+                            return self._json(404, {"error": "no ASR server (--stt-url)"})
+                        pcm = self.rfile.read(length)
+                        try:
+                            result = dash.stt.transcribe(pcm)
+                        except ValueError:
+                            raise
+                        except Exception as e:
+                            return self._json(502, {"error": f"ASR: {e}"})
+                        return self._json(200, {"text": result.get("text", ""), "ms": result.get("ms")})
                     body = json.loads(self.rfile.read(length) or b"{}")
+                    if self.path == "/api/tts":
+                        if not dash.tts:
+                            return self._json(404, {"error": "no TTS server (--tts-url)"})
+                        try:
+                            wav = dash.tts.speak(str(body.get("text", "")), body.get("voice") or None)
+                        except ValueError:
+                            raise
+                        except Exception as e:
+                            return self._json(502, {"error": f"TTS: {e}"})
+                        return self._send(200, wav, "audio/wav")
                     self._json(200, dash.post(self.path, body))
                 except KeyError:
                     self._json(404, {"error": "not found"})
