@@ -357,6 +357,9 @@ pio run -t upload && pio device monitor
   ฝั่ง bridge ให้ใช้ `--set tilt_limits=5,85` ให้ตรงกับเครื่อง ก่อนแฟลชให้ backup flash เดิมไว้
   (`esptool.py read_flash 0 0x1000000 backup.bin`) และ unpair จากแอป StackChan World
 - เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Neutral
+- **คุยด้วยเสียง** (`VOICE_URL` ใน config): กดจอค้างแล้วพูด (สูงสุด 10 วินาที) ปล่อยแล้ว robot ส่งเสียงไป `/api/voice` ของ bridge
+  (asr-typhoon ฟังไทย → LLM → wayu-tts พูดไทย) แล้วเล่นคำตอบจากลำโพง ปากขยับตามเสียง; ความดังเสียงพูด `VOICE_VOLUME`
+  แยกจากเสียงบี๊บ `SPEAKER_VOLUME_PCT`; bridge ต้องเปิด dashboard พร้อม `--stt-url`, `--tts-url` และ `--llm`
 
 ## โครงสร้าง
 

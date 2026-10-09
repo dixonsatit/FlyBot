@@ -321,7 +321,7 @@ function addFeed(f) {
            d.type === "seen" ? "📷 เห็น: " + (d.description || d.screen) : (EVENT_TEXT[d.type] || d.type); }
   div.className = cls; div.innerHTML = `<span class="t">${f.at}</span>`; div.append(document.createTextNode(text));
   if (!firstPoll) {  // speak new replies, narrations and meeting reminders (not the backlog on page load)
-    if (f.kind === "chat") say(f.data.text);
+    if (f.kind === "chat" && !f.data.voice) say(f.data.text);  // the robot speaks voice replies itself
     else if (f.kind === "event" && f.data.type === "meeting") say(f.data.message.replace(/^StackChan:\s*/, ""));
   }
   const feed = $("feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;

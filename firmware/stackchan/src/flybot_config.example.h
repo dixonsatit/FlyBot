@@ -43,5 +43,10 @@
 // % of the volume the bridge asks for (0 = mute)
 #define SPEAKER_VOLUME_PCT 100
 
+// Voice: hold the screen to talk to the bridge (needs its dashboard with --stt-url, --tts-url, --llm).
+// Basic auth defaults to MQTT_USER / MQTT_PASSWORD, like the k8s manifests.
+// #define VOICE_URL "http://192.168.1.10:31880/api/voice"
+// #define VOICE_VOLUME 140  // 0..255
+
 #define IMU_PERIOD_MS 33
 #define PROXIMITY_PERIOD_MS 100

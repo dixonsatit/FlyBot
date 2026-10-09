@@ -279,6 +279,8 @@ class Dashboard:
                         except Exception as e:
                             return self._json(502, {"error": f"ASR: {e}"})
                         return self._json(200, {"text": result.get("text", ""), "ms": result.get("ms")})
+                    if self.path == "/api/voice":  # the robot's turn: PCM 16 kHz mono s16le in, WAV out
+                        return self._voice(self.rfile.read(length))
                     body = json.loads(self.rfile.read(length) or b"{}")
                     if self.path == "/api/tts":
                         if not dash.tts:
@@ -295,5 +297,24 @@ class Dashboard:
                     self._json(404, {"error": "not found"})
                 except (ValueError, TypeError, AttributeError) as e:
                     self._json(400, {"error": str(e)})
+
+            def _voice(self, pcm: bytes):
+                if not (dash.stt and dash.tts and dash.bridge.cortex):
+                    return self._json(404, {"error": "voice needs --stt-url, --tts-url and --llm"})
+                try:
+                    text = dash.stt.transcribe(pcm).get("text", "").strip()
+                except ValueError:
+                    raise
+                except Exception as e:
+                    return self._json(502, {"error": f"ASR: {e}"})
+                if not text:  # nothing understood: the robot just goes back to idle
+                    return self._send(204, b"", "audio/wav")
+                dash.add("you", {"text": text, "voice": True})
+                try:
+                    reply = dash.bridge.cortex.ask(text)
+                    wav = dash.tts.speak(reply) if reply else b""
+                except Exception as e:
+                    return self._json(502, {"error": f"{type(e).__name__}: {e}"})
+                return self._send(200, wav, "audio/wav") if wav else self._send(204, b"", "audio/wav")
 
         return Handler

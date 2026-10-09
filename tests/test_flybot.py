@@ -787,6 +787,63 @@ def test_asr_via_dashboard(gains):
         server.server_close()
 
 
+def test_voice_turn_via_dashboard(gains):
+    """Robot voice: PCM -> ASR -> cortex reply -> TTS WAV, and the page doesn't speak it again."""
+    import base64 as _b64
+    import http.server
+    import json as _json
+    import threading
+    from flybot.cortex import Cortex
+    from flybot.dashboard import Dashboard
+    from flybot.stt import AsrClient
+    from flybot.tts import WayuTTS
+    wav = b"RIFF\x24\x00\x00\x00WAVEfake"
+    heard = {"text": "สวัสดีครับ"}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _send(self, obj):
+            data = _json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_GET(self):
+            self._send({"voices": []})
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            if self.path == "/api/transcribe":
+                self._send({"text": heard["text"], "ms": 50})
+            else:
+                self._send({"audio": _b64.b64encode(wav).decode()})
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    published = []
+    bridge.cortex = Cortex(_ScriptedLLM(lambda text, tools, img: "สวัสดีครับ ยินดีช่วยครับ"), bridge.controller,
+                           lambda t, b: published.append(_json.loads(b)), "stackchan")
+    dash = Dashboard(bridge, port=0, tts=WayuTTS(url), stt=AsrClient(url))
+    dash.start()
+    try:
+        status, body = _http_raw(dash.port, "/api/voice", b"\x10\x00" * 16000)
+        assert status == 200 and body == wav
+        assert published[-1] == {"type": "reply", "to": "สวัสดีครับ", "text": "สวัสดีครับ ยินดีช่วยครับ", "voice": True}
+        heard["text"] = "  "  # nothing understood: no reply, no LLM call
+        assert _http_raw(dash.port, "/api/voice", b"\x10\x00" * 160)[0] == 204
+        assert len(published) == 1
+    finally:
+        dash.stop()
+        server.shutdown()
+        server.server_close()
+
+
 def _http_raw(port, path, data):
     import urllib.error
     import urllib.request

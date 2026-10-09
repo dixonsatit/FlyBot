@@ -17,6 +17,7 @@
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
+#include "voice.h"
 #include "thai_font.h"
 
 #if __has_include("flybot_config.h")
@@ -54,6 +55,7 @@ static int toneCount = 0, toneIndex = 0;
 static uint32_t toneUntil = 0;
 
 static void serviceTones() {
+  if (voiceBusy()) return;  // speech owns the speaker
   if (toneIndex >= toneCount || millis() < toneUntil) return;
   const Tone& t = tones[toneIndex++];
   if (t.hz > 0) M5.Speaker.tone(t.hz, t.ms);  // freq 0 = rest
@@ -275,7 +277,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
   }
 
   JsonObject audio = doc["audio"];
-  if (!audio.isNull()) {
+  if (!audio.isNull() && !voiceBusy()) {
     M5.Speaker.setVolume((audio["volume"] | 120) * SPEAKER_VOLUME_PCT / 100);
     toneCount = toneIndex = 0;
     for (JsonArray t : audio["tones"].as<JsonArray>()) {
@@ -389,10 +391,12 @@ void setup() {
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setBufferSize(1024);  // command JSON with brain telemetry exceeds the 256 B default
   mqtt.setCallback(onCommand);
+  voiceBegin();
 }
 
 void loop() {
   M5.update();
+  voiceUpdate();
   ensureConnected();
   mqtt.loop();
   serviceTones();

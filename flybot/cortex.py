@@ -16,6 +16,7 @@ import logging
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from typing import Callable
 
 from .controller import PERSONALITIES, BrainController
@@ -102,11 +103,29 @@ class Cortex:
     def on_chat(self, text: str) -> None:
         self._submit(self._chat, text)
 
-    def _submit(self, fn, *args) -> None:
+    def ask(self, text: str, timeout: float = 60.0) -> str:
+        """Chat and wait for the reply (the robot's voice turn); runs on the cortex thread
+        like any other job, so it never overlaps a narration."""
+        done: Future = Future()
+
+        def voice_chat():
+            try:
+                done.set_result(self._chat(text, voice=True))
+            except Exception as e:
+                done.set_exception(e)
+                raise
+
+        if not self._submit(voice_chat):
+            raise RuntimeError("cortex busy")
+        return done.result(timeout)
+
+    def _submit(self, fn, *args) -> bool:
         try:
             self._jobs.put_nowait((fn, args))
+            return True
         except queue.Full:
             log.warning("cortex busy, dropping %s", fn.__name__)
+            return False
 
     def _run(self) -> None:
         while True:
@@ -163,11 +182,13 @@ class Cortex:
             self.emit_event({"type": "seen", "description": thai or screen, "screen": screen})
         return json.dumps({"seen": thai or screen}, ensure_ascii=False)
 
-    def _chat(self, text: str) -> None:
+    def _chat(self, text: str, voice: bool = False) -> str:
         reply = self.llm.ask(self.persona, self.history, text, tools=self.tools())
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "..."}]
         self.history = self.history[-2 * self.history_turns:]
-        self._out({"type": "reply", "to": text, "text": reply})
+        # voice: the robot speaks it, so the dashboard page must not say it again
+        self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
+        return reply
 
     def _out(self, payload: dict) -> None:
         self.publish(f"{self.base}/chat/out", json.dumps(payload, ensure_ascii=False))
