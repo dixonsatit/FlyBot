@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.13.2 (2026-10-09)
+
+### Bug Fixes
+
+- **voice**: Follow-up turns without the name and fewer missed wake words
+  ([`eb5ae75`](https://github.com/dixonsatit/FlyBot/commit/eb5ae75d5223a07fec1ab621b2512483c0214318))
+
+
 ## v0.13.1 (2026-10-09)
 
 ### Bug Fixes
