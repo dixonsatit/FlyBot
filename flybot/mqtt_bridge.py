@@ -204,6 +204,9 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--remind-minutes", default="10,1", help="minutes before start, comma-separated")
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
+    gh = ap.add_argument_group("GitHub (failed CI, review requests)")
+    gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
+    gh.add_argument("--github-interval", type=float, default=120.0, help="seconds between polls")
     dash = ap.add_argument_group("web dashboard")
     dash.add_argument("--dashboard-port", type=int, help="serve the dashboard on this port (off if unset)")
     dash.add_argument("--dashboard-user", default="stackchan")
@@ -280,8 +283,18 @@ def main(argv: list[str] | None = None) -> None:
             tz = ZoneInfo(args.tz) if args.tz else None
         except Exception as e:
             ap.error(f"--remind-minutes / --tz: {e}")
-        reminder = MeetingReminder(args.calendar, bridge.controller.remind, leads, args.calendar_refresh, tz)
+        def remind(r: dict) -> None:
+            bridge.controller.remind(r)
+            title = r.get("title") or "ประชุม"
+            where = f" ที่ {r['location']}" if r.get("location") else ""
+            when = f"อีก {r.get('minutes', 0)} นาทีมี" if r.get("minutes") else "ถึงเวลา"
+            if bridge.dashboard:
+                bridge.dashboard.announce(f"{when}ประชุม {title} ตอน {r.get('start', '')}{where} นะคะ")
+
+        reminder = MeetingReminder(args.calendar, remind, leads, args.calendar_refresh, tz)
         reminder.start()
+        if bridge.cortex:
+            bridge.cortex.calendar = reminder
         log.info("Meeting reminders: %d calendar(s), %s min before", len(args.calendar), args.remind_minutes)
     if args.dashboard_port:
         from .dashboard import Dashboard
@@ -297,6 +310,14 @@ def main(argv: list[str] | None = None) -> None:
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
         bridge.dashboard.start()
+    if args.github_token:
+        from .github import GitHubWatcher
+        watcher = GitHubWatcher(args.github_token, lambda line: bridge.dashboard and bridge.dashboard.announce(line),
+                                args.github_interval)
+        watcher.start()
+        if bridge.cortex:
+            bridge.cortex.github = watcher
+        log.info("GitHub: watching CI and review requests every %.0f s", args.github_interval)
     bridge.run(heartbeat=args.heartbeat)
 
 

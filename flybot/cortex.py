@@ -107,6 +107,8 @@ class Cortex:
         self.snapshot = snapshot if snapshot and self.vision_llm.supports_images else None
         self.narrate = narrate
         self.narrate_cooldown_s = narrate_cooldown_s
+        self.calendar = None  # flybot.meetings.MeetingReminder, set by the bridge
+        self.github = None  # flybot.github.GitHubWatcher
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -218,6 +220,12 @@ class Cortex:
         self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
         return reply
 
+    def _meetings(self):
+        if not self.calendar:
+            return {"error": "no calendar connected"}
+        return [{"title": m.title, "start": m.start.strftime("%Y-%m-%d %H:%M"), "location": m.location}
+                for m in self.calendar.meetings]
+
     def _out(self, payload: dict) -> None:
         self.publish(f"{self.base}/chat/out", json.dumps(payload, ensure_ascii=False))
 
@@ -234,6 +242,13 @@ class Cortex:
                  {"type": "object", "properties": {"name": {"type": "string", "enum": list(c.GESTURES)}},
                   "required": ["name"], "additionalProperties": False},
                  lambda name: c.gesture(name) or "moving"),
+            Tool("upcoming_meetings", "The user's meetings in the next 24 hours from their calendar.",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 self._meetings),
+            Tool("github_status", "The user's GitHub: CI workflows currently failing on recently pushed "
+                 "repositories, and open pull requests waiting for their review.",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: self.github.summary() if self.github else {"error": "GitHub is not connected"}),
             Tool("set_personality", "Change the robot's temperament: " + ", ".join(sorted(PERSONALITIES)) + ".",
                  {"type": "object", "properties": {"name": {"type": "string", "enum": sorted(PERSONALITIES)}},
                   "required": ["name"], "additionalProperties": False},

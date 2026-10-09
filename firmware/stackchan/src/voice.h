@@ -8,6 +8,7 @@
 void voiceBegin();
 // the bridge's /api/voice on the current network; wakeName: hands-free speech must call the name
 void voiceSetUrl(const char* url, bool wakeName);
+void voiceAnnounce(const char* id);  // play the bridge's /api/announce/<id> when free
 void voiceUpdate();  // call every loop()
 bool voiceBusy();        // capturing, waiting or speaking: the face stays steady
 bool voiceOwnsAudio();   // the mic or a reply holds the I2S bus: no tones (they would crash it)

@@ -851,6 +851,13 @@ def test_voice_turn_via_dashboard(gains):
         assert len(published) == 5
         status, body = _http_raw(dash.port, "/api/pat", b"")
         assert status == 200 and body == wav
+        sent = []
+        bridge.base = "stackchan"
+        bridge.client.publish = lambda topic, payload, qos=0: sent.append((topic, payload))
+        assert dash.announce("CI ของ FlyBot พังนะ")
+        key = _json.loads(sent[-1][1])["id"]
+        assert sent[-1][0] == "stackchan/announce"
+        assert _http(dash.port, "GET", f"/api/announce/{key}")[0] == 200
     finally:
         dash.stop()
         server.shutdown()
@@ -875,6 +882,51 @@ def test_gesture_overrides_reflexes_then_holds(gains):
     assert min(pans) < -55 and max(pans) > 55  # looked all the way round within the limits
     with pytest.raises(ValueError):
         c.gesture("backflip")
+
+
+def test_github_watcher_reports_new_failures_and_reviews():
+    import http.server
+    import json as _json
+    import threading
+    from flybot.github import GitHubWatcher
+    state = {"runs": [{"id": 1, "name": "CI", "head_branch": "main", "conclusion": "success", "html_url": "u1",
+                       "head_commit": {"message": "ok"}}], "prs": []}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            assert self.headers["Authorization"] == "Bearer t0ken"
+            if self.path.startswith("/user/repos"):
+                body = [{"full_name": "me/FlyBot", "name": "FlyBot"}]
+            elif "/actions/runs" in self.path:
+                body = {"workflow_runs": state["runs"]}
+            else:
+                body = {"items": state["prs"]}
+            data = _json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        w = GitHubWatcher("t0ken", api=f"http://127.0.0.1:{server.server_port}")
+        assert w.poll() == []  # the first poll only learns the current state
+        state["runs"].insert(0, {"id": 2, "name": "CI", "head_branch": "main", "conclusion": "failure",
+                                 "html_url": "u2", "head_commit": {"message": "feat: x\nbody"}})
+        state["prs"] = [{"html_url": "p1", "number": 7, "title": "Add HIS tools", "user": {"login": "dev"},
+                         "repository_url": "https://api.github.com/repos/me/FlyBot"}]
+        news = w.poll()
+        assert news == ["CI ของ FlyBot (CI) พังนะ", "มี PR รอให้รีวิวใน FlyBot: Add HIS tools"]
+        assert w.poll() == []  # nothing new: no repeat
+        summary = w.summary()
+        assert summary["failing_ci"][0]["commit"] == "feat: x" and summary["review_requested"][0]["number"] == 7
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_to_16k_resamples_wayu_wav():

@@ -295,6 +295,11 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     snapshotRequested = true;
     return;
   }
+  if (topicBase + "/announce" == topic) {  // the bridge wants to say something: {"id": "..."}
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len) && a["id"].is<const char*>()) voiceAnnounce(a["id"]);
+    return;
+  }
   JsonDocument doc;
   if (deserializeJson(doc, payload, len)) return;
 
@@ -439,6 +444,7 @@ static void ensureConnected() {
   if (ok) {
     mqtt.subscribe((topicBase + "/command").c_str());
     mqtt.subscribe((topicBase + "/snapshot/request").c_str());
+    mqtt.subscribe((topicBase + "/announce").c_str(), 1);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);

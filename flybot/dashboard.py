@@ -148,6 +148,8 @@ class Dashboard:
         self.wake = re.compile(wake_name, re.IGNORECASE)
         self.follow_up_s = follow_up_s  # after a spoken reply, the next sentence needs no name
         self._last_reply = -math.inf
+        self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
+        self._announce_seq = 0
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
@@ -229,6 +231,26 @@ class Dashboard:
             raise KeyError(path)
         return {"ok": True}
 
+    def announce(self, text: str) -> bool:
+        """Have the robot say ``text`` on its own (a reminder, a CI failure): render it, keep it for
+        GET /api/announce/<id>, and tell the robot on ``<base>/announce``."""
+        if not self.tts or not text:
+            return False
+        try:
+            wav = to_16k(self.tts.speak(text))
+        except Exception as e:
+            log.warning("announce: TTS failed: %s", e)
+            return False
+        with self._lock:
+            self._announce_seq += 1
+            key = str(self._announce_seq)
+            self._announcements[key] = wav
+            while len(self._announcements) > 8:
+                self._announcements.popitem(last=False)
+        self.add("chat", {"type": "announce", "text": text, "voice": True})
+        self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
+        return True
+
     def _authorized(self, header: str | None) -> bool:
         if not self.password:
             return True
@@ -274,6 +296,10 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path.startswith("/api/announce/"):
+                    with dash._lock:
+                        wav = dash._announcements.get(self.path.rsplit("/", 1)[-1])
+                    return self._send(200, wav, "audio/wav") if wav else self._json(404, {"error": "gone"})
                 if self.path == "/api/tts/voices":
                     if not dash.tts:
                         return self._json(200, {"voices": []})

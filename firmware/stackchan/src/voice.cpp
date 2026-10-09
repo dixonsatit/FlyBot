@@ -62,6 +62,9 @@ static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
 static volatile float micNoise = 0;
 
 static bool needName = true;  // hands-free speech must call the robot by name
+static String pendingAnnounce;  // an announcement waiting for the robot to be free
+
+void voiceAnnounce(const char* id) { pendingAnnounce = id; }
 
 void voiceSetUrl(const char* url, bool wakeName) {
   voiceUrl = url;
@@ -175,7 +178,8 @@ static void sendTask(void*) {
   http.setConnectTimeout(5000);
   http.setTimeout(60000);  // ASR + LLM + TTS
   const bool pat = path == "/api/pat";
-  int code = http.POST(pat ? nullptr : (uint8_t*)rec, pat ? 0 : recLen * sizeof(int16_t));
+  int code = path.startsWith("/api/announce/") ? http.GET()
+                                                : http.POST(pat ? nullptr : (uint8_t*)rec, pat ? 0 : recLen * sizeof(int16_t));
   if (code == 200) {
     int len = http.getSize();
     if (len > 0 && size_t(len) <= MAX_WAV && (wav = (uint8_t*)ps_malloc(len))) {
@@ -277,6 +281,11 @@ void voiceUpdate() {
         stopMic();
         avatar.setExpression(m5avatar::Expression::Happy);
         request("/api/pat", nullptr);
+      } else if (pendingAnnounce.length()) {  // speak up on our own (reminder, CI news)
+        String id = pendingAnnounce;
+        pendingAnnounce = "";
+        stopMic();
+        request(("/api/announce/" + id).c_str(), nullptr);
       }
       return;
 
@@ -323,6 +332,7 @@ void voiceUpdate() {
 #else
 void voiceBegin() {}
 void voiceSetUrl(const char*, bool) {}
+void voiceAnnounce(const char*) {}
 void voiceUpdate() {}
 bool voiceBusy() { return false; }
 bool voiceOwnsAudio() { return false; }
