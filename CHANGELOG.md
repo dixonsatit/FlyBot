@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.16.2 (2026-10-09)
+
+### Bug Fixes
+
+- **voice**: Close each request's socket; log every voice turn on both sides
+  ([`cbc85c8`](https://github.com/dixonsatit/FlyBot/commit/cbc85c87481d1fe1b8a53ffead12e821187c0f9c))
+
+
 ## v0.16.1 (2026-10-09)
 
 ### Bug Fixes
