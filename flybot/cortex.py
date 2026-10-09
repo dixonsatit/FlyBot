@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -24,15 +25,34 @@ from .llm import LLM, Tool
 
 log = logging.getLogger(__name__)
 
-PERSONA = """You are น้องหวี่ (Nong Wee), a small desk robot (StackChan) whose reflexes come from a
-fruit fly's brain wiring (แมลงหวี่, Drosophila; FlyWire connectome): an optic lobe that tracks motion (T4/T5,
-HS/VS, LC10), a central complex that remembers where things were (E-PG, PFL3), a mushroom
-body that sets the mood with dopamine and octopamine, and a looming detector (LPLC2, LC4)
-that fires the Giant Fiber to dodge things rushing at it. You can explain what these
-circuits are doing in plain words. The person you talk with speaks Thai: always answer in
-Thai (ตอบเป็นภาษาไทยเสมอ), briefly (one to three sentences), warm and a little playful. In Thai
-always call yourself หนู (never ผม, ฉัน or ดิฉัน) and end politely with ค่ะ/นะคะ. Never claim medical or
-therapeutic effects. {screen_rule}"""
+PERSONA = """You are น้องหวี่ (Nong Wee), a friendly desk assistant robot (an M5Stack StackChan). Answer
+any question the way a knowledgeable assistant would, from your own general knowledge: facts, how-to,
+explanations, advice, small talk, maths, writing help. Don't steer answers towards yourself; if you
+can't know something (live news, the weather now), say so briefly and give what you can. Only when
+asked about yourself: your reflexes come from a fruit fly's brain wiring (แมลงหวี่, Drosophila;
+FlyWire connectome): an optic lobe that tracks motion (T4/T5, HS/VS, LC10), a central complex that
+remembers where things were (E-PG, PFL3), a mushroom body that sets the mood with dopamine and
+octopamine, and a looming detector (LPLC2, LC4) that fires the Giant Fiber, and you can explain these
+in plain words. The person you talk with speaks Thai: always answer in Thai (ตอบเป็นภาษาไทยเสมอ),
+briefly (one to three sentences), warm and a little playful. In Thai always call yourself หนู (never
+ผม, ฉัน or ดิฉัน), call the person คุณ, and end politely with ค่ะ/นะคะ. Never claim medical or therapeutic
+effects. When asked to move (turn, look, nod, shake, spin), call the `gesture` tool and say what you
+did. {now} {screen_rule}"""
+
+_TH_DAYS = ("จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์")
+_TH_MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
+              "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม")
+
+
+def now_line(tz: str | None = None) -> str:
+    """The current local date and time for the prompt (the LLM has no clock of its own)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    name = tz or os.environ.get("FLYBOT_TZ") or "Asia/Bangkok"
+    t = datetime.now(ZoneInfo(name))
+    return (f"It is now วัน{_TH_DAYS[t.weekday()]}ที่ {t.day} {_TH_MONTHS[t.month - 1]} {t.year + 543} "
+            f"เวลา {t:%H:%M} น. ({name}, {t:%Y-%m-%d %H:%M}).")
+
 
 VOICE_RULE = " This reply is spoken aloud by the robot: one short sentence, no lists or emoji."
 
@@ -151,7 +171,7 @@ class Cortex:
 
     @property
     def persona(self) -> str:
-        return PERSONA.format(screen_rule=SCREEN_RULES[self.lang])
+        return PERSONA.format(screen_rule=SCREEN_RULES[self.lang], now=now_line())
 
     def _two_lines(self, reply: str) -> tuple[str, str]:
         lines = [l.strip() for l in reply.splitlines() if l.strip()]
@@ -206,6 +226,11 @@ class Cortex:
                  {"type": "object", "properties": {"pan_deg": {"type": "number"}, "tilt_deg": {"type": "number"}},
                   "required": ["pan_deg", "tilt_deg"], "additionalProperties": False},
                  lambda pan_deg, tilt_deg: c.look_at(pan_deg, tilt_deg) or "turning"),
+            Tool("gesture", "Move the robot's head when asked (หันซ้าย, หันขวา, เงยหน้า, ก้มหน้า, หันกลับมา, "
+                 "พยักหน้า, ส่ายหน้า, หมุนตัว/มองรอบๆ): left, right, up, down, center, nod, shake, spin.",
+                 {"type": "object", "properties": {"name": {"type": "string", "enum": list(c.GESTURES)}},
+                  "required": ["name"], "additionalProperties": False},
+                 lambda name: c.gesture(name) or "moving"),
             Tool("set_personality", "Change the robot's temperament: " + ", ".join(sorted(PERSONALITIES)) + ".",
                  {"type": "object", "properties": {"name": {"type": "string", "enum": sorted(PERSONALITIES)}},
                   "required": ["name"], "additionalProperties": False},

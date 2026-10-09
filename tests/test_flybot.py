@@ -857,6 +857,26 @@ def test_voice_turn_via_dashboard(gains):
         server.server_close()
 
 
+def test_gesture_overrides_reflexes_then_holds(gains):
+    c = BrainController(ControllerConfig(backend="rate", pan_limits=(-60, 60), tilt_limits=(5, 45)), gains=gains)
+    s = SensorState()
+    c.gesture("left")
+    for _ in range(40):  # 2 s at 20 Hz
+        c.step(s, 0.05)
+    assert c.pan < -40  # turned left, and the FC2 goal keeps it there
+    for _ in range(40):
+        c.step(s, 0.05)
+    assert c.pan < -35
+    c.gesture("spin")
+    pans = []
+    for _ in range(100):
+        c.step(s, 0.05)
+        pans.append(c.pan)
+    assert min(pans) < -55 and max(pans) > 55  # looked all the way round within the limits
+    with pytest.raises(ValueError):
+        c.gesture("backflip")
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

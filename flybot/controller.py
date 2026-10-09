@@ -146,6 +146,7 @@ class BrainController:
         self.gf = GiantFiber(looming or LoomingGains(), threshold=cfg.gf_threshold,
                              refractory_s=cfg.gf_refractory_s)
         self._escape_until = -math.inf
+        self._gesture: list[list] = []  # [pan, tilt, seconds, elapsed] waypoints a command plays
         self._escape_dir = 1.0
         self._tilt_home: float | None = None  # tilt to settle back to after an escape
         self.events: list[dict] = []
@@ -250,6 +251,32 @@ class BrainController:
         self.configure(**changes)
         self.personality = name
         return diff
+
+    GESTURES = ("left", "right", "up", "down", "center", "nod", "shake", "spin")
+
+    def gesture(self, name: str) -> None:
+        """Play a head movement asked for by voice, over the reflexes. A turn ends with the FC2
+        goal there, so the head stays looking that way once no target pulls it elsewhere."""
+        if name not in self.GESTURES:
+            raise ValueError(f"unknown gesture {name!r}")
+
+        def apply():
+            lo, hi = self.cfg.pan_limits
+            tlo, thi = self.cfg.tilt_limits
+            pan, home = self.pan, float(np.clip(self.cfg.home_tilt, tlo, thi))
+            side = min(45.0, -lo, hi)
+            moves = {
+                "left": [(-side, home, 1.2)],
+                "right": [(side, home, 1.2)],
+                "up": [(pan, thi, 1.0)],
+                "down": [(pan, tlo, 1.0)],
+                "center": [(0.0, home, 1.2)],
+                "nod": [(pan, min(thi, home + 15), 0.35), (pan, max(tlo, home - 8), 0.35)] * 2 + [(pan, home, 0.4)],
+                "shake": [(pan - 20, home, 0.35), (pan + 20, home, 0.35)] * 2 + [(pan, home, 0.4)],
+                "spin": [(lo, home, 1.2), (hi, home, 1.8), (0.0, home, 1.2)],
+            }[name]
+            self._gesture = [[float(np.clip(p_, lo, hi)), float(np.clip(t_, tlo, thi)), d, 0.0] for p_, t_, d in moves]
+        self._inbox.put(apply)
 
     def say(self, text: str, seconds: float = 6.0) -> None:
         """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
@@ -388,6 +415,16 @@ class BrainController:
             self.cx.set_goal(self.cx.heading + self.pan + stim[0] * cfg.hfov_deg / 2)
         elif not escaping:
             pan_rate += cfg.k_heading * self.cx.steering(self.pan)
+
+        if self._gesture:  # a commanded movement overrides the reflexes until it has played
+            step = self._gesture[0]
+            step[3] += dt
+            pan_rate, tilt_rate = 6.0 * (step[0] - self.pan), 6.0 * (step[1] - self.tilt)
+            if step[3] >= step[2]:
+                self._gesture.pop(0)
+                if not self._gesture:
+                    self.cx.set_goal(self.cx.heading + step[0])
+                    self._tilt_home = step[1]
 
         pan_rate = float(np.clip(pan_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
         tilt_rate = float(np.clip(tilt_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
