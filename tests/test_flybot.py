@@ -838,6 +838,7 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "  "  # nothing understood: no reply, no LLM call
         assert _http_raw(dash.port, "/api/voice", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 1
+        dash._last_reply = -1e9  # outside the follow-up window
         heard["text"] = "วันนี้ฝนตกไหม"  # hands-free speech that doesn't call the robot is ignored
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 1
@@ -845,6 +846,9 @@ def test_voice_turn_via_dashboard(gains):
             heard["text"] = name
             assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 4
+        heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        assert len(published) == 5
         status, body = _http_raw(dash.port, "/api/pat", b"")
         assert status == 200 and body == wav
     finally:

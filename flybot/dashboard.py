@@ -142,9 +142,12 @@ class SimRobot:
 
 class Dashboard:
     def __init__(self, bridge, port: int = 8080, user: str = "stackchan", password: str | None = None,
-                 sim: bool = False, tts=None, stt=None, wake_name: str = r"น้อง\s*(หวี่|หวี|วี่|วี|v)"):
+                 sim: bool = False, tts=None, stt=None, wake_name: str = r"น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
+                 follow_up_s: float = 20.0):
         self.bridge = bridge
         self.wake = re.compile(wake_name, re.IGNORECASE)
+        self.follow_up_s = follow_up_s  # after a spoken reply, the next sentence needs no name
+        self._last_reply = -math.inf
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
@@ -345,9 +348,11 @@ class Dashboard:
                     raise
                 except Exception as e:
                     return self._json(502, {"error": f"ASR: {e}"})
-                if not text or (wake and not dash.wake.search(text)):  # not for the robot: back to idle
+                seconds = len(pcm) / 32000
+                follow_up = time.monotonic() - dash._last_reply < dash.follow_up_s
+                if not text or (wake and not follow_up and not dash.wake.search(text)):  # not for the robot
                     if text:
-                        log.info("voice: heard %r without the wake name", text)
+                        log.info("voice: heard %r (%.1fs) without the wake name", text, seconds)
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
                 t_asr = time.monotonic()
@@ -359,6 +364,7 @@ class Dashboard:
                     return self._json(502, {"error": f"{type(e).__name__}: {e}"})
                 log.info("voice: %d KB in, asr %.1fs, llm %.1fs, tts %.1fs, %d KB out", len(pcm) // 1024,
                          t_asr - t0, t_llm - t_asr, time.monotonic() - t_llm, len(wav) // 1024)
+                dash._last_reply = time.monotonic()
                 return self._send(200, wav, "audio/wav") if wav else self._send(204, b"", "audio/wav")
 
         return Handler

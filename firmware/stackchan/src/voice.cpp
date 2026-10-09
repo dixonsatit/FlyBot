@@ -33,7 +33,8 @@ static constexpr size_t BLOCK = 1600;    // 0.1 s
 static constexpr size_t MAX_SAMPLES = RATE * 10;
 static constexpr size_t MIN_SPEECH = RATE * 5 / 10;  // shorter is a cough or a click
 static constexpr int PREROLL = 3;                    // blocks kept before speech starts
-static constexpr int END_QUIET = 8;                  // blocks of quiet that end a sentence
+static constexpr int END_QUIET = 12;                 // blocks of quiet that end a sentence (a pause
+                                                     // before the name must not split it off)
 static constexpr size_t MAX_WAV = 4 * 1024 * 1024;
 
 // Listening: mic on, waiting for speech. Capturing: recording a sentence. Waiting: the bridge
