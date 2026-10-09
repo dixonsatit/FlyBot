@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.16.1 (2026-10-09)
+
+### Bug Fixes
+
+- **voice**: Accept "วี" at the start of a sentence as the wake name
+  ([`930590b`](https://github.com/dixonsatit/FlyBot/commit/930590b88c93a78afa64c5d8f5707ed120e81544))
+
+
 ## v0.16.0 (2026-10-09)
 
 ### Features
