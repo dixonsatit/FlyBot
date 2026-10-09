@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.16.3 (2026-10-09)
+
+### Bug Fixes
+
+- **voice**: Answer the name said alone, then listen for the question
+  ([`ada4228`](https://github.com/dixonsatit/FlyBot/commit/ada42282fb1f39b8b2b574082af6a2195a259c93))
+
+
 ## v0.16.2 (2026-10-09)
 
 ### Bug Fixes
