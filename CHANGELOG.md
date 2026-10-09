@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.10.0 (2026-10-09)
+
+### Bug Fixes
+
+- **firmware**: Reliable StackChan servos, camera and quieter face
+  ([`099b967`](https://github.com/dixonsatit/FlyBot/commit/099b96744c0dfa766acd69f5d54d3fb6aac1f101))
+
+### Features
+
+- **firmware**: Support M5Stack's official StackChan body
+  ([`f3fa3f2`](https://github.com/dixonsatit/FlyBot/commit/f3fa3f22855fea878411613537005f6b040a6336))
+
+- **voice**: Talk to the robot in Thai by holding its screen
+  ([`c960f60`](https://github.com/dixonsatit/FlyBot/commit/c960f6071e7437f3ffb663c735f96b56f095534e))
+
+
 ## v0.9.0 (2026-10-05)
 
 ### Features
