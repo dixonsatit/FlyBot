@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.12.1 (2026-10-09)
+
+### Performance Improvements
+
+- **voice**: Shorter spoken replies and 16 kHz audio back to the robot
+  ([`1c8509a`](https://github.com/dixonsatit/FlyBot/commit/1c8509a78ddda216c0c77d5469fd1a88efdfc6c6))
+
+
 ## v0.12.0 (2026-10-09)
 
 ### Features
