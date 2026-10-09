@@ -84,7 +84,7 @@ static void sweep(SelfTestReport& r, void (*writeServos)(float, float)) {
   r.add("servo dir", true, "check it matched");
 }
 
-SelfTestReport runSelfTest(bool cameraOk, bool proximityOk, bool full, void (*writeServos)(float, float)) {
+SelfTestReport runSelfTest(bool cameraOk, bool proximityOk, bool servoOk, const char* servoDetail, bool full, void (*writeServos)(float, float)) {
   SelfTestReport r;
   r.full = full;
   show(r, "running...");
@@ -121,6 +121,8 @@ SelfTestReport runSelfTest(bool cameraOk, bool proximityOk, bool full, void (*wr
   } else {
     r.add("ltr553", false, "begin failed");
   }
+
+  r.add("servo", servoOk, "%s", servoDetail);
 
   M5.Speaker.tone(1319, 80);
   r.add("speaker", M5.Speaker.isEnabled(), "beep");

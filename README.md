@@ -349,6 +349,13 @@ pio run -t upload && pio device monitor
   หมุนเซอร์โวพร้อมบอกบนจอว่าหัวควรหันไปทางไหน ถ้าหันผิดให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
 - เซอร์โว: `องศา = CENTER + SIGN × มุมจากคำสั่ง` แล้วจำกัดใน MIN..MAX (SG90 แกน Y ขยับได้ ~60–90°)
   ค่าเริ่มต้น Port.C X=17, Y=18 ถ้าหัวหันผิดทางให้กลับ `SERVO_X_SIGN` / `SERVO_Y_SIGN`
+- **StackChan ตัว official ของ M5Stack** (เซอร์โว SCS0009 แบบ serial bus): `pio run -e stackchan-official -t upload`
+  เปิดไฟเลี้ยงเซอร์โวผ่านขา 0 ของ IO expander PY32 (I2C 0x6F) แล้วสั่ง ID 1 (yaw) / ID 2 (pitch) ทาง UART1
+  1 Mbps (TX G6, RX G7) ตามเฟิร์มแวร์โรงงาน (`github.com/m5stack/StackChan`), 1 step = 0.3125°, ศูนย์ 460/620
+  หรือค่าที่ calibrate ไว้ใน NVS `servo/zero_pos_1,2` แกนก้มเงยจำกัด 5–85° (M5Stack เตือนว่าเกินนี้อาจค้างจนเสีย)
+  มี stall protection แบบเดียวกับเฟิร์มแวร์โรงงาน และปลด torque เมื่อหัวหยุดนิ่ง 1.5 วินาที
+  ฝั่ง bridge ให้ใช้ `--set tilt_limits=5,85` ให้ตรงกับเครื่อง ก่อนแฟลชให้ backup flash เดิมไว้
+  (`esptool.py read_flash 0 0x1000000 backup.bin`) และ unpair จากแอป StackChan World
 - เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Doubt
 
 ## โครงสร้าง

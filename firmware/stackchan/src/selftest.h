@@ -22,4 +22,4 @@ struct SelfTestReport {
 };
 
 // full = also sweep the servos (watch that the head turns the way the screen says)
-SelfTestReport runSelfTest(bool cameraOk, bool proximityOk, bool full, void (*writeServos)(float pan, float tilt));
+SelfTestReport runSelfTest(bool cameraOk, bool proximityOk, bool servoOk, const char* servoDetail, bool full, void (*writeServos)(float pan, float tilt));

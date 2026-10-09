@@ -1,4 +1,4 @@
-// StackChan (CoreS3 + SG90) <-> FlyBot brain over MQTT.
+// StackChan (CoreS3 + SG90, or M5Stack's StackChan with SCS0009 servos) <-> FlyBot brain over MQTT.
 //
 // publishes  <base>/sensor/camera     {"x","y","vx","vy","box":[l,t,r,b],"width","height","polarity","lum":[l,r,t,b]}
 //                                     | {"detected":false,"lum":[...]}
@@ -11,12 +11,12 @@
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include <ArduinoJson.h>
-#include <ESP32Servo.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
 #include "esp_camera.h"
 #include "img_converters.h"
 #include "selftest.h"
+#include "servo_drv.h"
 #include "thai_font.h"
 
 #if __has_include("flybot_config.h")
@@ -35,7 +35,6 @@ static constexpr int FRAME_W = 160;  // FRAMESIZE_QQVGA
 static constexpr int FRAME_H = 120;
 
 Avatar avatar;
-Servo servoX, servoY;
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 String topicBase = MQTT_BASE_TOPIC;
@@ -210,10 +209,7 @@ static void publishProximity() {
 }
 
 // -- commands ---------------------------------------------------------------
-static void writeServos(float pan, float tilt) {
-  servoX.write(constrain(SERVO_X_CENTER + SERVO_X_SIGN * pan, SERVO_X_MIN, SERVO_X_MAX));
-  servoY.write(constrain(SERVO_Y_CENTER + SERVO_Y_SIGN * tilt, SERVO_Y_MIN, SERVO_Y_MAX));
-}
+static void writeServos(float pan, float tilt) { servoWrite(pan, tilt); }
 
 static Expression toExpression(const char* e) {
   if (!strcmp(e, "happy")) return Expression::Happy;
@@ -287,7 +283,24 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
 
 // -- connectivity -----------------------------------------------------------------
 static void ensureConnected() {
-  if (WiFi.status() != WL_CONNECTED) return;  // WiFi auto-reconnects
+  static bool loggedIp = false;
+  static uint32_t lastJoin = 0;
+  if (WiFi.status() != WL_CONNECTED) {
+    loggedIp = false;
+    // auto-reconnect gives up after a run of auth failures, so start over every 10 s
+    if (millis() - lastJoin > 10000) {
+      lastJoin = millis();
+      M5_LOGW("WiFi not connected (status %d), joining %s", WiFi.status(), WIFI_SSID);
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    }
+    return;
+  }
+  if (!loggedIp) {
+    loggedIp = true;
+    M5_LOGW("WiFi %s ip %s gw %s rssi %d", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(),
+            WiFi.gatewayIP().toString().c_str(), WiFi.RSSI());
+  }
   if (mqtt.connected()) return;
   static uint32_t lastTry = 0;
   if (millis() - lastTry < 2000) return;
@@ -324,10 +337,8 @@ void setup() {
   cameraOk = initCamera();
   if (!cameraOk) M5_LOGE("camera init failed");
 
-  servoX.setPeriodHertz(50);
-  servoY.setPeriodHertz(50);
-  servoX.attach(SERVO_PIN_X, 500, 2400);
-  servoY.attach(SERVO_PIN_Y, 500, 2400);
+  bool servoOk = servoBegin();  // after the camera: the SCS power switch is on the shared I2C bus
+  M5_LOGI("servo: %s", servoInfo());
   writeServos(0, 0);
   M5.Speaker.begin();
 
@@ -339,9 +350,9 @@ void setup() {
     M5.update();
     full = M5.Touch.getCount() > 0;
   }
-  SelfTestReport report = runSelfTest(cameraOk, proximityOk, full, writeServos);
+  SelfTestReport report = runSelfTest(cameraOk, proximityOk, servoOk, servoInfo(), full, writeServos);
   selfTestJson = report.toJson();
-  Serial.println(selfTestJson);
+  M5_LOGW("selftest %s", selfTestJson.c_str());
   delay(report.allOk() ? 2500 : 10000);  // leave failures on screen long enough to read
 
   avatar.init();
@@ -355,7 +366,19 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  int found = WiFi.scanNetworks();  // logged so a weak or missing AP is visible on the serial port
+  for (int i = 0; i < found; ++i) {
+    if (WiFi.SSID(i) == WIFI_SSID) {
+      M5_LOGW("scan: %s rssi %d ch %d bssid %s auth %d", WIFI_SSID, WiFi.RSSI(i), WiFi.channel(i),
+              WiFi.BSSIDstr(i).c_str(), WiFi.encryptionType(i));
+    }
+  }
+  M5_LOGW("scan: %d networks, my mac %s", found, WiFi.macAddress().c_str());
+  WiFi.scanDelete();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#ifdef WIFI_TX_POWER  // some APs drop the auth of a loud ESP32 (AUTH_EXPIRE)
+  WiFi.setTxPower(WIFI_TX_POWER);
+#endif
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setBufferSize(1024);  // command JSON with brain telemetry exceeds the 256 B default
   mqtt.setCallback(onCommand);
@@ -366,6 +389,7 @@ void loop() {
   ensureConnected();
   mqtt.loop();
   serviceTones();
+  servoUpdate();
   if (!mqtt.connected()) {
     delay(10);
     return;

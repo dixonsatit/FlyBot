@@ -24,6 +24,14 @@
 #define SERVO_Y_MIN 60  // the SG90 StackChan tilt mechanism only travels ~60..90
 #define SERVO_Y_MAX 90
 
+// M5Stack StackChan (pio run -e stackchan-official): SCS0009 bus servos, angles in degrees
+// from the factory zero (read from NVS if the factory app calibrated it).
+#define SCS_YAW_SIGN 1
+#define SCS_PITCH_SIGN 1
+#define SCS_YAW_LIMIT_DEG 90  // factory firmware allows 128
+#define SCS_PITCH_MIN_DEG 5   // M5Stack: keep the vertical axis within 5..85 or it may stall
+#define SCS_PITCH_MAX_DEG 85
+
 // Motion detector (frame differencing on 160x120 grayscale)
 #define DIFF_THRESHOLD 25         // per-pixel |change| counted as motion
 #define MIN_MOTION_PIXELS 40      // fewer changed pixels -> "detected": false

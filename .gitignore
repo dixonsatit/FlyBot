@@ -7,3 +7,4 @@ data/
 firmware/*/.pio/
 firmware/*/src/flybot_config.h
 *.key
+firmware/*/backup/
