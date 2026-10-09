@@ -955,6 +955,19 @@ def test_assistant_store_notes_and_reminders(tmp_path):
     assert again.forget(note["id"]) and again.cancel(r2["id"]) and again.summary() == {"notes": [], "reminders": []}
 
 
+def test_cortex_saves_a_note_the_llm_only_claimed(gains, tmp_path):
+    import json as _json
+    from flybot.assistant import AssistantStore
+    from flybot.cortex import Cortex
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    cortex = Cortex(_ScriptedLLM(lambda text, tools, img: "หนูจะจดไว้ให้นะคะ"), brain, lambda t, b: None, "stackchan")
+    cortex.store = AssistantStore(str(tmp_path / "a.json"))
+    cortex._chat("จำไหมว่าห้องเซิร์ฟเวอร์อยู่ชั้นสาม")
+    assert [n["text"] for n in cortex.store.notes] == ["ห้องเซิร์ฟเวอร์อยู่ชั้นสาม"]
+    cortex._chat("วันนี้กี่โมง")  # not a note
+    assert len(cortex.store.notes) == 1
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

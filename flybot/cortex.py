@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import queue
+import re
 import threading
 import time
 from concurrent.futures import Future
@@ -59,6 +60,8 @@ def now_line(tz: str | None = None) -> str:
     return (f"It is now วัน{_TH_DAYS[t.weekday()]}ที่ {t.day} {_TH_MONTHS[t.month - 1]} {t.year + 543} "
             f"เวลา {t:%H:%M} น. ({name}, {t:%Y-%m-%d %H:%M}).")
 
+
+REMEMBER_RE = re.compile(r"^(จำ|จด)(ไว้|ไหม|หน่อย|ด้วย)?\s*(นะ|ที)?\s*(ว่า)?\s*")
 
 VOICE_RULE = " This reply is spoken aloud by the robot: one short sentence, no lists or emoji."
 
@@ -221,12 +224,25 @@ class Cortex:
     def _chat(self, text: str, voice: bool = False) -> str:
         # spoken replies: TTS time grows with length, so keep them to one sentence
         persona = self.persona + (VOICE_RULE if voice else "")
+        notes_before = len(self.store.notes) if self.store else 0
         reply = self.llm.ask(persona, self.history, text, tools=self.tools())
+        self._ensure_saved(text, notes_before)
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "..."}]
         self.history = self.history[-2 * self.history_turns:]
         # voice: the robot speaks it, so the dashboard page must not say it again
         self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
         return reply
+
+    def _ensure_saved(self, text: str, notes_before: int) -> None:
+        """A sentence starting with จำ/จด is a note even when the LLM only said it saved it (qwen
+        answered "หนูจะจดไว้ให้" without calling `remember`)."""
+        m = REMEMBER_RE.match(text.strip())
+        if not (m and self.store) or len(self.store.notes) > notes_before:
+            return
+        fact = text.strip()[m.end():].strip()
+        if len(fact) >= 4:
+            log.info("remember (forced, the LLM didn't save it): %s", fact)
+            self.store.remember(fact)
 
     def _store(self):
         if not self.store:
