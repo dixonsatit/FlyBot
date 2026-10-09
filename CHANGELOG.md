@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.19.1 (2026-10-09)
+
+### Bug Fixes
+
+- **assistant**: Save facts said with จำ/จด and never claim a save that didn't happen
+  ([`dc89eeb`](https://github.com/dixonsatit/FlyBot/commit/dc89eeb2f0b0f8e449d5a4f11db818fbff496969))
+
+
 ## v0.19.0 (2026-10-09)
 
 ### Features
