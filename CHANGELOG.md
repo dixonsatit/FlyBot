@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.13.3 (2026-10-09)
+
+### Bug Fixes
+
+- **firmware**: Never block on USB serial logs; per-network wake name
+  ([`3057d9b`](https://github.com/dixonsatit/FlyBot/commit/3057d9bd8c969f956916ea39dd9f21b63d3afad0))
+
+
 ## v0.13.2 (2026-10-09)
 
 ### Bug Fixes
