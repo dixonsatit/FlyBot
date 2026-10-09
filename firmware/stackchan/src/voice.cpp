@@ -1,5 +1,7 @@
 #include "voice.h"
 
+#include "params.h"
+
 #include <Avatar.h>
 #include <HTTPClient.h>
 #include <M5Unified.h>
@@ -17,21 +19,6 @@
 #endif
 #ifndef VOICE_PASSWORD
 #define VOICE_PASSWORD MQTT_PASSWORD
-#endif
-#ifndef SPEAKER_VOLUME_PCT
-#define SPEAKER_VOLUME_PCT 100
-#endif
-#ifndef VOICE_GAIN  // software gain on the reply's samples (clipped), past the speaker's 255
-#define VOICE_GAIN 1.0f
-#endif
-#ifndef VOICE_VOLUME  // 0..255, separate from SPEAKER_VOLUME_PCT so speech stays audible
-#define VOICE_VOLUME 140
-#endif
-#ifndef VAD_MIN_RMS  // speech must be at least this loud (s16 RMS) ...
-#define VAD_MIN_RMS 400
-#endif
-#ifndef VAD_RATIO  // ... and this many times the room's noise floor
-#define VAD_RATIO 3.0f
 #endif
 
 #if STACKCHAN_OFFICIAL
@@ -69,9 +56,23 @@ static uint8_t* wav = nullptr;
 static volatile size_t wavLen = 0;
 static volatile int httpCode = 0;
 static String path;  // /api/voice[?wake=1] or /api/pat for the running request
+static String voiceUrl;  // of the network we're on (empty: no voice there)
+static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
+static volatile float micNoise = 0;
+
+void voiceSetUrl(const char* url) { voiceUrl = url; }
 
 bool voiceBusy() { return state == State::Capturing || state == State::Waiting || state == State::Speaking; }
 bool voiceOwnsAudio() { return state != State::Off; }
+
+String voiceStatusJson() {
+  static const char* NAMES[] = {"off", "listening", "capturing", "waiting", "speaking"};
+  char buf[160];
+  snprintf(buf, sizeof buf, "{\"state\":\"%s\",\"level\":%ld,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\"}",
+           NAMES[int(state)], long(micLevel), micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
+           voiceUrl.c_str());
+  return buf;
+}
 
 static int32_t rms(const int16_t* s, size_t n) {
   int64_t sum = 0;
@@ -100,12 +101,14 @@ static void micTask(void*) {
     while (M5.Mic.isRecording()) delay(1);
     if (!micActive) continue;
     const int32_t level = rms(block, BLOCK);
+    micLevel = level;
+    micNoise = noise;
 
     if (state == State::Listening) {
       if (noise == 0 || level < noise * 2) noise = noise == 0 ? level : noise * 0.95f + level * 0.05f;
       memcpy(preroll[ring], block, sizeof block);
       ring = (ring + 1) % PREROLL;
-      loud = level > max(float(VAD_MIN_RMS), noise * VAD_RATIO) ? loud + 1 : 0;
+      loud = level > max(float(P.vadMinRms), noise * P.vadRatio) ? loud + 1 : 0;
       if (warmup > 0) {
         --warmup;
         loud = 0;
@@ -129,7 +132,7 @@ static void micTask(void*) {
         memcpy(rec + recLen, block, sizeof block);
         recLen += BLOCK;
       }
-      quiet = level < max(float(VAD_MIN_RMS) * 0.7f, noise * VAD_RATIO * 0.7f) ? quiet + 1 : 0;
+      quiet = level < max(float(P.vadMinRms) * 0.7f, noise * P.vadRatio * 0.7f) ? quiet + 1 : 0;
       const bool full = recLen + BLOCK > MAX_SAMPLES;
       const bool done = fromHold ? (!holding || full) : (quiet >= END_QUIET || full);
       if (!done) continue;
@@ -148,17 +151,17 @@ static void micTask(void*) {
 
 // Scale the samples of a 16-bit PCM WAV in place (Wayu-TTS: 24 kHz mono, plain 44-byte header).
 static void amplify(uint8_t* w, size_t len) {
-  if (VOICE_GAIN == 1.0f || len < 44 || memcmp(w, "RIFF", 4) || memcmp(w + 8, "WAVE", 4) || w[34] != 16) return;
+  if (P.voiceGain == 1.0f || len < 44 || memcmp(w, "RIFF", 4) || memcmp(w + 8, "WAVE", 4) || w[34] != 16) return;
   int16_t* pcm = (int16_t*)(w + 44);
   for (size_t i = 0; i < (len - 44) / 2; ++i) {
-    int32_t v = int32_t(pcm[i] * VOICE_GAIN);
+    int32_t v = int32_t(pcm[i] * P.voiceGain);
     pcm[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
   }
 }
 
 static void sendTask(void*) {
   HTTPClient http;
-  String url = VOICE_URL;
+  String url = voiceUrl;
   url.replace("/api/voice", path);
   http.begin(url);
   http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
@@ -258,7 +261,7 @@ void voiceUpdate() {
         avatar.setSpeechText(httpCode == 200 || httpCode == 204 ? "" : "voice error");
         httpCode = 0;
       }
-      if (WiFi.status() == WL_CONNECTED) startMic();
+      if (WiFi.status() == WL_CONNECTED && voiceUrl.length()) startMic();
       return;
 
     case State::Listening:
@@ -290,7 +293,7 @@ void voiceUpdate() {
       if (!started) {
         avatar.setSpeechText("");
         M5.Speaker.begin();
-        M5.Speaker.setVolume(VOICE_VOLUME);
+        M5.Speaker.setVolume(P.voiceVolume);
         started = M5.Speaker.playWav(wav, wavLen);
         if (!started) M5_LOGW("voice: playWav failed (%u bytes)", unsigned(wavLen));
       }
@@ -299,7 +302,7 @@ void voiceUpdate() {
         return;
       }
       avatar.setMouthOpenRatio(0);
-      M5.Speaker.setVolume(64 * SPEAKER_VOLUME_PCT / 100);
+      M5.Speaker.setVolume(64 * P.speakerVolumePct / 100);
       free(wav);
       wav = nullptr;
       wavLen = 0;
@@ -313,7 +316,9 @@ void voiceUpdate() {
 
 #else
 void voiceBegin() {}
+void voiceSetUrl(const char*) {}
 void voiceUpdate() {}
 bool voiceBusy() { return false; }
 bool voiceOwnsAudio() { return false; }
+String voiceStatusJson() { return "{\"state\":\"disabled\"}"; }
 #endif

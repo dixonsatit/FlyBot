@@ -10,6 +10,14 @@
 #define MQTT_PASSWORD ""
 #define MQTT_BASE_TOPIC "stackchan"
 
+// Optional second network with its own broker (the strongest known one is joined), e.g. home
+// WiFi through a laptop running tools/lan_relay.py over its VPN.
+// #define WIFI2_SSID "home-ssid"
+// #define WIFI2_PASSWORD "home-password"
+// #define WIFI2_MQTT_HOST "192.168.1.104"
+// #define WIFI2_MQTT_PORT 31883
+// #define WIFI2_VOICE_URL "http://192.168.1.104:31880/api/voice"
+
 // SG90 signal pins. CoreS3 Port.A X:2 Y:1, Port.B X:9 Y:8, Port.C X:17 Y:18
 #define SERVO_PIN_X 17
 #define SERVO_PIN_Y 18

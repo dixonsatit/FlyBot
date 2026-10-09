@@ -17,6 +17,7 @@
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
+#include "params.h"
 #include "stream.h"
 #include "voice.h"
 #include "thai_font.h"
@@ -29,12 +30,6 @@
 #endif
 #ifndef SELF_TEST_FULL  // configs copied from an older example
 #define SELF_TEST_FULL 0
-#endif
-#ifndef EGO_MOTION_DEG_S  // head turning faster than this moves the whole image (flybot.plant)
-#define EGO_MOTION_DEG_S 10
-#endif
-#ifndef SPEAKER_VOLUME_PCT  // scales the bridge's audio volume; 0 = mute
-#define SPEAKER_VOLUME_PCT 100
 #endif
 
 using namespace m5avatar;
@@ -53,6 +48,16 @@ static bool havePrev = false;
 static bool cameraOk = false;
 static bool proximityOk = false;
 static uint32_t egoMotionUntil = 0;  // until then the camera sees its own head turning
+
+// Latest values for the monitor page (built into /status JSON every 300 ms).
+static struct {
+  uint32_t n = 0, frames = 0, commands = 0;
+  bool detected = false, ego = false;
+  int box[4] = {0, 0, 0, 0};
+  float gyro[3] = {}, accel[3] = {}, pan = 0, tilt = 0;
+  uint16_t ps = 0, als = 0;
+  String face = "", brain = "{}";
+} tele;
 
 // -- tone queue: [Hz, ms] pairs played without blocking the main loop -------
 struct Tone { uint16_t hz; uint16_t ms; };
@@ -141,7 +146,7 @@ static void processCamera() {
       (y < FRAME_H / 2 ? lumT : lumB) += v;
       int d = int(v) - int(prevFrame[i]);
       prevFrame[i] = v;
-      changedMask[i] = havePrev && abs(d) > DIFF_THRESHOLD;
+      changedMask[i] = havePrev && abs(d) > P.diffThreshold;
       if (changedMask[i]) {
         ++count;
         sumX += x;
@@ -163,8 +168,13 @@ static void processCamera() {
   static float lastX = 0, lastY = 0, vx = 0, vy = 0;
   static uint32_t lastSeen = 0;
   const bool ego = millis() < egoMotionUntil;  // the head is turning: the difference is our own motion
-  const bool tooMuch = count > MAX_MOTION_FRACTION * FRAME_W * FRAME_H;
-  const bool seen = count >= MIN_MOTION_PIXELS;
+  const bool tooMuch = count > P.maxMotionFraction * FRAME_W * FRAME_H;
+  const bool seen = count >= P.minMotionPixels;
+  tele.n = count;
+  tele.ego = ego || tooMuch;
+  tele.detected = seen && !tele.ego;
+  if (seen) tele.box[0] = minX, tele.box[1] = minY, tele.box[2] = maxX, tele.box[3] = maxY;
+  ++tele.frames;
   streamFrame(prevFrame, changedMask, FRAME_W, FRAME_H, minX, minY, seen ? maxX : -1, maxY, ego || tooMuch);
 #ifdef CAMERA_DEBUG  // publish every frame's changed-pixel count to tune the detector
   {
@@ -176,7 +186,7 @@ static void processCamera() {
   if (tooMuch || ego) return;  // whole image moved or the head is turning: keep the last target
 
   JsonDocument doc;
-  if (count < MIN_MOTION_PIXELS) {
+  if (count < P.minMotionPixels) {
     doc["detected"] = false;
     lastSeen = 0;
   } else {
@@ -220,6 +230,7 @@ static void publishImu() {
   float gx, gy, gz, ax, ay, az;
   M5.Imu.getGyro(&gx, &gy, &gz);
   M5.Imu.getAccel(&ax, &ay, &az);
+  tele.gyro[0] = gx, tele.gyro[1] = gy, tele.gyro[2] = gz, tele.accel[0] = ax, tele.accel[1] = ay, tele.accel[2] = az;
   char buf[160];
   int n = snprintf(buf, sizeof buf, "{\"gyro\":[%.2f,%.2f,%.2f],\"accel\":[%.3f,%.3f,%.3f]}",
                    gx, gy, gz, ax, ay, az);
@@ -228,8 +239,9 @@ static void publishImu() {
 
 static void publishProximity() {
   char buf[48];
-  int n = snprintf(buf, sizeof buf, "{\"ps\":%u,\"als\":%u}", CoreS3.Ltr553.getPsValue(),
-                   CoreS3.Ltr553.getAlsValue());
+  tele.ps = CoreS3.Ltr553.getPsValue();
+  tele.als = CoreS3.Ltr553.getAlsValue();
+  int n = snprintf(buf, sizeof buf, "{\"ps\":%u,\"als\":%u}", tele.ps, tele.als);
   mqtt.publish((topicBase + "/sensor/proximity").c_str(), (const uint8_t*)buf, n);
 }
 
@@ -240,7 +252,7 @@ static void writeServos(float pan, float tilt) {
   const uint32_t now = millis();
   const float dt = max(now - lastMs, 20u) / 1000.0f;
   const float speed = hypotf(pan - lastPan, tilt - lastTilt) / dt;
-  if (speed > EGO_MOTION_DEG_S) egoMotionUntil = now + 150;  // one frame plus the servo settling
+  if (speed > P.egoMotionDegS) egoMotionUntil = now + 150;  // one frame plus the servo settling
   lastPan = pan;
   lastTilt = tilt;
   lastMs = now;
@@ -287,12 +299,20 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
   if (deserializeJson(doc, payload, len)) return;
 
   JsonObject servo = doc["servo"];
-  if (!servo.isNull()) writeServos(servo["pan_angle"] | 0.0f, servo["tilt_angle"] | 0.0f);
+  if (!servo.isNull()) {
+    tele.pan = servo["pan_angle"] | 0.0f;
+    tele.tilt = servo["tilt_angle"] | 0.0f;
+    writeServos(tele.pan, tele.tilt);
+  }
+  tele.brain = "";
+  serializeJson(doc["brain"], tele.brain);
+  ++tele.commands;
 
   static String lastFace;
   const char* face = doc["face"]["expression"];
   if (face && lastFace != face && !voiceBusy()) {  // keep the face steady while talking
     lastFace = face;
+    tele.face = face;
     avatar.setExpression(toExpression(face));
   }
 
@@ -307,7 +327,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
 
   JsonObject audio = doc["audio"];
   if (!audio.isNull() && !voiceOwnsAudio()) {
-    M5.Speaker.setVolume((audio["volume"] | 120) * SPEAKER_VOLUME_PCT / 100);
+    M5.Speaker.setVolume((audio["volume"] | 120) * P.speakerVolumePct / 100);
     toneCount = toneIndex = 0;
     for (JsonArray t : audio["tones"].as<JsonArray>()) {
       if (toneCount >= int(sizeof tones / sizeof *tones)) break;
@@ -317,18 +337,88 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
   }
 }
 
+// -- monitor page status (stream.cpp serves it) -------------------------------------
+static void publishStatus() {
+  static uint32_t last = 0, lastFrames = 0, lastCommands = 0;
+  const uint32_t now = millis();
+  if (now - last < 300) return;
+  const float dt = (now - last) / 1000.0f;
+  last = now;
+  char head[640];
+  snprintf(head, sizeof head,
+           "{\"uptime\":%lu,\"wifi\":{\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\"},\"mqtt\":%d,"
+           "\"heap\":%u,\"psram\":%u,\"fps\":%.1f,\"cmd_hz\":%.1f,"
+           "\"servo\":{\"pan\":%.1f,\"tilt\":%.1f},\"face\":\"%s\","
+           "\"cam\":{\"n\":%lu,\"detected\":%d,\"skipped\":%d,\"box\":[%d,%d,%d,%d]},"
+           "\"imu\":{\"gyro\":[%.1f,%.1f,%.1f],\"accel\":[%.2f,%.2f,%.2f]},\"ps\":%u,\"als\":%u,",
+           (unsigned long)(now / 1000), WiFi.SSID().c_str(), WiFi.RSSI(), WiFi.localIP().toString().c_str(),
+           mqtt.connected(), ESP.getFreeHeap(), ESP.getFreePsram(), (tele.frames - lastFrames) / dt,
+           (tele.commands - lastCommands) / dt, tele.pan, tele.tilt, tele.face.c_str(), (unsigned long)tele.n,
+           tele.detected, tele.ego, tele.box[0], tele.box[1], tele.box[2], tele.box[3], tele.gyro[0], tele.gyro[1],
+           tele.gyro[2], tele.accel[0], tele.accel[1], tele.accel[2], tele.ps, tele.als);
+  lastFrames = tele.frames;
+  lastCommands = tele.commands;
+  String s = head;
+  s += "\"brain\":" + (tele.brain.length() ? tele.brain : String("{}"));
+  s += ",\"voice\":" + voiceStatusJson();
+  s += ",\"params\":" + paramsJson() + "}";
+  streamSetStatus(s);
+}
+
 // -- connectivity -----------------------------------------------------------------
+// Up to two networks, each with its own broker and voice URL (e.g. the hospital WiFi
+// straight to the cluster, and home WiFi through a laptop relaying over its VPN).
+struct Network { const char *ssid, *password, *mqttHost; uint16_t mqttPort; const char* voiceUrl; };
+static const Network NETWORKS[] = {
+#ifdef VOICE_URL
+    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, VOICE_URL},
+#else
+    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, ""},
+#endif
+#ifdef WIFI2_SSID
+    {WIFI2_SSID, WIFI2_PASSWORD, WIFI2_MQTT_HOST, WIFI2_MQTT_PORT, WIFI2_VOICE_URL},
+#endif
+};
+static constexpr int N_NETWORKS = sizeof NETWORKS / sizeof *NETWORKS;
+static int network = 0;
+static uint32_t lastJoin = 0;  // give each join 10 s before starting over
+
+// The strongest known network in a scan (logged, so a weak or missing AP shows on serial).
+static int pickNetwork() {
+  int best = network, bestRssi = -1000;
+  int found = WiFi.scanNetworks();
+  for (int i = 0; i < found; ++i) {
+    for (int n = 0; n < N_NETWORKS; ++n) {
+      if (WiFi.SSID(i) == NETWORKS[n].ssid) {
+        M5_LOGW("scan: %s rssi %d ch %d", NETWORKS[n].ssid, WiFi.RSSI(i), WiFi.channel(i));
+        if (WiFi.RSSI(i) > bestRssi) bestRssi = WiFi.RSSI(i), best = n;
+      }
+    }
+  }
+  M5_LOGW("scan: %d networks, my mac %s", found, WiFi.macAddress().c_str());
+  WiFi.scanDelete();
+  return best;
+}
+
+static void joinNetwork() {
+  network = pickNetwork();
+  lastJoin = millis();
+  const Network& n = NETWORKS[network];
+  WiFi.begin(n.ssid, n.password);
+  mqtt.disconnect();
+  mqtt.setServer(n.mqttHost, n.mqttPort);
+  voiceSetUrl(n.voiceUrl);
+}
+
 static void ensureConnected() {
   static bool loggedIp = false;
-  static uint32_t lastJoin = 0;
   if (WiFi.status() != WL_CONNECTED) {
     loggedIp = false;
     // auto-reconnect gives up after a run of auth failures, so start over every 10 s
     if (millis() - lastJoin > 10000) {
-      lastJoin = millis();
-      M5_LOGW("WiFi not connected (status %d), joining %s", WiFi.status(), WIFI_SSID);
+      M5_LOGW("WiFi not connected (status %d), rejoining", WiFi.status());
       WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      joinNetwork();
     }
     return;
   }
@@ -360,6 +450,7 @@ static void ensureConnected() {
 void setup() {
   auto cfg = M5.config();
   CoreS3.begin(cfg);
+  paramsBegin();  // tunables saved from the monitor page
 
   Ltr5xx_Init_Basic_Para ltr = LTR5XX_BASE_PARA_CONFIG_DEFAULT;
   ltr.ps_led_pulse_freq = LTR5XX_LED_PULSE_FREQ_40KHZ;
@@ -378,7 +469,7 @@ void setup() {
 
   writeServos(0, 0);
   M5.Speaker.begin();
-  M5.Speaker.setVolume(64 * SPEAKER_VOLUME_PCT / 100);  // boot beep; 64 = M5Unified default
+  M5.Speaker.setVolume(64 * P.speakerVolumePct / 100);  // boot beep; 64 = M5Unified default
 
   // touch the screen during the first 1.5 s for the full test (servo sweep)
   bool full = SELF_TEST_FULL;
@@ -404,29 +495,20 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  int found = WiFi.scanNetworks();  // logged so a weak or missing AP is visible on the serial port
-  for (int i = 0; i < found; ++i) {
-    if (WiFi.SSID(i) == WIFI_SSID) {
-      M5_LOGW("scan: %s rssi %d ch %d bssid %s auth %d", WIFI_SSID, WiFi.RSSI(i), WiFi.channel(i),
-              WiFi.BSSIDstr(i).c_str(), WiFi.encryptionType(i));
-    }
-  }
-  M5_LOGW("scan: %d networks, my mac %s", found, WiFi.macAddress().c_str());
-  WiFi.scanDelete();
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-#ifdef WIFI_TX_POWER  // some APs drop the auth of a loud ESP32 (AUTH_EXPIRE)
-  WiFi.setTxPower(WIFI_TX_POWER);
-#endif
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setBufferSize(1024);  // command JSON with brain telemetry exceeds the 256 B default
   mqtt.setCallback(onCommand);
   voiceBegin();
+  joinNetwork();
+#ifdef WIFI_TX_POWER  // some APs drop the auth of a loud ESP32 (AUTH_EXPIRE)
+  WiFi.setTxPower(WIFI_TX_POWER);
+#endif
   streamBegin();
 }
 
 void loop() {
   M5.update();
   voiceUpdate();
+  publishStatus();
   ensureConnected();
   mqtt.loop();
   serviceTones();
