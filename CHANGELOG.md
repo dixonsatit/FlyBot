@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.13.1 (2026-10-09)
+
+### Bug Fixes
+
+- **firmware**: Keep the monitor page within the robot's 16 sockets
+  ([`b529737`](https://github.com/dixonsatit/FlyBot/commit/b5297373afeed036da04f412d228b359aea143f4))
+
+
 ## v0.13.0 (2026-10-09)
 
 ### Features
