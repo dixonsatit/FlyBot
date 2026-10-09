@@ -40,6 +40,9 @@ from .plant import PlantConfig, StackChanPlant, World
 log = logging.getLogger(__name__)
 
 
+CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot being called
+CALL_REPLY = "ว่าไงคะ"
+
 # What the robot says when its head is stroked (it calls itself หนู).
 PAT_LINES = ("หนูฟินจังเลย", "หนูชอบให้ลูบหัว", "ฟินมากเลย หนูชอบ", "อีกนิดนึงนะ หนูชอบ")
 
@@ -377,6 +380,12 @@ class Dashboard:
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
                 follow_up = time.monotonic() - dash._last_reply < dash.follow_up_s
+                # A call is the name said alone, which asr-typhoon hears as one short word ("หวี่" came
+                # out as มี / นี่ / วี): answer it and open the follow-up window for the question.
+                if wake and not follow_up and text and len(text.replace(" ", "")) <= CALL_MAX_CHARS:
+                    dash._last_reply = time.monotonic()
+                    log.info("voice: call %r (%.1fs) -> %r", text, seconds, CALL_REPLY)
+                    return self._send(200, to_16k(dash.tts.speak(CALL_REPLY)), "audio/wav")
                 if not text or (wake and not follow_up and not dash.wake.search(text)):  # not for the robot
                     log.info("voice: %s (%.1fs) -> 204", f"heard {text!r} without the wake name" if text
                              else "nothing understood", seconds)

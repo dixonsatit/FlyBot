@@ -839,6 +839,10 @@ def test_voice_turn_via_dashboard(gains):
         assert _http_raw(dash.port, "/api/voice", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 1
         dash._last_reply = -1e9  # outside the follow-up window
+        heard["text"] = "มี"  # the name alone, as the ASR hears it: answered, and the window opens
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        assert len(published) == 1  # no LLM turn for a call
+        dash._last_reply = -1e9
         heard["text"] = "วันนี้ฝนตกไหม"  # hands-free speech that doesn't call the robot is ignored
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 1
