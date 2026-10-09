@@ -368,15 +368,18 @@ static void publishStatus() {
 // -- connectivity -----------------------------------------------------------------
 // Up to two networks, each with its own broker and voice URL (e.g. the hospital WiFi
 // straight to the cluster, and home WiFi through a laptop relaying over its VPN).
-struct Network { const char *ssid, *password, *mqttHost; uint16_t mqttPort; const char* voiceUrl; };
+struct Network { const char *ssid, *password, *mqttHost; uint16_t mqttPort; const char* voiceUrl; bool wakeName; };
 static const Network NETWORKS[] = {
 #ifdef VOICE_URL
-    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, VOICE_URL},
+    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, VOICE_URL, true},
 #else
-    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, ""},
+    {WIFI_SSID, WIFI_PASSWORD, MQTT_HOST, MQTT_PORT, "", true},
 #endif
 #ifdef WIFI2_SSID
-    {WIFI2_SSID, WIFI2_PASSWORD, WIFI2_MQTT_HOST, WIFI2_MQTT_PORT, WIFI2_VOICE_URL},
+#ifndef WIFI2_WAKE_NAME  // 0: answer every sentence on this network (e.g. at home, alone)
+#define WIFI2_WAKE_NAME 1
+#endif
+    {WIFI2_SSID, WIFI2_PASSWORD, WIFI2_MQTT_HOST, WIFI2_MQTT_PORT, WIFI2_VOICE_URL, WIFI2_WAKE_NAME},
 #endif
 };
 static constexpr int N_NETWORKS = sizeof NETWORKS / sizeof *NETWORKS;
@@ -407,7 +410,7 @@ static void joinNetwork() {
   WiFi.begin(n.ssid, n.password);
   mqtt.disconnect();
   mqtt.setServer(n.mqttHost, n.mqttPort);
-  voiceSetUrl(n.voiceUrl);
+  voiceSetUrl(n.voiceUrl, n.wakeName);
 }
 
 static void ensureConnected() {
@@ -450,6 +453,9 @@ static void ensureConnected() {
 void setup() {
   auto cfg = M5.config();
   CoreS3.begin(cfg);
+  // Logs go to the USB serial port; with nobody reading it a full buffer made every log call
+  // wait (the mic task and web server stalled). Drop output instead of waiting.
+  Serial.setTxTimeoutMs(0);
   paramsBegin();  // tunables saved from the monitor page
 
   Ltr5xx_Init_Basic_Para ltr = LTR5XX_BASE_PARA_CONFIG_DEFAULT;

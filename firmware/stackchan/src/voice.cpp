@@ -61,7 +61,12 @@ static String voiceUrl;  // of the network we're on (empty: no voice there)
 static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
 static volatile float micNoise = 0;
 
-void voiceSetUrl(const char* url) { voiceUrl = url; }
+static bool needName = true;  // hands-free speech must call the robot by name
+
+void voiceSetUrl(const char* url, bool wakeName) {
+  voiceUrl = url;
+  needName = wakeName;
+}
 
 bool voiceBusy() { return state == State::Capturing || state == State::Waiting || state == State::Speaking; }
 bool voiceOwnsAudio() { return state != State::Off; }
@@ -143,7 +148,7 @@ static void micTask(void*) {
         state = State::Listening;
         continue;
       }
-      uttWake = !fromHold;
+      uttWake = !fromHold && needName;
       uttReady = true;
       micActive = false;  // main stops the mic and sends the sentence
     }
@@ -317,7 +322,7 @@ void voiceUpdate() {
 
 #else
 void voiceBegin() {}
-void voiceSetUrl(const char*) {}
+void voiceSetUrl(const char*, bool) {}
 void voiceUpdate() {}
 bool voiceBusy() { return false; }
 bool voiceOwnsAudio() { return false; }
