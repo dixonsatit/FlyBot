@@ -48,6 +48,11 @@
 // Basic auth defaults to MQTT_USER / MQTT_PASSWORD, like the k8s manifests.
 // #define VOICE_URL "http://192.168.1.10:31880/api/voice"
 // #define VOICE_VOLUME 140  // 0..255
+// Hands-free: speech louder than VAD_MIN_RMS and VAD_RATIO x the room's noise is sent with
+// ?wake=1, and the bridge answers only if it calls the robot by name (--wake-name).
+// #define VAD_MIN_RMS 400
+// #define VAD_RATIO 3.0f
+// #define VOICE_GAIN 1.0f  // software gain on replies, past VOICE_VOLUME 255
 
 // Camera monitor: http://<robot ip>/ shows what the motion detector sees (MJPEG, 5 fps)
 // #define STREAM_PORT 80

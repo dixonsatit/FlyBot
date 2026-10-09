@@ -213,6 +213,8 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--tts-url", help="Wayu-TTS server for Thai speech, e.g. http://wayu-tts:7860")
     dash.add_argument("--tts-voice", help="default Wayu voice id (e.g. f_young_clear, m_young_clear)")
     dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
+    dash.add_argument("--wake-name", default=r"น้อง\s*(หวี่|หวี|วี่|วี|v)",
+                      help="regex the robot's hands-free speech must contain (as asr-typhoon spells the name)")
     llm = ap.add_argument_group("LLM cortex (narration, chat, vision)")
     llm.add_argument("--llm", default="none", choices=["none", "anthropic", "openai"],
                      help="anthropic = Claude API; openai = any OpenAI-compatible endpoint")
@@ -290,7 +292,7 @@ def main(argv: list[str] | None = None) -> None:
             from .stt import AsrClient
             stt = AsrClient(args.stt_url)
         bridge.dashboard = Dashboard(bridge, args.dashboard_port, args.dashboard_user, args.dashboard_password,
-                                     sim=args.dashboard_sim, tts=tts, stt=stt)
+                                     sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name)
         bridge.dashboard.start()
     bridge.run(heartbeat=args.heartbeat)
 

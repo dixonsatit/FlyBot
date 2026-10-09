@@ -27,6 +27,8 @@ import hmac
 import json
 import logging
 import math
+import random
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +38,10 @@ from .controller import PERSONALITIES
 from .plant import PlantConfig, StackChanPlant, World
 
 log = logging.getLogger(__name__)
+
+
+# What the robot says when its head is stroked (it calls itself หนู).
+PAT_LINES = ("หนูฟินจังเลย", "หนูชอบให้ลูบหัว", "ฟินมากเลย หนูชอบ", "อีกนิดนึงนะ หนูชอบ")
 
 
 class SimRobot:
@@ -118,8 +124,9 @@ class SimRobot:
 
 class Dashboard:
     def __init__(self, bridge, port: int = 8080, user: str = "stackchan", password: str | None = None,
-                 sim: bool = False, tts=None, stt=None):
+                 sim: bool = False, tts=None, stt=None, wake_name: str = r"น้อง\s*(หวี่|หวี|วี่|วี|v)"):
         self.bridge = bridge
+        self.wake = re.compile(wake_name, re.IGNORECASE)
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
@@ -279,8 +286,11 @@ class Dashboard:
                         except Exception as e:
                             return self._json(502, {"error": f"ASR: {e}"})
                         return self._json(200, {"text": result.get("text", ""), "ms": result.get("ms")})
-                    if self.path == "/api/voice":  # the robot's turn: PCM 16 kHz mono s16le in, WAV out
-                        return self._voice(self.rfile.read(length))
+                    if self.path.split("?")[0] == "/api/voice":  # PCM 16 kHz mono s16le in, WAV out
+                        # ?wake=1: hands-free speech, answered only when it calls the robot by name
+                        return self._voice(self.rfile.read(length), wake="wake=1" in self.path)
+                    if self.path == "/api/pat":  # the robot's head was stroked
+                        return self._pat()
                     body = json.loads(self.rfile.read(length) or b"{}")
                     if self.path == "/api/tts":
                         if not dash.tts:
@@ -298,7 +308,16 @@ class Dashboard:
                 except (ValueError, TypeError, AttributeError) as e:
                     self._json(400, {"error": str(e)})
 
-            def _voice(self, pcm: bytes):
+            def _pat(self):
+                dash.bridge.controller.pet()
+                if not dash.tts:
+                    return self._send(204, b"", "audio/wav")
+                try:
+                    return self._send(200, dash.tts.speak(random.choice(PAT_LINES)), "audio/wav")
+                except Exception as e:
+                    return self._json(502, {"error": f"TTS: {e}"})
+
+            def _voice(self, pcm: bytes, wake: bool = False):
                 if not (dash.stt and dash.tts and dash.bridge.cortex):
                     return self._json(404, {"error": "voice needs --stt-url, --tts-url and --llm"})
                 try:
@@ -307,7 +326,9 @@ class Dashboard:
                     raise
                 except Exception as e:
                     return self._json(502, {"error": f"ASR: {e}"})
-                if not text:  # nothing understood: the robot just goes back to idle
+                if not text or (wake and not dash.wake.search(text)):  # not for the robot: back to idle
+                    if text:
+                        log.info("voice: heard %r without the wake name", text)
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
                 try:

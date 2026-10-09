@@ -61,7 +61,7 @@ static int toneCount = 0, toneIndex = 0;
 static uint32_t toneUntil = 0;
 
 static void serviceTones() {
-  if (voiceBusy()) return;  // speech owns the speaker
+  if (voiceOwnsAudio()) return;  // the mic or a reply holds the I2S bus
   if (toneIndex >= toneCount || millis() < toneUntil) return;
   const Tone& t = tones[toneIndex++];
   if (t.hz > 0) M5.Speaker.tone(t.hz, t.ms);  // freq 0 = rest
@@ -250,7 +250,7 @@ static void writeServos(float pan, float tilt) {
 static Expression toExpression(const char* e) {
   if (!strcmp(e, "happy")) return Expression::Happy;
   if (!strcmp(e, "sleepy")) return Expression::Sleepy;
-  if (!strcmp(e, "alert")) return Expression::Angry;
+  if (!strcmp(e, "alert")) return Expression::Happy;  // someone came close: greet, not glare
   return Expression::Neutral;  // curious: the resting face of an assistant
 }
 
@@ -291,7 +291,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
 
   static String lastFace;
   const char* face = doc["face"]["expression"];
-  if (face && lastFace != face) {
+  if (face && lastFace != face && !voiceBusy()) {  // keep the face steady while talking
     lastFace = face;
     avatar.setExpression(toExpression(face));
   }
@@ -306,7 +306,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
   }
 
   JsonObject audio = doc["audio"];
-  if (!audio.isNull() && !voiceBusy()) {
+  if (!audio.isNull() && !voiceOwnsAudio()) {
     M5.Speaker.setVolume((audio["volume"] | 120) * SPEAKER_VOLUME_PCT / 100);
     toneCount = toneIndex = 0;
     for (JsonArray t : audio["tones"].as<JsonArray>()) {

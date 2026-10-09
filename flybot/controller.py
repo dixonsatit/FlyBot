@@ -255,6 +255,10 @@ class BrainController:
         """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
         self._inbox.put(lambda: setattr(self, "_say", (text, self._clock + seconds)))
 
+    def pet(self, hold_s: float = 4.0) -> None:
+        """Head stroked (the base's touch strip): a happy face, like the petting reward."""
+        self._inbox.put(lambda: self.mb.hold("happy", hold_s))
+
     def remind(self, reminder: dict, hold_s: float = 8.0) -> None:
         """Meeting reminder: look at the user, alert face, chime, balloon, and an event."""
         def apply():
