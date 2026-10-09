@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.15.0 (2026-10-09)
+
+### Features
+
+- **assistant**: An IT/dev sidekick persona, clever and a little cheeky
+  ([`ee52ea3`](https://github.com/dixonsatit/FlyBot/commit/ee52ea33b99323de839ba62681facdd768bc75dd))
+
+
 ## v0.14.0 (2026-10-09)
 
 ### Features
