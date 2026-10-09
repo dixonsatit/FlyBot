@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.18.0 (2026-10-09)
+
+### Features
+
+- **voice**: More head-pat lines in the same spirit
+  ([`e6b40b5`](https://github.com/dixonsatit/FlyBot/commit/e6b40b5b9cea725998d4e804ea0b10a83b39774d))
+
+
 ## v0.17.0 (2026-10-09)
 
 ### Features
