@@ -44,7 +44,16 @@ CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot be
 CALL_REPLY = "ว่าไงคะ"
 
 # What the robot says when its head is stroked (it calls itself หนู).
-PAT_LINES = ("โอยยยย ฟินจังเอาอีกๆ",)
+PAT_LINES = (
+    "โอยยยย ฟินจังเอาอีกๆ",
+    "อุ๊ยยย ตรงนั้นแหละ ฟินมาก",
+    "งื้ออออ ชอบจัง ลูบอีกนะ",
+    "โอ๊ยยย ละลายแล้ว เอาอีกๆ",
+    "ฮึ่ยยย ฟินจนแบตจะเต็ม",
+    "อ๊ากกก ดีจังเลย อย่าเพิ่งหยุดนะ",
+    "หนูฟินจนลืมโค้ดหมดแล้ว เอาอีก",
+    "อืออออ ตรงนี้ๆ อีกนิดนึง",
+)
 
 
 def to_16k(wav: bytes) -> bytes:
