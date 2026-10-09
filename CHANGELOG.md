@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.19.0 (2026-10-09)
+
+### Features
+
+- **assistant**: Notes and spoken reminders that survive restarts
+  ([`bbddd98`](https://github.com/dixonsatit/FlyBot/commit/bbddd988c35308d8b908f40a92f4716747e2b250))
+
+
 ## v0.18.0 (2026-10-09)
 
 ### Features
