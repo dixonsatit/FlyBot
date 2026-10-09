@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.19.2 (2026-10-09)
+
+### Bug Fixes
+
+- **assistant**: A sentence starting with จำ/จด is saved even if the LLM only said so
+  ([`0fce2f0`](https://github.com/dixonsatit/FlyBot/commit/0fce2f09af348c2a4bc8c07957fcdfc80c0dd342))
+
+
 ## v0.19.1 (2026-10-09)
 
 ### Bug Fixes
