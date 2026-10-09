@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.17.0 (2026-10-09)
+
+### Features
+
+- **voice**: Head pats say "โอยยยย ฟินจังเอาอีกๆ"
+  ([`0668d83`](https://github.com/dixonsatit/FlyBot/commit/0668d832bc4f20b9117447f29e3ea32e7b1b6194))
+
+
 ## v0.16.3 (2026-10-09)
 
 ### Bug Fixes
