@@ -40,5 +40,8 @@
 // 1 = always run the full boot self-test (servo sweep); otherwise touch the screen at boot
 #define SELF_TEST_FULL 0
 
+// % of the volume the bridge asks for (0 = mute)
+#define SPEAKER_VOLUME_PCT 100
+
 #define IMU_PERIOD_MS 33
 #define PROXIMITY_PERIOD_MS 100

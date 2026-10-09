@@ -28,6 +28,9 @@
 #ifndef SELF_TEST_FULL  // configs copied from an older example
 #define SELF_TEST_FULL 0
 #endif
+#ifndef SPEAKER_VOLUME_PCT  // scales the bridge's audio volume; 0 = mute
+#define SPEAKER_VOLUME_PCT 100
+#endif
 
 using namespace m5avatar;
 
@@ -95,6 +98,8 @@ static bool initCamera() {
     ok = esp_camera_init(&cfg) == ESP_OK;
   }
   M5.In_I2C.begin();
+  // cam_task's small stack overflows when it prints (FB-SIZE / FB-OVF) and the chip resets
+  esp_log_level_set("cam_hal", ESP_LOG_NONE);
   return ok;
 }
 
@@ -215,7 +220,7 @@ static Expression toExpression(const char* e) {
   if (!strcmp(e, "happy")) return Expression::Happy;
   if (!strcmp(e, "sleepy")) return Expression::Sleepy;
   if (!strcmp(e, "alert")) return Expression::Angry;
-  return Expression::Doubt;  // curious
+  return Expression::Neutral;  // curious: the resting face of an assistant
 }
 
 static volatile bool snapshotRequested = false;
@@ -271,7 +276,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
 
   JsonObject audio = doc["audio"];
   if (!audio.isNull()) {
-    M5.Speaker.setVolume(audio["volume"] | 120);
+    M5.Speaker.setVolume((audio["volume"] | 120) * SPEAKER_VOLUME_PCT / 100);
     toneCount = toneIndex = 0;
     for (JsonArray t : audio["tones"].as<JsonArray>()) {
       if (toneCount >= int(sizeof tones / sizeof *tones)) break;
@@ -337,10 +342,12 @@ void setup() {
   cameraOk = initCamera();
   if (!cameraOk) M5_LOGE("camera init failed");
 
-  bool servoOk = servoBegin();  // after the camera: the SCS power switch is on the shared I2C bus
-  M5_LOGI("servo: %s", servoInfo());
+  bool servoOk = servoBegin();  // after the camera has handed the shared I2C bus back
+  M5_LOGW("servo: %s", servoInfo());
+
   writeServos(0, 0);
   M5.Speaker.begin();
+  M5.Speaker.setVolume(64 * SPEAKER_VOLUME_PCT / 100);  // boot beep; 64 = M5Unified default
 
   // touch the screen during the first 1.5 s for the full test (servo sweep)
   bool full = SELF_TEST_FULL;
@@ -362,7 +369,7 @@ void setup() {
   } else {
     M5_LOGE("Thai font failed to load");
   }
-  avatar.setExpression(Expression::Doubt);
+  avatar.setExpression(Expression::Neutral);
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -391,6 +398,10 @@ void loop() {
   serviceTones();
   servoUpdate();
   if (!mqtt.connected()) {
+    if (cameraOk) {  // keep the frame buffers moving so the driver never runs out
+      camera_fb_t* fb = esp_camera_fb_get();
+      if (fb) esp_camera_fb_return(fb);
+    }
     delay(10);
     return;
   }

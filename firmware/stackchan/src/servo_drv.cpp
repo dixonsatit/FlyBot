@@ -53,7 +53,7 @@ static constexpr uint32_t SERVO_BAUD = 1000000;
 static constexpr uint8_t PY32_ADDR = 0x6F;
 static constexpr uint8_t PY32_VERSION = 0x02, PY32_DIR_L = 0x03, PY32_OUT_L = 0x05, PY32_PU_L = 0x09,
                          PY32_PD_L = 0x0B;
-static constexpr uint32_t I2C_FREQ = 400000;
+static constexpr uint32_t I2C_FREQ = 100000;  // as M5Stack's PY32 drivers; it misses reads at 400 kHz
 
 static SCSCL scs;
 static bool vmOk = false;
@@ -172,6 +172,13 @@ static void releaseIdle(Axis& a) {
 
 bool servoBegin() {
   vmOk = enableServoPower();
+  if (!vmOk) {  // which of the base's chips answer: none = the base has no power or no contact
+    char found[160] = "";
+    for (uint8_t addr = 0x08; addr < 0x78; ++addr) {
+      if (M5.In_I2C.scanID(addr, I2C_FREQ)) snprintf(found + strlen(found), sizeof found - strlen(found), " 0x%02X", addr);
+    }
+    M5_LOGW("servo: PY32 not found; board %d; base I2C devices:%s", int(M5.getBoard()), found[0] ? found : " none");
+  }
   Preferences p;
   if (p.begin("servo", true)) {
     yawAxis.zero = zeroFromNvs(p, "zero_pos_1", YAW_ZERO_DEFAULT);

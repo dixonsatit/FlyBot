@@ -356,7 +356,7 @@ pio run -t upload && pio device monitor
   มี stall protection แบบเดียวกับเฟิร์มแวร์โรงงาน และปลด torque เมื่อหัวหยุดนิ่ง 1.5 วินาที
   ฝั่ง bridge ให้ใช้ `--set tilt_limits=5,85` ให้ตรงกับเครื่อง ก่อนแฟลชให้ backup flash เดิมไว้
   (`esptool.py read_flash 0 0x1000000 backup.bin`) และ unpair จากแอป StackChan World
-- เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Doubt
+- เสียงเล่นจากคิวแบบไม่บล็อก loop; หน้า: alert→Angry, happy→Happy, sleepy→Sleepy, curious→Neutral
 
 ## โครงสร้าง
 
