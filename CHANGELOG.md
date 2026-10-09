@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.12.0 (2026-10-09)
+
+### Features
+
+- **voice**: Hands-free น้องหวี่, head pats and a friendlier face
+  ([`6b09256`](https://github.com/dixonsatit/FlyBot/commit/6b09256acd6b109a9655f859d21c41e27ee8d5be))
+
+
 ## v0.11.0 (2026-10-09)
 
 ### Features
