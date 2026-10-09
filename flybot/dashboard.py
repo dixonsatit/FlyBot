@@ -44,6 +44,24 @@ log = logging.getLogger(__name__)
 PAT_LINES = ("หนูฟินจังเลย", "หนูชอบให้ลูบหัว", "ฟินมากเลย หนูชอบ", "อีกนิดนึงนะ หนูชอบ")
 
 
+def to_16k(wav: bytes) -> bytes:
+    """Resample a mono 16-bit PCM WAV to 16 kHz (Wayu-TTS sends 24 kHz): a third less to send
+    over the robot's WiFi. Anything else is returned untouched."""
+    import struct
+
+    import numpy as np
+    if len(wav) < 44 or wav[:4] != b"RIFF" or wav[8:12] != b"WAVE":
+        return wav
+    fmt, ch, rate, _, _, bits = struct.unpack("<HHIIHH", wav[20:36])
+    if fmt != 1 or ch != 1 or bits != 16 or rate <= 16000 or wav[36:40] != b"data":
+        return wav
+    x = np.frombuffer(wav[44:44 + (len(wav) - 44) // 2 * 2], dtype="<i2").astype(np.float32)
+    n = int(len(x) * 16000 / rate)
+    y = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype("<i2").tobytes()
+    return (b"RIFF" + struct.pack("<I", 36 + len(y)) + b"WAVEfmt " +
+            struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16) + b"data" + struct.pack("<I", len(y)) + y)
+
+
 class SimRobot:
     """Interactive world + simulated StackChan feeding the bridge's sensor state."""
 
@@ -320,6 +338,7 @@ class Dashboard:
             def _voice(self, pcm: bytes, wake: bool = False):
                 if not (dash.stt and dash.tts and dash.bridge.cortex):
                     return self._json(404, {"error": "voice needs --stt-url, --tts-url and --llm"})
+                t0 = time.monotonic()
                 try:
                     text = dash.stt.transcribe(pcm).get("text", "").strip()
                 except ValueError:
@@ -331,11 +350,15 @@ class Dashboard:
                         log.info("voice: heard %r without the wake name", text)
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                t_asr = time.monotonic()
                 try:
                     reply = dash.bridge.cortex.ask(text)
-                    wav = dash.tts.speak(reply) if reply else b""
+                    t_llm = time.monotonic()
+                    wav = to_16k(dash.tts.speak(reply)) if reply else b""
                 except Exception as e:
                     return self._json(502, {"error": f"{type(e).__name__}: {e}"})
+                log.info("voice: %d KB in, asr %.1fs, llm %.1fs, tts %.1fs, %d KB out", len(pcm) // 1024,
+                         t_asr - t0, t_llm - t_asr, time.monotonic() - t_llm, len(wav) // 1024)
                 return self._send(200, wav, "audio/wav") if wav else self._send(204, b"", "audio/wav")
 
         return Handler

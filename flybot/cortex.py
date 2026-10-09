@@ -34,6 +34,8 @@ Thai (ตอบเป็นภาษาไทยเสมอ), briefly (one to t
 always call yourself หนู (never ผม, ฉัน or ดิฉัน) and end politely with ค่ะ/นะคะ. Never claim medical or
 therapeutic effects. {screen_rule}"""
 
+VOICE_RULE = " This reply is spoken aloud by the robot: one short sentence, no lists or emoji."
+
 SCREEN_RULES = {
     "th": "Text you pass to the `say` tool must be very short Thai (at most 14 characters): the "
           "speech balloon is small.",
@@ -184,7 +186,9 @@ class Cortex:
         return json.dumps({"seen": thai or screen}, ensure_ascii=False)
 
     def _chat(self, text: str, voice: bool = False) -> str:
-        reply = self.llm.ask(self.persona, self.history, text, tools=self.tools())
+        # spoken replies: TTS time grows with length, so keep them to one sentence
+        persona = self.persona + (VOICE_RULE if voice else "")
+        reply = self.llm.ask(persona, self.history, text, tools=self.tools())
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "..."}]
         self.history = self.history[-2 * self.history_turns:]
         # voice: the robot speaks it, so the dashboard page must not say it again

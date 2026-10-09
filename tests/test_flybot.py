@@ -853,6 +853,17 @@ def test_voice_turn_via_dashboard(gains):
         server.server_close()
 
 
+def test_to_16k_resamples_wayu_wav():
+    import struct
+    from flybot.dashboard import to_16k
+    pcm = (b"\x00\x10" * 24000)  # 1 s at 24 kHz
+    wav = (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " +
+           struct.pack("<IHHIIHH", 16, 1, 1, 24000, 48000, 2, 16) + b"data" + struct.pack("<I", len(pcm)) + pcm)
+    out = to_16k(wav)
+    assert struct.unpack("<I", out[24:28])[0] == 16000 and len(out) == 44 + 32000
+    assert to_16k(b"RIFF\x24\x00\x00\x00WAVEfake") == b"RIFF\x24\x00\x00\x00WAVEfake"  # not PCM: untouched
+
+
 def _http_raw(port, path, data):
     import urllib.error
     import urllib.request
