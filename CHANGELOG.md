@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.13.0 (2026-10-09)
+
+### Features
+
+- **firmware**: Monitor page, live tuning and a second WiFi via a VPN relay
+  ([`c755371`](https://github.com/dixonsatit/FlyBot/commit/c755371f0a6021fc90315b5f180e440c7092800d))
+
+
 ## v0.12.1 (2026-10-09)
 
 ### Performance Improvements
