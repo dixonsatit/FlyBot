@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.11.0 (2026-10-09)
+
+### Features
+
+- **firmware**: Camera monitor and calmer motion detection
+  ([`4627ddc`](https://github.com/dixonsatit/FlyBot/commit/4627ddcb05f1bf494df51446b61e75314bb1cede))
+
+
 ## v0.10.0 (2026-10-09)
 
 ### Bug Fixes
