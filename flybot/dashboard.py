@@ -373,12 +373,13 @@ class Dashboard:
                 except ValueError:
                     raise
                 except Exception as e:
+                    log.warning("voice: ASR failed (%.1fs, wake=%d): %s", len(pcm) / 32000, wake, e)
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
                 follow_up = time.monotonic() - dash._last_reply < dash.follow_up_s
                 if not text or (wake and not follow_up and not dash.wake.search(text)):  # not for the robot
-                    if text:
-                        log.info("voice: heard %r (%.1fs) without the wake name", text, seconds)
+                    log.info("voice: %s (%.1fs) -> 204", f"heard {text!r} without the wake name" if text
+                             else "nothing understood", seconds)
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
                 t_asr = time.monotonic()
@@ -387,9 +388,11 @@ class Dashboard:
                     t_llm = time.monotonic()
                     wav = to_16k(dash.tts.speak(reply)) if reply else b""
                 except Exception as e:
+                    log.warning("voice: %r failed: %s: %s", text, type(e).__name__, e)
                     return self._json(502, {"error": f"{type(e).__name__}: {e}"})
-                log.info("voice: %d KB in, asr %.1fs, llm %.1fs, tts %.1fs, %d KB out", len(pcm) // 1024,
-                         t_asr - t0, t_llm - t_asr, time.monotonic() - t_llm, len(wav) // 1024)
+                log.info("voice: %r (%.1fs, wake=%d%s) -> %r | asr %.1fs llm %.1fs tts %.1fs, %d KB", text,
+                         seconds, wake, ", follow-up" if follow_up else "", reply, t_asr - t0, t_llm - t_asr,
+                         time.monotonic() - t_llm, len(wav) // 1024)
                 dash._last_reply = time.monotonic()
                 return self._send(200, wav, "audio/wav") if wav else self._send(204, b"", "audio/wav")
 

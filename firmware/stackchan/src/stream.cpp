@@ -14,6 +14,7 @@
 #include <img_converters.h>
 
 #include "params.h"
+#include "voice.h"
 
 static constexpr int W = 160, H = 120;
 static constexpr uint32_t FRAME_MS = 200;  // 5 fps is enough to watch and keeps the CPU for the brain
@@ -129,6 +130,25 @@ static esp_err_t setHandler(httpd_req_t* req) {
   return httpd_resp_send(req, body.c_str(), body.length());
 }
 
+// GET /rec.wav: the last sentence the mic captured, to check what the ASR got.
+static esp_err_t recHandler(httpd_req_t* req) {
+  if (!authorized(req)) return ESP_OK;
+  const int16_t* pcm = nullptr;
+  const uint32_t bytes = voiceRecording(&pcm) * 2;
+  uint8_t h[44];
+  const uint32_t riff = 36 + bytes, rate = 16000, byteRate = 32000, fmtLen = 16;
+  const uint16_t fmt = 1, ch = 1, align = 2, bits = 16;
+  memcpy(h, "RIFF", 4), memcpy(h + 4, &riff, 4), memcpy(h + 8, "WAVEfmt ", 8), memcpy(h + 16, &fmtLen, 4);
+  memcpy(h + 20, &fmt, 2), memcpy(h + 22, &ch, 2), memcpy(h + 24, &rate, 4), memcpy(h + 28, &byteRate, 4);
+  memcpy(h + 32, &align, 2), memcpy(h + 34, &bits, 2), memcpy(h + 36, "data", 4), memcpy(h + 40, &bytes, 4);
+  httpd_resp_set_type(req, "audio/wav");
+  httpd_resp_send_chunk(req, (const char*)h, sizeof h);
+  for (uint32_t off = 0; pcm && off < bytes; off += 4096) {
+    if (httpd_resp_send_chunk(req, (const char*)pcm + off, min(4096u, bytes - off)) != ESP_OK) return ESP_FAIL;
+  }
+  return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 static const char PAGE[] = R"HTML(<!doctype html><html lang=th><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>StackChan monitor</title>
 <style>
@@ -223,10 +243,12 @@ void streamBegin() {
   httpd_uri_t index = {"/", HTTP_GET, indexHandler, nullptr};
   httpd_uri_t st = {"/status", HTTP_GET, statusHandler, nullptr};
   httpd_uri_t set = {"/set", HTTP_GET, setHandler, nullptr};
+  httpd_uri_t recUri = {"/rec.wav", HTTP_GET, recHandler, nullptr};
   httpd_uri_t stream = {"/stream", HTTP_GET, streamHandler, nullptr};
   httpd_register_uri_handler(server, &index);
   httpd_register_uri_handler(server, &st);
   httpd_register_uri_handler(server, &set);
+  httpd_register_uri_handler(server, &recUri);
   if (httpd_start(&streamServer, &scfg) == ESP_OK) httpd_register_uri_handler(streamServer, &stream);
 }
 

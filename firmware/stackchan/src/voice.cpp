@@ -58,6 +58,15 @@ static volatile size_t wavLen = 0;
 static volatile int httpCode = 0;
 static String path;  // /api/voice[?wake=1] or /api/pat for the running request
 static String voiceUrl;  // of the network we're on (empty: no voice there)
+// The last turns, for the monitor page: what was sent, what came back, whether it played.
+struct Turn { uint32_t at; uint16_t ms; char kind; int16_t code; uint32_t bytes; int8_t played; };
+static Turn turns[10];
+static int turnCount = 0;
+static void logTurn(char kind, uint16_t ms) {
+  turns[turnCount % 10] = {millis() / 1000, ms, kind, 0, 0, -1};
+  ++turnCount;
+}
+static Turn& lastTurn() { return turns[(turnCount + 9) % 10]; }
 static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
 static volatile float micNoise = 0;
 
@@ -74,13 +83,27 @@ void voiceSetUrl(const char* url, bool wakeName) {
 bool voiceBusy() { return state == State::Capturing || state == State::Waiting || state == State::Speaking; }
 bool voiceOwnsAudio() { return state != State::Off; }
 
+size_t voiceRecording(const int16_t** pcm) {
+  *pcm = rec;
+  return rec ? recLen : 0;
+}
+
 String voiceStatusJson() {
   static const char* NAMES[] = {"off", "listening", "capturing", "waiting", "speaking"};
   char buf[160];
-  snprintf(buf, sizeof buf, "{\"state\":\"%s\",\"level\":%ld,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\"}",
+  snprintf(buf, sizeof buf, "{\"state\":\"%s\",\"level\":%ld,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\",\"turns\":[",
            NAMES[int(state)], long(micLevel), micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
            voiceUrl.c_str());
-  return buf;
+  String out = buf;
+  for (int i = max(0, turnCount - 10); i < turnCount; ++i) {
+    const Turn& t = turns[i % 10];
+    char row[96];
+    snprintf(row, sizeof row, "%s{\"t\":%lu,\"kind\":\"%c\",\"ms\":%u,\"code\":%d,\"bytes\":%lu,\"played\":%d}",
+             i > max(0, turnCount - 10) ? "," : "", (unsigned long)t.at, t.kind, t.ms, t.code, (unsigned long)t.bytes,
+             t.played);
+    out += row;
+  }
+  return out + "]}";
 }
 
 static int32_t rms(const int16_t* s, size_t n) {
@@ -168,8 +191,11 @@ static void amplify(uint8_t* w, size_t len) {
   }
 }
 
-static void sendTask(void*) {
+// vTaskDelete() never returns, so locals' destructors don't run: the request lives in its own
+// function and closes its socket explicitly (each turn leaked one until the 16 ran out).
+static int voiceRequest() {
   HTTPClient http;
+  http.setReuse(false);
   String url = voiceUrl;
   url.replace("/api/voice", path);
   http.begin(url);
@@ -199,7 +225,12 @@ static void sendTask(void*) {
     }
   }
   http.end();
-  httpCode = code;
+  return code;
+}
+
+static void sendTask(void*) {
+  httpCode = voiceRequest();
+  if (turnCount) lastTurn().code = httpCode, lastTurn().bytes = wavLen;
   state = wavLen ? State::Speaking : State::Off;  // Off: main restarts the mic
   vTaskDelete(nullptr);
 }
@@ -219,6 +250,8 @@ static void startMic() {
 
 static void request(const char* p, const char* balloon) {
   path = p;
+  logTurn(strstr(p, "wake=1") ? 'w' : strstr(p, "/api/voice") ? 'v' : strstr(p, "/api/pat") ? 'p' : 'a',
+          strstr(p, "/api/voice") ? recLen * 1000 / RATE : 0);
   wavLen = 0;
   httpCode = 0;
   if (balloon) avatar.setSpeechText(balloon);
@@ -310,6 +343,7 @@ void voiceUpdate() {
         M5.Speaker.begin();
         M5.Speaker.setVolume(P.voiceVolume);
         started = M5.Speaker.playWav(wav, wavLen);
+        if (turnCount) lastTurn().played = started;
         if (!started) M5_LOGW("voice: playWav failed (%u bytes)", unsigned(wavLen));
       }
       if (started && M5.Speaker.isPlaying()) {
@@ -337,4 +371,8 @@ void voiceUpdate() {}
 bool voiceBusy() { return false; }
 bool voiceOwnsAudio() { return false; }
 String voiceStatusJson() { return "{\"state\":\"disabled\"}"; }
+size_t voiceRecording(const int16_t** pcm) {
+  *pcm = nullptr;
+  return 0;
+}
 #endif
