@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.16.0 (2026-10-09)
+
+### Features
+
+- **assistant**: Calendar and GitHub watching, and the robot speaks up on its own
+  ([`09f1e4d`](https://github.com/dixonsatit/FlyBot/commit/09f1e4dc0a97ea2ae53285fe5bffb88a1bf47f1f))
+
+
 ## v0.15.0 (2026-10-09)
 
 ### Features
