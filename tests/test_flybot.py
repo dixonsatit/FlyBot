@@ -933,6 +933,28 @@ def test_github_watcher_reports_new_failures_and_reviews():
         server.server_close()
 
 
+def test_assistant_store_notes_and_reminders(tmp_path):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from flybot.assistant import AssistantStore
+    tz = ZoneInfo("Asia/Bangkok")
+    clock = [datetime(2026, 10, 9, 21, 0, tzinfo=tz)]
+    said = []
+    path = str(tmp_path / "assistant.json")
+    store = AssistantStore(path, said.append, "Asia/Bangkok", now=lambda: clock[0])
+    note = store.remember("ห้อง server อยู่ชั้น 3")
+    r1 = store.remind("กินข้าว", in_minutes=20)
+    r2 = store.remind("โทรหาหมอ", at="09:00")  # past today: tomorrow
+    assert r1["due"] == "2026-10-09 21:20" and r2["due"] == "2026-10-10 09:00"
+    with pytest.raises(ValueError):
+        store.remind("x", at="2026-10-01 10:00")  # already past
+    clock[0] += timedelta(minutes=25)
+    assert [r["text"] for r in store.due()] == ["กินข้าว"] and store.due() == []
+    again = AssistantStore(path, now=lambda: clock[0])  # survives a restart
+    assert again.notes[0]["text"] == "ห้อง server อยู่ชั้น 3" and len(again.reminders) == 1
+    assert again.forget(note["id"]) and again.cancel(r2["id"]) and again.summary() == {"notes": [], "reminders": []}
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

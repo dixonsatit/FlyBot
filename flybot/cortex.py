@@ -40,7 +40,8 @@ in plain words. The person you talk with speaks Thai: always answer in Thai (ต
 briefly (one to three sentences), warm and a little playful. In Thai always call yourself หนู (never
 ผม, ฉัน or ดิฉัน), call the person คุณ, and end politely with ค่ะ/นะคะ. Never claim medical or therapeutic
 effects. When asked to move (turn, look, nod, shake, spin), call the `gesture` tool and say what you
-did. {now} {screen_rule}"""
+did. For จำไว้/จด use `remember`; for เตือน... (in N minutes, at a time) use `set_reminder` and
+confirm the time. {now} {screen_rule}"""
 
 _TH_DAYS = ("จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์")
 _TH_MONTHS = ("มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
@@ -109,6 +110,7 @@ class Cortex:
         self.narrate_cooldown_s = narrate_cooldown_s
         self.calendar = None  # flybot.meetings.MeetingReminder, set by the bridge
         self.github = None  # flybot.github.GitHubWatcher
+        self.store = None  # flybot.assistant.AssistantStore: notes and reminders
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -176,7 +178,11 @@ class Cortex:
 
     @property
     def persona(self) -> str:
-        return PERSONA.format(screen_rule=SCREEN_RULES[self.lang], now=now_line())
+        persona = PERSONA.format(screen_rule=SCREEN_RULES[self.lang], now=now_line())
+        notes = self.store.notes[-30:] if self.store else []
+        if notes:  # small enough to carry every turn, so "what did I tell you" needs no tool call
+            persona += " Notes the user asked you to remember: " + "; ".join(f"[{n['id']}] {n['text']}" for n in notes)
+        return persona
 
     def _two_lines(self, reply: str) -> tuple[str, str]:
         lines = [l.strip() for l in reply.splitlines() if l.strip()]
@@ -220,6 +226,11 @@ class Cortex:
         self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
         return reply
 
+    def _store(self):
+        if not self.store:
+            raise RuntimeError("no assistant storage configured (--state-dir)")
+        return self.store
+
     def _meetings(self):
         if not self.calendar:
             return {"error": "no calendar connected"}
@@ -249,6 +260,27 @@ class Cortex:
                  "repositories, and open pull requests waiting for their review.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  lambda: self.github.summary() if self.github else {"error": "GitHub is not connected"}),
+            Tool("remember", "Save a note the user asks you to remember (จำไว้ว่า..., จดไว้...).",
+                 {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"],
+                  "additionalProperties": False},
+                 lambda text: self._store().remember(text)),
+            Tool("forget_note", "Delete a saved note by its id.",
+                 {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"],
+                  "additionalProperties": False},
+                 lambda id: {"deleted": self._store().forget(id)}),
+            Tool("set_reminder", "Remind the user later: you will say the text aloud when it is due. Give "
+                 "in_minutes (e.g. 20) or at as local time 'YYYY-MM-DD HH:MM' or 'HH:MM'.",
+                 {"type": "object", "properties": {"text": {"type": "string"}, "in_minutes": {"type": "number"},
+                                                   "at": {"type": "string"}},
+                  "required": ["text"], "additionalProperties": False},
+                 lambda text, in_minutes=None, at=None: self._store().remind(text, in_minutes, at)),
+            Tool("cancel_reminder", "Cancel a pending reminder by its id.",
+                 {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"],
+                  "additionalProperties": False},
+                 lambda id: {"cancelled": self._store().cancel(id)}),
+            Tool("notes_and_reminders", "The user's saved notes and pending reminders (with ids).",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: self._store().summary()),
             Tool("set_personality", "Change the robot's temperament: " + ", ".join(sorted(PERSONALITIES)) + ".",
                  {"type": "object", "properties": {"name": {"type": "string", "enum": sorted(PERSONALITIES)}},
                   "required": ["name"], "additionalProperties": False},

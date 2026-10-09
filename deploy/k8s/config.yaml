@@ -10,7 +10,8 @@ data:
   FLYBOT_REMIND_MINUTES: "10,1"
   FLYBOT_PERSONALITY: curious
   FLYBOT_DASHBOARD_PORT: "8080"       # web dashboard (Service flybot-dashboard, NodePort 31880)
-  FLYBOT_DASHBOARD_SIM: "false"       # "true" = simulated robot while no real robot is connected
+  FLYBOT_DASHBOARD_SIM: "false"
+  FLYBOT_STATE_DIR: /state             # notes and reminders (PVC flybot-assistant)       # "true" = simulated robot while no real robot is connected
   FLYBOT_LLM: none                    # anthropic | openai | none
   # FLYBOT_LLM_MODEL: qwen3.5-122b
   # FLYBOT_LLM_BASE_URL: https://<server>/v1

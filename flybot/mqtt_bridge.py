@@ -204,6 +204,7 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--remind-minutes", default="10,1", help="minutes before start, comma-separated")
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
+    ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
     gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
     gh.add_argument("--github-interval", type=float, default=120.0, help="seconds between polls")
@@ -310,6 +311,13 @@ def main(argv: list[str] | None = None) -> None:
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
         bridge.dashboard.start()
+    if args.state_dir and bridge.cortex:
+        from .assistant import AssistantStore
+        store = AssistantStore(os.path.join(args.state_dir, "assistant.json"),
+                               lambda line: bridge.dashboard and bridge.dashboard.announce(line), args.tz)
+        store.start()
+        bridge.cortex.store = store
+        log.info("Assistant memory: %s (%d notes, %d reminders)", store.path, len(store.notes), len(store.reminders))
     if args.github_token:
         from .github import GitHubWatcher
         watcher = GitHubWatcher(args.github_token, lambda line: bridge.dashboard and bridge.dashboard.announce(line),

@@ -15,6 +15,7 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        fsGroup: 10001                 # the assistant volume is writable by the bridge
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: bridge
@@ -53,7 +54,10 @@ spec:
           volumeMounts:
             - {name: gains, mountPath: /config, readOnly: true}
             - {name: tmp, mountPath: /tmp}
+            - {name: state, mountPath: /state}
       volumes:
+        - name: state                  # notes and reminders (FLYBOT_STATE_DIR)
+          persistentVolumeClaim: {claimName: flybot-assistant}
         - name: gains
           configMap: {name: flybot-gains}
         - name: tmp
@@ -69,3 +73,13 @@ spec:
   selector: {app: flybot-bridge}
   ports:
     - {name: http, port: 8080, targetPort: dashboard, nodePort: 31880}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flybot-assistant
+  namespace: flybot
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources: {requests: {storage: 1Gi}}
