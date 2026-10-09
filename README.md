@@ -360,6 +360,8 @@ pio run -t upload && pio device monitor
 - **คุยด้วยเสียง** (`VOICE_URL` ใน config): กดจอค้างแล้วพูด (สูงสุด 10 วินาที) ปล่อยแล้ว robot ส่งเสียงไป `/api/voice` ของ bridge
   (asr-typhoon ฟังไทย → LLM → wayu-tts พูดไทย) แล้วเล่นคำตอบจากลำโพง ปากขยับตามเสียง; ความดังเสียงพูด `VOICE_VOLUME`
   แยกจากเสียงบี๊บ `SPEAKER_VOLUME_PCT`; bridge ต้องเปิด dashboard พร้อม `--stt-url`, `--tts-url` และ `--llm`
+- **ดูภาพจากกล้อง** (`STREAM_PORT 80`): เปิด `http://<IP robot>/` เห็นภาพ 5 fps ที่ตัวตรวจจับเห็น — จุดขาว = พิกเซลที่เปลี่ยน,
+  กรอบ = การเคลื่อนไหวที่พบ, ขอบขาว = เฟรมที่ข้ามเพราะหัวกำลังหมุน (`EGO_MOTION_DEG_S`); ใช้ปรับ `MIN_MOTION_PIXELS` / `DIFF_THRESHOLD`
 
 ## โครงสร้าง
 

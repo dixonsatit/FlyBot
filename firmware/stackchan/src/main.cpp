@@ -17,6 +17,7 @@
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
+#include "stream.h"
 #include "voice.h"
 #include "thai_font.h"
 
@@ -28,6 +29,9 @@
 #endif
 #ifndef SELF_TEST_FULL  // configs copied from an older example
 #define SELF_TEST_FULL 0
+#endif
+#ifndef EGO_MOTION_DEG_S  // head turning faster than this moves the whole image (flybot.plant)
+#define EGO_MOTION_DEG_S 10
 #endif
 #ifndef SPEAKER_VOLUME_PCT  // scales the bridge's audio volume; 0 = mute
 #define SPEAKER_VOLUME_PCT 100
@@ -44,9 +48,11 @@ PubSubClient mqtt(wifiClient);
 String topicBase = MQTT_BASE_TOPIC;
 
 static uint8_t prevFrame[FRAME_W * FRAME_H];
+static uint8_t changedMask[FRAME_W * FRAME_H];  // for the camera monitor
 static bool havePrev = false;
 static bool cameraOk = false;
 static bool proximityOk = false;
+static uint32_t egoMotionUntil = 0;  // until then the camera sees its own head turning
 
 // -- tone queue: [Hz, ms] pairs played without blocking the main loop -------
 struct Tone { uint16_t hz; uint16_t ms; };
@@ -135,7 +141,8 @@ static void processCamera() {
       (y < FRAME_H / 2 ? lumT : lumB) += v;
       int d = int(v) - int(prevFrame[i]);
       prevFrame[i] = v;
-      if (havePrev && abs(d) > DIFF_THRESHOLD) {
+      changedMask[i] = havePrev && abs(d) > DIFF_THRESHOLD;
+      if (changedMask[i]) {
         ++count;
         sumX += x;
         sumY += y;
@@ -155,7 +162,18 @@ static void processCamera() {
 
   static float lastX = 0, lastY = 0, vx = 0, vy = 0;
   static uint32_t lastSeen = 0;
-  if (count > MAX_MOTION_FRACTION * FRAME_W * FRAME_H) return;  // ego-motion: keep the last target
+  const bool ego = millis() < egoMotionUntil;  // the head is turning: the difference is our own motion
+  const bool tooMuch = count > MAX_MOTION_FRACTION * FRAME_W * FRAME_H;
+  const bool seen = count >= MIN_MOTION_PIXELS;
+  streamFrame(prevFrame, changedMask, FRAME_W, FRAME_H, minX, minY, seen ? maxX : -1, maxY, ego || tooMuch);
+#ifdef CAMERA_DEBUG  // publish every frame's changed-pixel count to tune the detector
+  {
+    char dbg[64];
+    int n = snprintf(dbg, sizeof dbg, "{\"n\":%u,\"ego\":%d}", unsigned(count), ego);
+    mqtt.publish((topicBase + "/debug/camera").c_str(), (const uint8_t*)dbg, n);
+  }
+#endif
+  if (tooMuch || ego) return;  // whole image moved or the head is turning: keep the last target
 
   JsonDocument doc;
   if (count < MIN_MOTION_PIXELS) {
@@ -216,7 +234,18 @@ static void publishProximity() {
 }
 
 // -- commands ---------------------------------------------------------------
-static void writeServos(float pan, float tilt) { servoWrite(pan, tilt); }
+static void writeServos(float pan, float tilt) {
+  static float lastPan = 0, lastTilt = 0;
+  static uint32_t lastMs = 0;
+  const uint32_t now = millis();
+  const float dt = max(now - lastMs, 20u) / 1000.0f;
+  const float speed = hypotf(pan - lastPan, tilt - lastTilt) / dt;
+  if (speed > EGO_MOTION_DEG_S) egoMotionUntil = now + 150;  // one frame plus the servo settling
+  lastPan = pan;
+  lastTilt = tilt;
+  lastMs = now;
+  servoWrite(pan, tilt);
+}
 
 static Expression toExpression(const char* e) {
   if (!strcmp(e, "happy")) return Expression::Happy;
@@ -392,6 +421,7 @@ void setup() {
   mqtt.setBufferSize(1024);  // command JSON with brain telemetry exceeds the 256 B default
   mqtt.setCallback(onCommand);
   voiceBegin();
+  streamBegin();
 }
 
 void loop() {

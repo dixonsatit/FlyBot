@@ -34,8 +34,9 @@
 
 // Motion detector (frame differencing on 160x120 grayscale)
 #define DIFF_THRESHOLD 25         // per-pixel |change| counted as motion
-#define MIN_MOTION_PIXELS 40      // fewer changed pixels -> "detected": false
+#define MIN_MOTION_PIXELS 200     // fewer changed pixels -> "detected": false (real camera: ~35 px of noise at rest)
 #define MAX_MOTION_FRACTION 0.30f // more -> whole image moved (head turning / exposure), frame skipped
+#define EGO_MOTION_DEG_S 10        // frames are skipped while the head turns faster (real scenes change whole-frame above ~10 deg/s)
 
 // 1 = always run the full boot self-test (servo sweep); otherwise touch the screen at boot
 #define SELF_TEST_FULL 0
@@ -47,6 +48,9 @@
 // Basic auth defaults to MQTT_USER / MQTT_PASSWORD, like the k8s manifests.
 // #define VOICE_URL "http://192.168.1.10:31880/api/voice"
 // #define VOICE_VOLUME 140  // 0..255
+
+// Camera monitor: http://<robot ip>/ shows what the motion detector sees (MJPEG, 5 fps)
+// #define STREAM_PORT 80
 
 #define IMU_PERIOD_MS 33
 #define PROXIMITY_PERIOD_MS 100
