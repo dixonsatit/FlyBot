@@ -842,13 +842,13 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "วันนี้ฝนตกไหม"  # hands-free speech that doesn't call the robot is ignored
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 1
-        for name in ("น้องหวี่วันนี้ฝนตกไหม", "สวัสดีน้องวี", "น้อง VQ ตอนนี้"):  # as asr-typhoon spells it
+        for name in ("น้องหวี่วันนี้ฝนตกไหม", "สวัสดีน้องวี", "น้อง VQ ตอนนี้", "วีตอนนี้กี่โมงแล้ว"):  # as asr-typhoon spells it
             heard["text"] = name
             assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
-        assert len(published) == 4
+        assert len(published) == 5
         heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
-        assert len(published) == 5
+        assert len(published) == 6
         status, body = _http_raw(dash.port, "/api/pat", b"")
         assert status == 200 and body == wav
         sent = []

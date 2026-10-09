@@ -142,7 +142,7 @@ class SimRobot:
 
 class Dashboard:
     def __init__(self, bridge, port: int = 8080, user: str = "stackchan", password: str | None = None,
-                 sim: bool = False, tts=None, stt=None, wake_name: str = r"น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
+                 sim: bool = False, tts=None, stt=None, wake_name: str = r"^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
                  follow_up_s: float = 20.0):
         self.bridge = bridge
         self.wake = re.compile(wake_name, re.IGNORECASE)
