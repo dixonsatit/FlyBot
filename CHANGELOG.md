@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.14.0 (2026-10-09)
+
+### Features
+
+- **assistant**: Answer anything, know the time, move the head on command
+  ([`6723f2b`](https://github.com/dixonsatit/FlyBot/commit/6723f2ba448ea52d189797305c94c72675e6803e))
+
+
 ## v0.13.3 (2026-10-09)
 
 ### Bug Fixes
