@@ -204,7 +204,9 @@ void streamBegin() {
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = STREAM_PORT;
   cfg.ctrl_port = STREAM_PORT + 32768;
-  cfg.max_open_sockets = 5;
+  // LWIP has 16 sockets for everything (MQTT, voice, both servers' listen + ctrl sockets):
+  // keep the page to a few connections and drop the oldest when they run out
+  cfg.max_open_sockets = 3;
   cfg.lru_purge_enable = true;
   httpd_handle_t server = nullptr;
   if (httpd_start(&server, &cfg) != ESP_OK) {
@@ -215,7 +217,8 @@ void streamBegin() {
   httpd_config_t scfg = HTTPD_DEFAULT_CONFIG();
   scfg.server_port = STREAM_PORT + 1;
   scfg.ctrl_port = STREAM_PORT + 32769;
-  scfg.max_open_sockets = 2;
+  scfg.max_open_sockets = 1;
+  scfg.lru_purge_enable = true;  // a new viewer takes over the stream
   httpd_handle_t streamServer = nullptr;
   httpd_uri_t index = {"/", HTTP_GET, indexHandler, nullptr};
   httpd_uri_t st = {"/status", HTTP_GET, statusHandler, nullptr};
