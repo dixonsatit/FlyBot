@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.0 (2026-10-10)
+
+### Features
+
+- **assistant**: Watch people, not motion; weather and PM2.5 where it is
+  ([`4740b66`](https://github.com/dixonsatit/FlyBot/commit/4740b66f0c66bdae4a4f27acd6affdb404467a3b))
+
+
 ## v0.23.0 (2026-10-10)
 
 ### Features
