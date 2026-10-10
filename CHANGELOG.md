@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.20.1 (2026-10-10)
+
+### Bug Fixes
+
+- **meetings**: Retry stalled feed downloads and reload soon after a failure
+  ([`bc576aa`](https://github.com/dixonsatit/FlyBot/commit/bc576aaf82615d471e7cd0603536b3667d468cbe))
+
+
 ## v0.20.0 (2026-10-10)
 
 ### Features
