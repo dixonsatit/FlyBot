@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.3 (2026-10-10)
+
+### Bug Fixes
+
+- **faces**: Only the face tracker turns the head; no vision-model presence checks with it
+  ([`42a1e94`](https://github.com/dixonsatit/FlyBot/commit/42a1e9434ee4e77d1a55a255cce0e7fd3f9d3cdc))
+
+
 ## v0.32.2 (2026-10-10)
 
 ### Bug Fixes
