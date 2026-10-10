@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.0 (2026-10-10)
+
+### Features
+
+- **faces**: Follow the face with the DGX detector, fine head moves, streamed camera frames
+  ([`5c6b149`](https://github.com/dixonsatit/FlyBot/commit/5c6b149e35d7d50720b89be747ce2bf3c4ef437b))
+
+
 ## v0.31.0 (2026-10-10)
 
 ### Chores
