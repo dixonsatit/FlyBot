@@ -12,6 +12,14 @@ spec:
     metadata:
       labels: {app: flybot-bridge}
     spec:
+      # sith-k9s: tyranus (192.168.3.15) pulled images from ghcr.io at ~3 KB/s on 2026-10-10 (the
+      # v0.30.0 pull broke off after 32 min), and the state volume then stayed attached there
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: kubernetes.io/hostname, operator: NotIn, values: [tyranus]}
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
