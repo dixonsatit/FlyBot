@@ -976,6 +976,49 @@ def test_cortex_saves_a_note_the_llm_only_claimed(gains, tmp_path):
 
 
 
+def test_presence_holds_announcements_and_welcomes_back(gains):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    from flybot.dashboard import Dashboard
+    from flybot.meetings import Meeting
+    from flybot.presence import Presence
+    clock = [1_000_000.0]
+    sees = {"person": False}
+
+    class Eyes:
+        def ask(self, system, history, text, image_jpeg=None, **kw):
+            assert image_jpeg == b"jpeg"
+            return "yes" if sees["person"] else "no"
+
+    said = []
+    p = Presence(lambda timeout: b"jpeg", Eyes(), lambda left, now: said.append((left, now)),
+                 check_s=30, away_s=300, clock=lambda: clock[0])
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    bridge.presence = p
+    dash = Dashboard(bridge, port=0)
+    dash.tts = object()  # announce() holds before it would render anything
+    assert dash.announce("CI ของ FlyBot พังนะ") and dash.held == ["CI ของ FlyBot พังนะ"]  # nobody seen yet
+
+    sees["person"] = True
+    p.note_motion()
+    p.tick()
+    assert p.present and said == []  # first sighting: no "welcome back"
+    sees["person"] = False
+    clock[0] += 400
+    p.tick()  # 400 s without a sighting
+    assert not p.present and p.left_at == 1_000_000.0
+    clock[0] += 3600
+    sees["person"] = True
+    p.note_motion()
+    p.tick()
+    assert p.present and said == [(1_000_000.0, 1_004_000.0)]
+    tz = ZoneInfo("Asia/Bangkok")
+    meeting = Meeting("u1", "หัวหน้างาน IT", datetime.fromtimestamp(1_000_900, tz))
+    line = dash.welcome_back(1_000_000.0, 1_004_000.0, [meeting])
+    assert line == "กลับมาแล้ว ประชุมหัวหน้างาน IT เป็นยังไงบ้างคะ ระหว่างที่ไม่อยู่ CI ของ FlyBot พังนะ"
+    assert dash.held == []
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

@@ -57,6 +57,7 @@ class StackChanBridge:
         self.cortex: Cortex | None = None
         self.dashboard = None  # flybot.dashboard.Dashboard, optional
         self._jpeg: bytes | None = None
+        self.presence = None  # flybot.presence.Presence when --presence is on
         self._jpeg_ready = threading.Event()
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
@@ -114,6 +115,8 @@ class StackChanBridge:
             return
         if kind in SENSOR_KINDS and isinstance(payload, dict):
             self.sensors.update(kind, payload)
+            if kind == "camera" and "x" in payload and self.presence:
+                self.presence.note_motion()
 
     @staticmethod
     def _log_selftest(payload: bytes) -> None:
@@ -205,6 +208,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
+    ap.add_argument("--presence", action="store_true",
+                    help="check camera frames for a person (Claude Haiku); hold announcements while away")
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
     gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
     gh.add_argument("--github-interval", type=float, default=120.0, help="seconds between polls")
@@ -311,6 +316,20 @@ def main(argv: list[str] | None = None) -> None:
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
         bridge.dashboard.start()
+    if args.presence and bridge.dashboard and args.llm == "anthropic":
+        from .llm import AnthropicLLM
+        from .presence import Presence
+        eyes = AnthropicLLM("claude-haiku-5-5", api_key=api_key, max_tokens=512)  # room for its thinking
+
+        def arrived(left_at: float, now: float) -> None:
+            meetings = bridge.cortex.calendar.meetings if bridge.cortex and bridge.cortex.calendar else []
+            line = bridge.dashboard.welcome_back(left_at, now, meetings)
+            if line:
+                bridge.dashboard.announce(line, force=True)
+
+        bridge.presence = Presence(bridge.snapshot, eyes, arrived)
+        bridge.presence.start()
+        log.info("Presence: camera checks with %s", eyes.model)
     if args.state_dir and bridge.cortex:
         from .assistant import AssistantStore
         store = AssistantStore(os.path.join(args.state_dir, "assistant.json"),

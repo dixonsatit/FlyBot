@@ -161,6 +161,7 @@ class Dashboard:
         self.follow_up_s = follow_up_s  # after a spoken reply, the next sentence needs no name
         self._last_reply = -math.inf
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
+        self.held: list[str] = []  # announcements kept while nobody was at the desk
         self._announce_seq = 0
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
@@ -243,11 +244,19 @@ class Dashboard:
             raise KeyError(path)
         return {"ok": True}
 
-    def announce(self, text: str) -> bool:
+    def announce(self, text: str, force: bool = False) -> bool:
         """Have the robot say ``text`` on its own (a reminder, a CI failure): render it, keep it for
-        GET /api/announce/<id>, and tell the robot on ``<base>/announce``."""
+        GET /api/announce/<id>, and tell the robot on ``<base>/announce``. While presence says
+        nobody is at the desk it is held, and said when they come back."""
         if not self.tts or not text:
             return False
+        presence = getattr(self.bridge, "presence", None)
+        if presence and not presence.present and not force:
+            with self._lock:
+                self.held.append(text)
+                del self.held[:-10]
+            log.info("announce held (nobody here): %s", text)
+            return True
         try:
             wav = to_16k(self.tts.speak(text))
         except Exception as e:
@@ -262,6 +271,22 @@ class Dashboard:
         self.add("chat", {"type": "announce", "text": text, "voice": True})
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return True
+
+    def welcome_back(self, left_at: float, now: float, meetings=()) -> str:
+        """What to say when the user returns: a meeting they were away for, then what was held."""
+        from datetime import datetime
+        parts = []
+        missed = [m for m in meetings if left_at - 600 <= m.start.timestamp() <= now and now - m.start.timestamp() <= 7200]
+        if missed:
+            parts.append(f"กลับมาแล้ว ประชุม{missed[-1].title[:40]} เป็นยังไงบ้างคะ")
+        with self._lock:
+            held, self.held = self.held, []
+        if held:
+            parts.append("ระหว่างที่ไม่อยู่ " + " ".join(held[-3:]))
+        if not parts:
+            return ""
+        self._last_reply = time.monotonic()  # they can answer without the wake name
+        return " ".join(parts)
 
     def _authorized(self, header: str | None) -> bool:
         if not self.password:
@@ -400,6 +425,8 @@ class Dashboard:
                              else "nothing understood", seconds)
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                if getattr(dash.bridge, "presence", None):
+                    dash.bridge.presence.note_voice()
                 t_asr = time.monotonic()
                 try:
                     reply = dash.bridge.cortex.ask(text)

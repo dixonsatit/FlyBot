@@ -89,12 +89,12 @@ class MeetingReminder:
         found = []
         for source in self.sources:
             try:
-                found += parse_meetings(_read(source), now - self.grace, now + self.horizon, self.tz)
+                found += parse_meetings(_read(source), now - timedelta(hours=6), now + self.horizon, self.tz)
             except Exception as e:  # keep the last good list if a feed is down or malformed
                 log.warning("calendar %s: %s", source if not source.startswith("http") else "feed", e)
                 return False
         self.meetings = sorted(found, key=lambda m: m.start)
-        log.info("calendar: %d meetings in the next %d days", len(self.meetings), self.horizon.days)
+        log.info("calendar: %d meetings in the next %d days (and past 6 h)", len(self.meetings), self.horizon.days)
         return True
 
     def check(self) -> list[dict]:
