@@ -1195,7 +1195,7 @@ def test_faces_enroll_match_and_greet_once(gains, tmp_path):
 
     registry, client = FaceRegistry(str(tmp_path / "faces.json")), FakeClient()
     bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
-    bridge.snapshot = lambda timeout: b"jpeg"
+    bridge.snapshot = lambda timeout, max_age=0: b"jpeg"
     dash = Dashboard(bridge, port=0)
     dash.faces = (client, registry, None)
     with pytest.raises(ValueError):
@@ -1218,6 +1218,69 @@ def test_faces_enroll_match_and_greet_once(gains, tmp_path):
     now[0] += 7 * 3600
     g.on_face_seen(); _t.sleep(0.1)
     assert len(greeted) == 1  # a stranger is not greeted
+
+
+def test_bridge_snapshot_callers_share_frames(gains):
+    import threading as _th
+    from flybot.mqtt_bridge import StackChanBridge
+    b = StackChanBridge(BrainController(ControllerConfig(backend="rate"), gains=gains), "localhost", 1883, "stackchan", 20.0)
+    asked = []
+    b.client.publish = lambda topic, payload=None, qos=0: asked.append(topic)
+    frame = lambda data: b._on_message(None, None, type("M", (), {"topic": "stackchan/snapshot", "payload": data}))
+    got = []
+    ts = [_th.Thread(target=lambda: got.append(b.snapshot(2.0))) for _ in range(3)]
+    for t in ts:
+        t.start()
+    import time as _t; _t.sleep(0.2)
+    frame(b"jpeg1")
+    for t in ts:
+        t.join()
+    assert got == [b"jpeg1"] * 3 and asked.count("stackchan/snapshot/request") == 1  # one request, shared
+    assert b.snapshot(0.1, max_age=1.0) == b"jpeg1"  # recent enough: no new request
+    b.stream()
+    b.stream()
+    assert asked.count("stackchan/camera/stream") == 1  # renewed only halfway through
+
+
+def test_face_tracker_centres_the_face_and_pauses_for_manual_moves(gains, tmp_path):
+    from flybot.faces import FaceRegistry, FaceTracker, Greeter
+    c = BrainController(ControllerConfig(backend="rate", track_motion=False), gains=gains)
+    s = SensorState()
+
+    class Client:
+        box = [0.7, 0.4, 0.2, 0.2]  # face centre at x 0.8: to the right
+        def embed(self, jpeg):
+            return [{"box": self.box, "score": 0.9, "embedding": [0.0] * 128}]
+
+    greeter = Greeter(lambda *a: b"j", Client(), FaceRegistry(str(tmp_path / "f.json")), lambda p: None)
+    streamed, now = [], [0.0]
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: streamed.append(k), Client(), c, greeter, lambda: True,
+                    clock=lambda: now[0])
+    assert t.step() and t.last_seen["x"] == 0.8
+    for _ in range(40):
+        c.step(s, 0.05)
+    assert c.pan > 8  # turned right towards the face
+    assert t.step() and streamed  # a face in view: the robot streams frames
+    t.pause(15.0)
+    assert not t.step()  # someone moved the head on purpose
+    now[0] += 16
+    assert t.step()
+
+
+def test_move_head_tool_turns_by_degrees_within_limits(gains):
+    import json
+    from flybot.cortex import Cortex
+    c = BrainController(ControllerConfig(backend="rate", track_motion=False, tilt_limits=(5, 45)), gains=gains)
+    cortex = Cortex(_ScriptedLLM(lambda text, tools, img: ""), c, lambda t, b: None, "stackchan")
+    tool = {t.name: t for t in cortex.tools()}["move_head"]
+    r = json.loads(tool.call({"tilt_by": 100}))
+    assert r["tilt"] == 45  # สุด: to the limit
+    s = SensorState()
+    for _ in range(60):
+        c.step(s, 0.05)
+    assert abs(c.tilt - 45) < 3
+    r = json.loads(tool.call({"pan_by": -15}))
+    assert r["pan"] == round(c.pan - 15)
 
 
 def test_to_16k_resamples_wayu_wav():

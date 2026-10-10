@@ -59,10 +59,15 @@ class StackChanBridge:
         self._jpeg: bytes | None = None
         self.presence = None  # flybot.presence.Presence when --presence is on
         self.greeter = None  # flybot.faces.Greeter when --face-url is set
+        self.tracker = None  # flybot.faces.FaceTracker: keeps the face centred
+        self._last_motion = -float("inf")
         self._last_face_turn = 0.0
         self.power: dict = {}  # last <base>/sensor/power
         self._battery_warned = False
-        self._jpeg_ready = threading.Event()
+        self._jpeg_at = 0.0  # monotonic time the last frame arrived
+        self._jpeg_cond = threading.Condition()
+        self._asked_at = -float("inf")  # last snapshot/request, so callers share one
+        self._stream_until = 0.0  # the robot is sending frames on its own until then
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
                       vision: bool = False, vision_llm=None) -> None:
@@ -76,11 +81,27 @@ class StackChanBridge:
         if self.dashboard:
             self.dashboard.add("chat", json.loads(body))
 
-    def snapshot(self, timeout: float) -> bytes | None:
-        """Ask the robot for one JPEG frame (called from the cortex thread)."""
-        self._jpeg_ready.clear()
-        self.client.publish(f"{self.base}/snapshot/request", "1", qos=0)
-        return self._jpeg if self._jpeg_ready.wait(timeout) else None
+    def snapshot(self, timeout: float, max_age: float = 0.0) -> bytes | None:
+        """A JPEG frame from the robot no older than ``max_age`` s, else a new one (any thread).
+        The camera card, presence and face checks share frames: while the robot streams, or a
+        request is already out, nobody sends another."""
+        now = time.monotonic()
+        with self._jpeg_cond:
+            if self._jpeg and now - self._jpeg_at <= max_age:
+                return self._jpeg
+            since = self._jpeg_at
+            if now >= self._stream_until and now - self._asked_at > 1.0:
+                self._asked_at = now
+                self.client.publish(f"{self.base}/snapshot/request", "1", qos=0)
+            ok = self._jpeg_cond.wait_for(lambda: self._jpeg_at > since, timeout)
+            return self._jpeg if ok else None
+
+    def stream(self, seconds: float = 20.0, fps: int = 4) -> None:
+        """Have the robot send frames by itself for ``seconds`` (renewed while someone watches)."""
+        now = time.monotonic()
+        if self._stream_until - now < seconds / 2:  # renew halfway, not on every frame
+            self._stream_until = now + seconds
+            self.client.publish(f"{self.base}/camera/stream", json.dumps({"fps": fps, "seconds": seconds}), qos=0)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code.is_failure:  # e.g. wrong username/password: paho keeps retrying
@@ -111,8 +132,9 @@ class StackChanBridge:
             self._on_power(msg.payload)
             return
         if msg.topic == f"{self.base}/snapshot":
-            self._jpeg = bytes(msg.payload)
-            self._jpeg_ready.set()
+            with self._jpeg_cond:
+                self._jpeg, self._jpeg_at = bytes(msg.payload), time.monotonic()
+                self._jpeg_cond.notify_all()
             return
         if msg.topic == f"{self.base}/chat/in" and self.cortex:
             text = msg.payload.decode(errors="replace").strip()
@@ -131,8 +153,12 @@ class StackChanBridge:
             return
         if kind in SENSOR_KINDS and isinstance(payload, dict):
             self.sensors.update(kind, payload)
-            if kind == "camera" and "x" in payload and self.presence:
-                self.presence.note_motion()
+            if kind == "camera" and "x" in payload:
+                self._last_motion = time.monotonic()
+                if self.presence:
+                    self.presence.note_motion()
+                if self.greeter:  # the robot's own face detector rarely fires: let the DGX look
+                    self.greeter.on_face_seen()
 
     def leds(self, rgb: tuple[int, int, int], mode: str = "blink", seconds: float = 8.0) -> None:
         """Signal on the base's RGB ring: mode solid, blink or spin."""
@@ -421,6 +447,8 @@ def main(argv: list[str] | None = None) -> None:
             target = pan + (x - 0.5) * c.cfg.hfov_deg, tilt - (y - 0.5) * c.cfg.vfov_deg
             log.info("presence: head at pan %.0f tilt %.0f when the frame was taken -> %.0f, %.0f", pan, tilt, *target)
             c.face(*target)
+            if bridge.greeter:
+                bridge.greeter.on_face_seen()
 
         def search(scan: bool) -> None:  # nobody in view: face the desk, now and then look around
             c = bridge.controller
@@ -472,6 +500,18 @@ def main(argv: list[str] | None = None) -> None:
             log.info("greeted %s", person.get("name"))
 
         bridge.greeter = Greeter(bridge.snapshot, client, registry, greet)
+        from .faces import FaceTracker
+
+        def someone_around() -> bool:  # tracking streams frames, so only while somebody may be there
+            p = bridge.presence
+            return bool(p and p.present) or time.monotonic() - bridge._last_motion < 30.0
+
+        bridge.tracker = FaceTracker(bridge.snapshot, bridge.stream, client, bridge.controller, bridge.greeter,
+                                     someone_around, on_seen=bridge.presence.note_face if bridge.presence else None)
+        bridge.tracker.start()
+        bridge.dashboard.tracker = bridge.tracker
+        if bridge.cortex:
+            bridge.cortex.tracker = bridge.tracker
         bridge.dashboard.faces = (client, registry, StaffDirectory(args.staff_dsn) if args.staff_dsn else None)
         if bridge.cortex:
             bridge.cortex.greeter = bridge.greeter

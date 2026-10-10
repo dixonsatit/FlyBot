@@ -373,6 +373,9 @@ static Expression toExpression(const char* e) {
 }
 
 static volatile bool snapshotRequested = false;
+// <base>/camera/stream {"fps", "seconds"}: someone watches the dashboard camera, so send frames
+// on our own instead of one per request (a round trip through the VPN took 0.3-3.7 s).
+static uint32_t streamUntil = 0, streamEveryMs = 250, lastStreamMs = 0;
 static String selfTestJson;  // published (retained) once MQTT connects
 // Thai speech-balloon font; marks arrive pre-positioned by flybot.thai_text.shape()
 static lgfx::PointerWrapper thaiFontData;
@@ -399,6 +402,14 @@ static void publishSnapshot() {
 static void onCommand(char* topic, byte* payload, unsigned int len) {
   if (topicBase + "/snapshot/request" == topic) {
     snapshotRequested = true;
+    return;
+  }
+  if (topicBase + "/camera/stream" == topic) {
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len)) {
+      streamEveryMs = 1000 / constrain(int(a["fps"] | 4), 1, 10);
+      streamUntil = millis() + uint32_t(constrain(float(a["seconds"] | 20.0f), 1.0f, 60.0f) * 1000);
+    }
     return;
   }
   if (topicBase + "/leds" == topic) {  // {"rgb": [r, g, b], "mode": "solid|blink|spin", "seconds": 5}
@@ -588,6 +599,7 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/announce").c_str(), 1);
     mqtt.subscribe((topicBase + "/voice/progress").c_str(), 0);
     mqtt.subscribe((topicBase + "/leds").c_str(), 0);
+    mqtt.subscribe((topicBase + "/camera/stream").c_str(), 0);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
@@ -680,8 +692,10 @@ void loop() {
     return;
   }
 
-  if (cameraOk && snapshotRequested) {
+  const bool streaming = int32_t(streamUntil - millis()) > 0 && millis() - lastStreamMs >= streamEveryMs;
+  if (cameraOk && (snapshotRequested || streaming)) {
     snapshotRequested = false;
+    lastStreamMs = millis();
     publishSnapshot();
   }
   if (cameraOk) processCamera();

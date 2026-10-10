@@ -188,6 +188,7 @@ class Dashboard:
         # training sample under <archive_dir>/../wakeword/<kind>/ instead of being answered.
         self.collect: dict | None = None
         self.faces = None  # (FaceClient, FaceRegistry, StaffDirectory | None) when --face-url is set
+        self.tracker = None  # flybot.faces.FaceTracker: paused while a person steers the head
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -274,6 +275,8 @@ class Dashboard:
                 raise ValueError("face recognition is off (--face-url)")
             return {"ok": self.faces[1].forget(str(body.get("id", "")))}
         elif path == "/api/face":  # absolute pose, held so the reflexes leave it there a while
+            if self.tracker:
+                self.tracker.pause(20.0)
             c.face(float(body.get("pan", 0)), float(body.get("tilt", 0)), hold_s=20.0)
         elif path == "/api/look":
             c.look_at(float(body.get("pan", 0)), float(body.get("tilt", 0)))
@@ -403,6 +406,7 @@ class Dashboard:
         for f in client.embed(jpeg):
             pid, score = registry.match(f["embedding"])
             who = registry.summary(pid) if pid else None
+            log.info("identify (webcam): %s cosine %.3f", who.get("name") if who else "unknown", score)
             out.append({"box": f["box"], "score": round(score, 3),
                         "name": who and who.get("name"), "nick": who and who.get("nick")})
         return {"ok": True, "faces": out}
@@ -515,7 +519,10 @@ class Dashboard:
                         return self._json(200, {"staff": []})
                     return self._json(200, {"staff": dash.faces[2].search(q)})
                 if self.path.split("?")[0] == "/api/camera.jpg":  # one frame from the robot's camera
-                    jpeg = dash.bridge.snapshot(8.0) if hasattr(dash.bridge, "snapshot") else None
+                    b = dash.bridge
+                    if hasattr(b, "stream"):  # someone is watching: let the robot send frames itself
+                        b.stream()
+                    jpeg = b.snapshot(8.0) if hasattr(b, "snapshot") else None
                     if not jpeg:
                         return self._json(504, {"error": "no frame from the robot"})
                     return self._send(200, jpeg, "image/jpeg")

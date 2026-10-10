@@ -123,6 +123,7 @@ class Cortex:
         self.places = None  # flybot.places.Places (Google Maps) near the robot
         self.presence = None  # flybot.presence.Presence: whether the camera sees the user
         self.greeter = None  # flybot.faces.Greeter: who the camera recognised
+        self.tracker = None  # flybot.faces.FaceTracker: paused when the head is moved on request
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -255,6 +256,19 @@ class Cortex:
         self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
         return reply
 
+    def _move_head(self, pan_by: float = 0.0, tilt_by: float = 0.0, pan: float | None = None,
+                   tilt: float | None = None) -> dict:
+        c = self.controller
+        lo_p, hi_p = c.cfg.pan_limits
+        lo_t, hi_t = c.cfg.tilt_limits
+        target_pan = min(hi_p, max(lo_p, (c.pan if pan is None else pan) + pan_by))
+        target_tilt = min(hi_t, max(lo_t, (c.tilt if tilt is None else tilt) + tilt_by))
+        if self.tracker:
+            self.tracker.pause(15.0)
+        c.face(target_pan, target_tilt, hold_s=15.0)
+        return {"pan": round(target_pan), "tilt": round(target_tilt), "pan_limits": [lo_p, hi_p],
+                "tilt_limits": [lo_t, hi_t], "was": {"pan": round(c.pan), "tilt": round(c.tilt)}}
+
     @staticmethod
     def _recording(tools: list[Tool], done: list[str], on_lookup: Callable[[str], None] | None = None) -> list[Tool]:
         """The same tools, appending "name(args)" to ``done`` when one runs."""
@@ -315,7 +329,15 @@ class Cortex:
                  "พยักหน้า, ส่ายหน้า, หมุนตัว/มองรอบๆ): left, right, up, down, center, nod, shake, spin.",
                  {"type": "object", "properties": {"name": {"type": "string", "enum": list(c.GESTURES)}},
                   "required": ["name"], "additionalProperties": False},
-                 lambda name: c.gesture(name) or "moving"),
+                 lambda name: (self.tracker and self.tracker.pause(15.0)) or c.gesture(name) or "moving"),
+            Tool("move_head", "Turn the head by a given amount or to an exact pose when asked in detail "
+                 "(ก้มลง/เงยขึ้น/หันซ้าย/หันขวา นิดนึง, หน่อย, 30 องศา, สุด). Relative degrees: pan_by + = right, "
+                 "tilt_by + = up; นิดนึง ~8, หน่อย ~15, มาก ~30, สุด = to the limit. Or absolute pan/tilt. "
+                 "Face tracking pauses 15 s so the head stays there. Returns the new pose and the limits.",
+                 {"type": "object", "properties": {"pan_by": {"type": "number"}, "tilt_by": {"type": "number"},
+                                                   "pan": {"type": "number"}, "tilt": {"type": "number"}},
+                  "additionalProperties": False},
+                 self._move_head),
             Tool("upcoming_meetings", "The user's meetings in the next 7 days from their calendar (start is local time).",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  self._meetings),

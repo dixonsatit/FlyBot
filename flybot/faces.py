@@ -143,25 +143,95 @@ class Greeter:
 
     def _check(self) -> None:
         try:
-            jpeg = self.snapshot(8.0)
+            jpeg = self.snapshot(8.0, 1.0)  # a frame up to 1 s old will do
             if not jpeg:
                 return
-            faces = self.client.embed(jpeg)
-            if not faces:
-                return
-            pid, score = self.registry.match(faces[0]["embedding"])
-            log.info("faces: %d in frame, nearest %s (cosine %.2f)", len(faces), pid or "unknown", score)
-            if not pid:
-                return
-            person = self.registry.summary(pid)
-            self.present, self.present_at = person, self.clock()
-            if self.clock() - self.greeted.get(pid, -float("inf")) >= self.greet_gap_s:
-                self.greeted[pid] = self.clock()
-                self.on_greet(person)
+            self.consider(self.client.embed(jpeg))
         except Exception as e:
             log.warning("face check failed: %s", e)
         finally:
             self._busy.release()
 
+    def consider(self, faces: list[dict]) -> None:
+        """Faces found in a robot frame (largest first): remember and greet a known one."""
+        if not faces or not self.registry.people:
+            return
+        pid, score = self.registry.match(faces[0]["embedding"])
+        if not pid:
+            return
+        person = self.registry.summary(pid)
+        if not self.present or self.present.get("id") != pid or self.clock() - self.present_at > 60:
+            log.info("faces (robot camera): %s (cosine %.3f)", person.get("name"), score)
+        self.present, self.present_at = person, self.clock()
+        if self.clock() - self.greeted.get(pid, -float("inf")) >= self.greet_gap_s:
+            self.greeted[pid] = self.clock()
+            self.on_greet(person)
+
     def who(self, within_s: float = 120.0) -> dict | None:
         return self.present if self.present and self.clock() - self.present_at <= within_s else None
+
+
+class FaceTracker:
+    """Keep the face in front of the robot centred, from the DGX's detections: while someone is
+    around, the robot streams frames (~3/s), each goes to the face server, and the head turns a
+    part of the way (gain) towards the largest face. The same detections feed the greeter. The
+    robot's own on-device detector rarely found a face, so it is not relied on.
+    """
+
+    def __init__(self, snapshot, stream: Callable[..., None], client: FaceClient, controller, greeter: Greeter,
+                 active: Callable[[], bool], gain: float = 0.6, deadband: tuple[float, float] = (0.07, 0.09),
+                 fps: int = 3, idle_s: float = 20.0, clock: Callable[[], float] = time.monotonic,
+                 on_seen: Callable[[], None] | None = None):
+        self.snapshot, self.stream, self.client, self.c, self.greeter = snapshot, stream, client, controller, greeter
+        self.active, self.gain, self.deadband, self.fps, self.idle_s, self.clock = active, gain, deadband, fps, idle_s, clock
+        self.on_seen = on_seen  # e.g. presence.note_face: a face means someone is there
+        self.paused_until = 0.0  # a person or the assistant moved the head on purpose
+        self.last_face = -float("inf")
+        self.last_seen: dict | None = None  # the box of the face last centred on, for the dashboard
+        self._stop = threading.Event()
+
+    def pause(self, seconds: float = 15.0) -> None:
+        self.paused_until = self.clock() + seconds
+
+    def step(self) -> bool:
+        """One frame: find faces, turn towards the largest. True if a face was seen."""
+        now = self.clock()
+        if now < self.paused_until or not self.active():
+            return False
+        recent = now - self.last_face < self.idle_s
+        if recent:  # someone is in view: keep frames coming without a request each time
+            self.stream(seconds=10.0, fps=self.fps)
+        jpeg = self.snapshot(3.0, 0.0)
+        if not jpeg:
+            return False
+        pan, tilt = self.c.pan, self.c.tilt  # the frame is a few hundred ms old; the gain absorbs it
+        faces = self.client.embed(jpeg)
+        if not faces:
+            return False
+        self.last_face = self.clock()
+        x, y, w, h = faces[0]["box"]
+        dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
+        self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}
+        if abs(dx) > self.deadband[0] or abs(dy) > self.deadband[1]:
+            self.c.face(pan + self.gain * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg,
+                        hold_s=1.0)
+        self.greeter.consider(faces)
+        if self.on_seen:
+            self.on_seen()
+        return True
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                seen = self.step()
+            except Exception as e:
+                log.warning("face tracking: %s", e)
+                seen = False
+            # following a face: next frame at once; nobody in view: look again every 3 s
+            self._stop.wait(0.05 if seen or self.clock() - self.last_face < self.idle_s else 3.0)
+
+    def start(self) -> None:
+        threading.Thread(target=self.run, name="face-tracker", daemon=True).start()
+
+    def stop(self) -> None:
+        self._stop.set()
