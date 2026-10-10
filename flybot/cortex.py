@@ -201,8 +201,13 @@ class Cortex:
                 persona += " To answer about what you see, call the `look` tool."
         who = self.greeter.who() if self.greeter else None
         if who:  # a face matched an enrolled person: talk to them by name
-            persona += (f" The person in front of you now is {who.get('name', '')} (nickname {who.get('nick') or '-'}"
-                        f", {who.get('position') or ''} {who.get('office') or ''}); call them พี่{who.get('nick') or who.get('name', '')}.")
+            persona += (f" Your camera's face recognition just recognised the person in front of you: "
+                        f"{who.get('name', '')} (nickname {who.get('nick') or '-'}, {who.get('position') or ''} "
+                        f"{who.get('office') or ''}); call them พี่{who.get('nick') or who.get('name', '')}. You do "
+                        "recognise their face (they enrolled it with consent): if asked, say you remember their face.")
+        elif self.greeter:
+            persona += (" Your face recognition does not recognise anyone in view right now (nobody enrolled is "
+                        "facing the camera, or it is too dark).")
         notes = self.store.notes[-30:] if self.store else []
         if notes:  # small enough to carry every turn, so "what did I tell you" needs no tool call
             persona += " Notes the user asked you to remember: " + "; ".join(f"[{n['id']}] {n['text']}" for n in notes)
