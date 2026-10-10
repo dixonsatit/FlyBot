@@ -18,7 +18,7 @@
 
 static constexpr int W = 160, H = 120;
 static constexpr uint32_t FRAME_MS = 200;  // 5 fps is enough to watch and keeps the CPU for the brain
-static uint8_t view[W * H];
+static uint8_t* view = (uint8_t*)ps_calloc(W * H, 1);  // PSRAM: internal RAM is kept for TLS
 static SemaphoreHandle_t lock;
 static volatile uint32_t viewSeq = 0;
 static volatile int clients = 0;
@@ -33,7 +33,7 @@ void streamFrame(const uint8_t* luma, const uint8_t* changed, int w, int h, int 
   last = millis();
   if (xSemaphoreTake(lock, 0) != pdTRUE) return;
   if (rawView) {
-    memcpy(view, luma, sizeof view);
+    memcpy(view, luma, W * H);
   } else {
     for (int i = 0; i < W * H; ++i) view[i] = changed[i] ? 255 : luma[i] / 2;  // motion bright, scene dim
   }
@@ -86,7 +86,7 @@ static esp_err_t streamHandler(httpd_req_t* req) {
     size_t len = 0;
     xSemaphoreTake(lock, portMAX_DELAY);
     seen = viewSeq;
-    bool ok = fmt2jpg(view, sizeof view, W, H, PIXFORMAT_GRAYSCALE, 70, &jpg, &len);
+    bool ok = fmt2jpg(view, W * H, W, H, PIXFORMAT_GRAYSCALE, 70, &jpg, &len);
     xSemaphoreGive(lock);
     if (!ok) break;
     char head[96];

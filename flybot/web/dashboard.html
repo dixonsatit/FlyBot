@@ -91,6 +91,17 @@
       <div class="readout"><span>อารมณ์ <b id="expr">-</b></span><span>pan <b id="pan">0</b>°</span><span>tilt <b id="tilt">0</b>°</span></div>
     </div>
     <div class="card">
+      <h2>กล้องหุ่น</h2>
+      <div class="row"><button id="camBtn">เปิดกล้อง</button><span id="camInfo" class="hint"></span></div>
+      <img id="cam" alt="" title="แตะที่ภาพเพื่อหันไปทางนั้น"
+           style="display:none;width:100%;border-radius:10px;cursor:crosshair;background:#000">
+      <div class="row">
+        <button data-nudge="-15,0">◀</button><button data-nudge="0,8">▲</button>
+        <button data-nudge="0,-8">▼</button><button data-nudge="15,0">▶</button>
+      </div>
+      <div class="err" id="errCam"></div>
+    </div>
+    <div class="card">
       <h2>สั่งหุ่น</h2>
       <div class="row">นิสัย <select id="personality"></select></div>
       <div class="row">
@@ -337,6 +348,36 @@ async function post(path, body, errId) {
 }
 document.querySelectorAll("[data-look]").forEach(b => b.onclick = () => {
   const [pan, tilt] = b.dataset.look.split(",").map(Number); post("/api/look", { pan, tilt }, "err1"); });
+// ---- camera: one frame after another while the card is on; tap or nudge to turn the head ----
+let camOn = false, camFrames = 0, camSince = 0, camUrl = null;
+const HFOV = 62, VFOV = 49;  // ControllerConfig.hfov_deg / vfov_deg
+async function camLoop() {
+  while (camOn) {
+    try {
+      const r = await fetch("/api/camera.jpg?t=" + Date.now());
+      if (!r.ok) { $("errCam").textContent = r.status === 504 ? "หุ่นไม่ส่งภาพมา (ออฟไลน์?)" : r.statusText;
+                   await new Promise(ok => setTimeout(ok, 2000)); continue; }
+      const url = URL.createObjectURL(await r.blob());
+      $("cam").src = url; if (camUrl) URL.revokeObjectURL(camUrl); camUrl = url;
+      $("errCam").textContent = ""; camFrames++;
+      $("camInfo").textContent = (camFrames / ((Date.now() - camSince) / 1000)).toFixed(1) + " ภาพ/วินาที";
+    } catch (e) { $("errCam").textContent = e.message; await new Promise(ok => setTimeout(ok, 2000)); }
+  }
+}
+$("camBtn").onclick = () => {
+  camOn = !camOn; $("cam").style.display = camOn ? "block" : "none";
+  $("camBtn").textContent = camOn ? "ปิดกล้อง" : "เปิดกล้อง";
+  if (camOn) { camFrames = 0; camSince = Date.now(); camLoop(); }
+};
+const headNow = () => [Number($("pan").textContent) || 0, Number($("tilt").textContent) || 0];
+document.querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => {
+  const [dp, dt] = b.dataset.nudge.split(",").map(Number), [p, t] = headNow();
+  post("/api/face", { pan: p + dp, tilt: t + dt }, "errCam"); });
+$("cam").onclick = (e) => {
+  const r = e.target.getBoundingClientRect(), [p, t] = headNow();
+  const dx = (e.clientX - r.left) / r.width - 0.5, dy = (e.clientY - r.top) / r.height - 0.5;
+  post("/api/face", { pan: p + dx * HFOV, tilt: t - dy * VFOV }, "errCam");
+};
 document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => post("/api/sim", { action: b.dataset.act }, "err2"));
 $("simOn").onchange = (e) => post("/api/sim", { enabled: e.target.checked }, "err2");
 $("game").onclick = () => post("/api/game", { on: !(state && state.game_on) }, "err1");

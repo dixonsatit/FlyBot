@@ -1159,6 +1159,26 @@ def test_wake_word_recording_keeps_clips_instead_of_answering(gains, tmp_path):
         assert w.getframerate() == 16000 and w.getnframes() == 8000
 
 
+def test_dashboard_camera_frames_and_absolute_turns(gains):
+    from flybot.dashboard import Dashboard
+    brain = BrainController(ControllerConfig(backend="rate", track_motion=False), gains=gains)
+    bridge = _FakeBridge(brain)
+    frames = [b"\xff\xd8jpeg", None]
+    bridge.snapshot = lambda timeout: frames.pop(0)
+    dash = Dashboard(bridge, port=0)
+    dash.start()
+    try:
+        assert _http(dash.port, "GET", "/api/camera.jpg?t=1") == (200, b"\xff\xd8jpeg")
+        assert _http(dash.port, "GET", "/api/camera.jpg?t=2")[0] == 504  # robot offline
+        assert _http(dash.port, "POST", "/api/face", {"pan": 30, "tilt": 20})[0] == 200
+    finally:
+        dash.stop()
+    s = SensorState()
+    for _ in range(60):
+        brain.step(s, 0.05)
+    assert abs(brain.pan - 30) < 3 and abs(brain.tilt - 20) < 3
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

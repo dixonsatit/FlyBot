@@ -1,6 +1,7 @@
 #include "voice.h"
 
 #include "params.h"
+#include "root_ca.h"
 
 #include <Avatar.h>
 #include <HTTPClient.h>
@@ -51,7 +52,7 @@ static int16_t* rec = nullptr;
 static volatile size_t recLen = 0;
 static int16_t block[BLOCK];
 static int16_t stereo[BLOCK * 2];  // L/R pairs from the two mics; block is their mean
-static int16_t preroll[PREROLL][BLOCK];
+static int16_t (*preroll)[BLOCK] = (int16_t(*)[BLOCK])ps_calloc(PREROLL, sizeof(int16_t[BLOCK]));  // PSRAM
 
 static volatile bool micActive = false;  // main -> mic task: keep recording
 static volatile bool micParked = true;   // mic task -> main: not inside record()
@@ -165,7 +166,8 @@ static double xcorr[2 * MAX_LAG + 1], energyL, energyR;
 static int dirBlocks = 0;
 static volatile bool dirReady = false;
 static SoundDirection dirResult;
-static float bandL[BLOCK], bandR[BLOCK];
+static float* bandL = (float*)ps_calloc(BLOCK, sizeof(float));  // PSRAM: internal RAM is kept for TLS
+static float* bandR = (float*)ps_calloc(BLOCK, sizeof(float));
 
 static void directionReset() {
   memset(xcorr, 0, sizeof xcorr);
@@ -292,6 +294,12 @@ static void amplify(uint8_t* w, size_t len) {
   }
 }
 
+// https:// (the public endpoint) checks the server against the hospital certificate's roots.
+static void beginUrl(HTTPClient& http, const String& url) {
+  if (url.startsWith("https://")) http.begin(url, KKH_ROOT_CA);
+  else http.begin(url);
+}
+
 // vTaskDelete() never returns, so locals' destructors don't run: the request lives in its own
 // function and closes its socket explicitly (each turn leaked one until the 16 ran out).
 static int voiceRequest() {
@@ -299,7 +307,7 @@ static int voiceRequest() {
   http.setReuse(false);
   String url = voiceUrl;
   url.replace("/api/voice", path);
-  http.begin(url);
+  beginUrl(http, url);
   http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
   http.addHeader("Content-Type", "application/octet-stream");
   http.setConnectTimeout(5000);
@@ -344,7 +352,7 @@ static void fetchFiller(int i) {
   http.setReuse(false);
   String url = voiceUrl;
   url.replace("/api/voice", String("/api/filler/") + FILLER_NAMES[i]);
-  http.begin(url);
+  beginUrl(http, url);
   http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
   http.setConnectTimeout(5000);
   http.setTimeout(20000);

@@ -10,6 +10,7 @@ resources:
   - config.yaml
   - mosquitto.yaml
   - bridge.yaml
+  - ingress.yaml
 images:
   - name: flybot
     newName: ghcr.io/dixonsatit/flybot

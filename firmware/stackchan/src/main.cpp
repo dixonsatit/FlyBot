@@ -24,6 +24,8 @@
 #include "params.h"
 #include "stream.h"
 #include "voice.h"
+#include "wsclient.h"
+#include "root_ca.h"
 #include "thai_font.h"
 
 #if __has_include("flybot_config.h")
@@ -46,11 +48,14 @@ static constexpr int FRAME_H = 120;
 
 Avatar avatar;
 WiFiClient wifiClient;
+WsClient wssClient(KKH_ROOT_CA);  // MQTT host "wss://host/path": through the public HTTPS endpoint
 PubSubClient mqtt(wifiClient);
+static String mqttHost;  // host name only (setServer keeps the pointer)
 String topicBase = MQTT_BASE_TOPIC;
 
-static uint8_t prevFrame[FRAME_W * FRAME_H];
-static uint8_t changedMask[FRAME_W * FRAME_H];  // for the camera monitor
+// In PSRAM: internal RAM is kept for TLS (mbedTLS allocates only there in this core).
+static uint8_t* prevFrame = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);
+static uint8_t* changedMask = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);  // for the camera monitor
 static bool havePrev = false;
 static bool cameraOk = false;
 static bool proximityOk = false;
@@ -539,7 +544,18 @@ static void joinNetwork() {
   const Network& n = NETWORKS[network];
   WiFi.begin(n.ssid, n.password);
   mqtt.disconnect();
-  mqtt.setServer(n.mqttHost, n.mqttPort);
+  String host = n.mqttHost;
+  if (host.startsWith("wss://")) {  // e.g. wss://stackchan.kkh.go.th/mqtt, port 443
+    host = host.substring(6);
+    const int slash = host.indexOf('/');
+    wssClient.setPath(slash < 0 ? "/mqtt" : host.substring(slash));
+    if (slash >= 0) host = host.substring(0, slash);
+    mqtt.setClient(wssClient);
+  } else {
+    mqtt.setClient(wifiClient);
+  }
+  mqttHost = host;
+  mqtt.setServer(mqttHost.c_str(), n.mqttPort);
   voiceSetUrl(n.voiceUrl, n.wakeName);
 }
 

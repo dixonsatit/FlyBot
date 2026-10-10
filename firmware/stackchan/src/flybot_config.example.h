@@ -18,6 +18,10 @@
 // #define WIFI2_MQTT_PORT 31883
 // #define WIFI2_VOICE_URL "http://192.168.1.104:31880/api/voice"
 // #define WIFI2_WAKE_NAME 0  // answer every sentence there, without the wake name
+// Or, from any network, through the public endpoint (TLS; MQTT over WebSocket):
+// #define WIFI2_MQTT_HOST "wss://stackchan.kkh.go.th/mqtt"
+// #define WIFI2_MQTT_PORT 443
+// #define WIFI2_VOICE_URL "https://stackchan.kkh.go.th/api/voice"
 
 // SG90 signal pins. CoreS3 Port.A X:2 Y:1, Port.B X:9 Y:8, Port.C X:17 Y:18
 #define SERVO_PIN_X 17

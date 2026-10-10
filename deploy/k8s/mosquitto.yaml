@@ -4,7 +4,12 @@ metadata:
   name: mosquitto-config
 data:
   mosquitto.conf: |
+    per_listener_settings false
     listener 1883
+    # MQTT over WebSocket for the robot away from the LAN (stackchan.kkh.go.th/mqtt, ingress.yaml);
+    # TLS ends at the hospital's proxy in front of the cluster
+    listener 9001
+    protocol websockets
     allow_anonymous false
     password_file /mosquitto/auth/passwd
     persistence false
@@ -49,6 +54,7 @@ spec:
           image: eclipse-mosquitto:2
           ports:
             - {name: mqtt, containerPort: 1883}
+            - {name: ws, containerPort: 9001}
           readinessProbe:
             tcpSocket: {port: mqtt}
             periodSeconds: 10
@@ -79,3 +85,4 @@ spec:
   selector: {app: mosquitto}
   ports:
     - {name: mqtt, port: 1883, targetPort: mqtt, nodePort: 31883}
+    - {name: ws, port: 9001, targetPort: ws}

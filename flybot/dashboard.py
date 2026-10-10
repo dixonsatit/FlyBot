@@ -263,6 +263,8 @@ class Dashboard:
                     raise ValueError("kind must be positive or negative, and the bridge needs --state-dir")
                 self.collect = {"kind": kind, "left": max(1, min(int(body.get("count", 50)), 500)), "saved": 0}
             log.info("wake word recording: %s", self.collect)
+        elif path == "/api/face":  # absolute pose, held so the reflexes leave it there a while
+            c.face(float(body.get("pan", 0)), float(body.get("tilt", 0)), hold_s=20.0)
         elif path == "/api/look":
             c.look_at(float(body.get("pan", 0)), float(body.get("tilt", 0)))
         elif path == "/api/say":
@@ -439,6 +441,11 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path.split("?")[0] == "/api/camera.jpg":  # one frame from the robot's camera
+                    jpeg = dash.bridge.snapshot(8.0) if hasattr(dash.bridge, "snapshot") else None
+                    if not jpeg:
+                        return self._json(504, {"error": "no frame from the robot"})
+                    return self._send(200, jpeg, "image/jpeg")
                 if self.path.startswith("/api/filler/"):
                     wav = dash.filler(self.path.rsplit("/", 1)[-1])
                     return self._send(200, wav, "audio/wav") if wav else self._json(404, {"error": "no such filler"})
