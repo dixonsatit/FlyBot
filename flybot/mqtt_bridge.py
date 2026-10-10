@@ -424,10 +424,12 @@ def main(argv: list[str] | None = None) -> None:
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
         bridge.dashboard.start()
-    if args.presence and bridge.dashboard and args.llm == "anthropic":
-        from .llm import AnthropicLLM
+    if args.presence and bridge.dashboard:
         from .presence import Presence
-        eyes = AnthropicLLM("claude-haiku-5-5", api_key=api_key, max_tokens=512)  # room for its thinking
+        eyes = None  # without Claude: faces (the tracker), speech and handling say someone is there
+        if args.llm == "anthropic":
+            from .llm import AnthropicLLM
+            eyes = AnthropicLLM("claude-haiku-5-5", api_key=api_key, max_tokens=512)  # room for its thinking
 
         def arrived(left_at: float, now: float) -> None:
             meetings = bridge.cortex.calendar.meetings if bridge.cortex and bridge.cortex.calendar else []
@@ -455,10 +457,11 @@ def main(argv: list[str] | None = None) -> None:
             c.gesture("spin") if scan else c.face(c.cfg.home_pan, c.cfg.home_tilt)
 
         bridge.presence = Presence(snapshot, eyes, arrived, on_person=look_at_person, on_search=search)
+        bridge.presence.use_vision = eyes is not None
         bridge.presence.start()
         if bridge.cortex:
             bridge.cortex.presence = bridge.presence
-        log.info("Presence: camera checks with %s", eyes.model)
+        log.info("Presence: %s", f"camera checks with {eyes.model}" if eyes else "from faces, speech and handling")
     if args.location and bridge.cortex:
         from .weather import Weather
         lat, lon, *name = args.location.split(",")
