@@ -116,6 +116,7 @@ class Cortex:
         self.calendar = None  # flybot.meetings.MeetingReminder, set by the bridge
         self.github = None  # flybot.github.GitHubWatcher
         self.store = None  # flybot.assistant.AssistantStore: notes and reminders
+        self.weather = None  # flybot.weather.Weather where the robot is
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -292,6 +293,9 @@ class Cortex:
                  "repositories, and open pull requests waiting for their review.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  lambda: self.github.summary() if self.github else {"error": "GitHub is not connected"}),
+            Tool("weather", "Weather now, today and tomorrow, and PM2.5 / AQI where the robot is.",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: self.weather.now() if self.weather else {"error": "no location configured"}),
             Tool("remember", "Save a note the user asks you to remember (จำไว้ว่า..., จดไว้...).",
                  {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"],
                   "additionalProperties": False},

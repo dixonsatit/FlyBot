@@ -1019,6 +1019,21 @@ def test_presence_holds_announcements_and_welcomes_back(gains):
     assert dash.held == []
 
 
+def test_people_only_mode_ignores_motion_but_turns_to_a_face(gains):
+    from flybot.presence import Presence
+    c = BrainController(ControllerConfig(backend="rate", track_motion=False), gains=gains)
+    s = SensorState()
+    for i in range(40):  # a target moving on the right of the image
+        s.update("camera", {"x": 150, "y": 60, "vx": 30, "vy": 0, "width": 160, "height": 120, "polarity": 1.0},
+                 now=i * 0.05)
+        c.step(s, 0.05, now=i * 0.05)
+    assert abs(c.pan) < 5  # not chased (with track_motion on, the same input turns the head to 90)
+    seen = []
+    p = Presence(lambda t: b"jpeg", type("E", (), {"ask": lambda self, *a, **k: "yes 0.8 0.3"})(),
+                 on_person=lambda x, y: seen.append((x, y)))
+    assert p.person_visible() and seen == [(0.8, 0.3)]
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

@@ -208,6 +208,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
+    ap.add_argument("--location", default="16.43,102.83,ขอนแก่น",
+                    help="lat,lon,name for the weather tool (Open-Meteo); empty to turn it off")
     ap.add_argument("--presence", action="store_true",
                     help="check camera frames for a person (Claude Haiku); hold announcements while away")
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
@@ -328,9 +330,17 @@ def main(argv: list[str] | None = None) -> None:
             if line:
                 bridge.dashboard.announce(line, force=True)
 
-        bridge.presence = Presence(bridge.snapshot, eyes, arrived)
+        def look_at_person(x: float, y: float) -> None:  # face at (x, y) of the frame -> turn to it
+            c = bridge.controller
+            c.look_at(c.pan + (x - 0.5) * c.cfg.hfov_deg, c.tilt - (y - 0.5) * c.cfg.vfov_deg)
+
+        bridge.presence = Presence(bridge.snapshot, eyes, arrived, on_person=look_at_person)
         bridge.presence.start()
         log.info("Presence: camera checks with %s", eyes.model)
+    if args.location and bridge.cortex:
+        from .weather import Weather
+        lat, lon, *name = args.location.split(",")
+        bridge.cortex.weather = Weather(float(lat), float(lon), name[0] if name else "")
     if args.state_dir and bridge.dashboard:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
     if args.state_dir and bridge.cortex:

@@ -12,17 +12,20 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
-PROMPT = ("Is at least one person (a face, head or upper body) visible in this camera frame? "
-          "Answer with exactly one word: yes or no.")
+PROMPT = ("Is a person (a face, head or upper body) visible in this camera frame? If yes, answer "
+          "'yes X Y' where X and Y are the centre of the nearest face as fractions of the image width "
+          "and height (0 = left/top, 1 = right/bottom), e.g. 'yes 0.42 0.35'. If not, answer 'no'.")
 
 
 class Presence:
     def __init__(self, snapshot: Callable[[float], bytes | None], vision_llm,
                  on_arrive: Callable[[float, float], None] | None = None, check_s: float = 30.0,
-                 away_s: float = 300.0, clock: Callable[[], float] = time.time):
+                 away_s: float = 300.0, clock: Callable[[], float] = time.time,
+                 on_person: Callable[[float, float], None] | None = None, track_s: float = 8.0):
         self.snapshot, self.vision = snapshot, vision_llm
         self.on_arrive = on_arrive  # (left_at, now) when the user comes back
         self.check_s, self.away_s, self.clock = check_s, away_s, clock
+        self.on_person, self.track_s = on_person, track_s  # where the face is (0..1), re-checked while present
         self.present = False
         self.last_seen = -float("inf")  # wall clock, so meeting times compare
         self.left_at: float | None = None
@@ -58,7 +61,16 @@ class Presence:
         if not jpeg:
             return None
         reply = self.vision.ask("You check a desk robot's camera frame.", [], PROMPT, image_jpeg=jpeg)
-        return reply.strip().lower().startswith(("yes", "ใช่"))
+        words = reply.strip().lower().replace(",", " ").split()
+        if not words or not words[0].startswith(("yes", "ใช่")):
+            return False
+        try:
+            x, y = (min(1.0, max(0.0, float(v))) for v in words[1:3])
+        except ValueError:
+            return True
+        if self.on_person:
+            self.on_person(x, y)
+        return True
 
     def tick(self) -> None:
         now = self.clock()
@@ -66,7 +78,8 @@ class Presence:
             self.present, self.left_at = False, self.last_seen
             log.info("presence: user away since %s", time.strftime("%H:%M", time.localtime(self.last_seen)))
         recent_motion = now - self._motion < 15.0
-        if (recent_motion or self.present) and now - self._last_check >= self.check_s:
+        every = self.track_s if self.present else self.check_s
+        if (recent_motion or self.present) and now - self._last_check >= every:
             self._last_check = now
             try:
                 seen = self.person_visible()

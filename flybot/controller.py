@@ -33,6 +33,9 @@ class ControllerConfig:
     frame_width: int = 320  # CoreS3 GC0308 QVGA
     frame_height: int = 240
     hfov_deg: float = 62.0
+    # False: the optic lobe no longer steers the head at motion (an assistant watches people, not
+    # every moving thing); looming escapes still fire and look_at/the FC2 goal still steer
+    track_motion: bool = True
     vfov_deg: float = 49.0
     v_max: float = 2.0  # image velocity (half-frames/s) mapped to full-scale input
     k_position: float = 90.0  # deg/s per unit LC10 output
@@ -374,6 +377,8 @@ class BrainController:
         # image +x is right (pan +), image +y is down (tilt -)
         pan_rate = cfg.k_position * px + cfg.k_motion * hs
         tilt_rate = -(cfg.k_position * py + cfg.k_motion * vs)
+        if not cfg.track_motion:
+            pan_rate = tilt_rate = 0.0
 
         # looming: LPLC2 / LC4 -> Giant Fiber; an escape turns away from the object and up
         nearness = self._nearness_from(sensors)
@@ -411,7 +416,7 @@ class BrainController:
         yaw_rate = cfg.imu_yaw_sign * gyro[2] if gyro else None
         yaw = cfg.imu_yaw_sign * imu["yaw"] if "yaw" in imu else None
         d_heading = self.cx.update_heading(yaw_rate, dt, yaw)
-        if target and not escaping:
+        if target and not escaping and cfg.track_motion:
             self.cx.set_goal(self.cx.heading + self.pan + stim[0] * cfg.hfov_deg / 2)
         elif not escaping:
             pan_rate += cfg.k_heading * self.cx.steering(self.pan)
