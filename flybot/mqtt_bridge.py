@@ -324,7 +324,7 @@ def main(argv: list[str] | None = None) -> None:
             where = f" ที่ {r['location']}" if r.get("location") else ""
             when = f"อีก {r.get('minutes', 0)} นาทีมี" if r.get("minutes") else "ถึงเวลา"
             if bridge.dashboard:
-                bridge.dashboard.announce(f"{when}ประชุม {title} ตอน {r.get('start', '')}{where} นะคะ")
+                bridge.dashboard.announce(f"{when}ประชุม {title} ตอน {r.get('start', '')}{where} นะครับ")
 
         reminder = MeetingReminder(args.calendar, remind, leads, args.calendar_refresh, tz)
         reminder.start()

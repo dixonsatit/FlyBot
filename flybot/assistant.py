@@ -131,7 +131,7 @@ class AssistantStore:
                 log.info("reminder due: %s", r["text"])
                 if self.on_due:
                     try:
-                        self.on_due(f"เตือนค่ะ: {r['text']}")
+                        self.on_due(f"เตือนครับ: {r['text']}")
                     except Exception:
                         log.exception("reminder announce failed")
             self._stop.wait(10.0)

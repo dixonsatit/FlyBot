@@ -45,11 +45,11 @@ log = logging.getLogger(__name__)
 ADDRESSED_RE = re.compile(r"เห็น(ผม|ฉัน|หนู|ไหม)|ได้ยิน(ผม|ไหม)|หัน(หน้า|มา|ซ้าย|ขวา|ไป)|มองมา|เงย|ก้ม|พยักหน้า|"
                           r"ส่ายหน้า|หนู(ช่วย|ทำ|รู้|จำ|จด|เตือน)|ช่วย(บอก|ดู|เตือน|จำ|จด|เปิด|หา)|ตอบ(ผม|หน่อย)")
 CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot being called
-CALL_REPLY = "ว่าไงคะ"
+CALL_REPLY = "ว่าไงครับ"
 
 # What the robot says when its head is stroked (it calls itself หนู).
 # Played by the robot while a voice reply is being made (Dashboard.progress)
-FILLERS = {"search": "กำลังค้นหาข้อมูลให้นะคะ", "wait": "รอแป๊บนึงนะคะ ยังหาอยู่ค่ะ"}
+FILLERS = {"search": "กำลังค้นหาข้อมูลให้นะครับ", "wait": "รอแป๊บนึงนะครับ ยังหาอยู่ครับ"}
 
 PAT_LINES = (
     "โอยยยย ฟินจังเอาอีกๆ",
@@ -343,7 +343,7 @@ class Dashboard:
         parts = []
         missed = [m for m in meetings if left_at - 600 <= m.start.timestamp() <= now and now - m.start.timestamp() <= 7200]
         if missed:
-            parts.append(f"กลับมาแล้ว ประชุม{missed[-1].title[:40]} เป็นยังไงบ้างคะ")
+            parts.append(f"กลับมาแล้ว ประชุม{missed[-1].title[:40]} เป็นยังไงบ้างครับ")
         with self._lock:
             held, self.held = self.held, []
         if held:
