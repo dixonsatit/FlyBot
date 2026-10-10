@@ -36,8 +36,14 @@ def _read(source: str, timeout: float = 15.0) -> bytes:
         source = "https://" + source[len("webcal://"):]
     if source.startswith(("http://", "https://")):
         req = urllib.request.Request(source, headers={"User-Agent": "flybot-meetings"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+        for attempt in range(3):  # k9s egress to Google stalls now and then; a fresh connection is quick
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.read()
+            except (OSError, TimeoutError) as e:
+                if attempt == 2:
+                    raise
+                log.info("calendar feed attempt %d failed (%s), retrying", attempt + 1, e)
     return Path(source).expanduser().read_bytes()
 
 
@@ -78,7 +84,7 @@ class MeetingReminder:
         self._fired: set[tuple[str, datetime, float]] = set()
         self._stop = threading.Event()
 
-    def refresh(self) -> None:
+    def refresh(self) -> bool:
         now = self.now()
         found = []
         for source in self.sources:
@@ -86,9 +92,10 @@ class MeetingReminder:
                 found += parse_meetings(_read(source), now - self.grace, now + self.horizon, self.tz)
             except Exception as e:  # keep the last good list if a feed is down or malformed
                 log.warning("calendar %s: %s", source if not source.startswith("http") else "feed", e)
-                return
+                return False
         self.meetings = sorted(found, key=lambda m: m.start)
         log.info("calendar: %d meetings in the next %d days", len(self.meetings), self.horizon.days)
+        return True
 
     def check(self) -> list[dict]:
         """Reminders due now (each fired once)."""
@@ -112,11 +119,12 @@ class MeetingReminder:
         self._stop.set()
 
     def _run(self) -> None:
-        last_refresh = -float("inf")
+        last_refresh, wait = -float("inf"), self.refresh_s
         while not self._stop.is_set():
-            if time.monotonic() - last_refresh >= self.refresh_s:
-                self.refresh()
+            if time.monotonic() - last_refresh >= wait:
+                ok = self.refresh()
                 last_refresh = time.monotonic()
+                wait = self.refresh_s if ok else min(30.0, self.refresh_s)  # failed: try again soon
             for reminder in self.check():
                 try:
                     self.on_reminder(reminder)
