@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.28.0 (2026-10-10)
+
+### Features
+
+- **voice**: Wake-word recording session for training "น้องหวี่"
+  ([`d11e562`](https://github.com/dixonsatit/FlyBot/commit/d11e5620fbd9d8e6ab32fa8b0564c1427c44df62))
+
+
 ## v0.27.1 (2026-10-10)
 
 ### Bug Fixes
