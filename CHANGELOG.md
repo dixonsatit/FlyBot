@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.19.3 (2026-10-10)
+
+### Bug Fixes
+
+- **assistant**: Keep tool actions in the chat history
+  ([`0f59abc`](https://github.com/dixonsatit/FlyBot/commit/0f59abcabad1c0e021729a96d028e7410ffb0c46))
+
+
 ## v0.19.2 (2026-10-09)
 
 ### Bug Fixes
