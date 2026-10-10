@@ -295,7 +295,13 @@ static void serviceBody() {
     M5.Imu.getGyro(&gx, &gy, &gz);
     M5.Imu.getAccel(&ax, &ay, &az);
     tele.gyro[0] = gx, tele.gyro[1] = gy, tele.gyro[2] = gz, tele.accel[0] = ax, tele.accel[1] = ay, tele.accel[2] = az;
-    if (const char* ev = motionUpdate(ax, ay, az, gx, gy, gz)) {
+    const char* ev = motionUpdate(ax, ay, az, gx, gy, gz);
+    // a hand stroking or swiping the head jolts the IMU (0.3-0.46 g): that is not being lifted
+    if (ev && voiceLastTouchMs() && now - voiceLastTouchMs() < 1500) {
+      M5_LOGW("body: %s ignored (head touched)", ev);
+      ev = nullptr;
+    }
+    if (ev) {
       M5_LOGW("body: %s", ev);
       tele.reaction = ev;
       voiceReact(ev);

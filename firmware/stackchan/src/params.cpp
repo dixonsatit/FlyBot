@@ -34,7 +34,7 @@
 #endif
 
 static const Params DEFAULTS = {DIFF_THRESHOLD, MIN_MOTION_PIXELS, MAX_MOTION_FRACTION, EGO_MOTION_DEG_S,
-                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO, VAD_SPEECH_FRAC, 0.25f, 25.0f, 0.8f, LED_BRIGHTNESS, 0, 0.3f, 0};
+                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO, VAD_SPEECH_FRAC, 0.25f, 25.0f, 0.15f, LED_BRIGHTNESS, 0, 0.3f, 0};
 Params P = DEFAULTS;
 
 struct Field {
@@ -56,7 +56,7 @@ static const Field FIELDS[] = {
     {"vad_speech_frac", true, &P.vadSpeechFrac, 0, 1},
     {"motion_lift_g", true, &P.motionLiftG, 0.05f, 2},
     {"motion_tilt_deg", true, &P.motionTiltDeg, 5, 90},
-    {"motion_shake_g", true, &P.motionShakeG, 0.2f, 4},
+    {"motion_shake_g", true, &P.motionShakeG, 0.05f, 2},
     {"led_brightness", false, &P.ledBrightness, 0, 255},
     {"face_swap", false, &P.faceSwap, 0, 1},
     {"face_score", true, &P.faceScore, 0.05f, 0.95f},

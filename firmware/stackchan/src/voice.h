@@ -15,6 +15,7 @@ void voiceProgress(const char* name);
 void voiceReact(const char* kind);
 // A swipe on the head strip since the last call: "swipe_forward" (stops speech) or "swipe_back" (repeats).
 bool voiceTakeGesture(String* name);
+uint32_t voiceLastTouchMs();  // millis() of the last touch on the head strip (0: never)
 void voiceUpdate();  // call every loop()
 const char* voiceStateName();  // off, listening, capturing, waiting, speaking, reacting
 bool voiceBusy();        // capturing, waiting or speaking: the face stays steady

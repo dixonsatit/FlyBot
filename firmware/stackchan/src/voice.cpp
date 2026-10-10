@@ -41,6 +41,10 @@ static constexpr size_t MAX_WAV = 4 * 1024 * 1024;
 // is answering. Speaking: the reply plays (mic off, they share the I2S bus).
 enum class State { Off, Listening, Capturing, Waiting, Speaking };
 static volatile State state = State::Off;
+static uint8_t touchRaw[3] = {0, 0, 0};  // last pad readings, for the monitor page
+static volatile uint32_t lastTouchMs = 0;  // a hand on the head strip
+uint32_t voiceLastTouchMs() { return lastTouchMs; }
+static char touchLast[64] = "";  // the last touch: where it started and ended, what it was
 static volatile bool reacting = false;  // a reaction line is playing (the mic waits for it)
 
 static int16_t* rec = nullptr;
@@ -106,6 +110,10 @@ String voiceStatusJson() {
            NAMES[int(state)], long(micLevel), micShare, micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
            voiceUrl.c_str());
   String out = buf;
+  char tbuf[112];
+  snprintf(tbuf, sizeof tbuf, "{\"touch\":[%u,%u,%u],\"touch_last\":\"%s\",", touchRaw[0], touchRaw[1], touchRaw[2],
+           touchLast);
+  out = String(tbuf) + out.substring(1);
   for (int i = max(0, turnCount - 10); i < turnCount; ++i) {
     const Turn& t = turns[i % 10];
     char row[96];
@@ -449,37 +457,45 @@ void voiceBegin() {
   xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
 }
 
-// The base's touch strip (3 pads): a stroke held ~0.4 s is a pat (then a pause before the next
-// one); moving along the strip is a swipe. Position as in M5Stack's hal_head_touch.cpp: the
-// intensity-weighted pad, -100..100, and a swipe once it has moved 40 from where it started.
+// The base's touch strip (3 pads), position as in M5Stack's hal_head_touch.cpp: the
+// intensity-weighted pad, -100..100. A touch that ends at least 60 from where it began is a
+// swipe (decided on release: while a finger lands the position jumps around), one held still
+// for 0.6 s is a pat (then a pause before the next pat).
 enum class HeadGesture { None, Pat, SwipeForward, SwipeBack };
 static HeadGesture headGesture() {
 #if STACKCHAN_OFFICIAL
   static uint32_t lastPoll = 0, since = 0, lastPat = 0;
-  static int startPos = 0;
-  static bool done = false;  // this touch already gave a gesture
+  static int startPos = 0, lastPos = 0, minPos = 0, maxPos = 0;
+  static bool patted = false;
   if (millis() - lastPoll < 50) return HeadGesture::None;
   lastPoll = millis();
   headTouch.read_touch_result();
   headTouch.parse_touch_result();
   const uint8_t* t = headTouch.point_type;
+  memcpy(touchRaw, t, 3);
   const int total = t[0] + t[1] + t[2];
+  if (total) lastTouchMs = millis();
   if (!total) {
+    if (!since) return HeadGesture::None;
+    const int moved = lastPos - startPos;
+    const uint32_t held = millis() - since;
     since = 0;
-    return HeadGesture::None;
+    HeadGesture g = HeadGesture::None;
+    if (!patted && abs(moved) >= 60 && held < 2000) g = moved > 0 ? HeadGesture::SwipeForward : HeadGesture::SwipeBack;
+    snprintf(touchLast, sizeof touchLast, "%d..%d (start %d, end %d), %lu ms: %s", minPos, maxPos, startPos, lastPos,
+             (unsigned long)held, patted ? "pat" : g == HeadGesture::SwipeForward ? "swipe_forward"
+                                                   : g == HeadGesture::SwipeBack     ? "swipe_back"
+                                                                                      : "none");
+    return g;
   }
   const int pos = (t[2] - t[0]) * 100 / total;
   if (!since) {
-    since = millis(), startPos = pos, done = false;
+    since = millis(), startPos = minPos = maxPos = lastPos = pos, patted = false;
     return HeadGesture::None;
   }
-  if (done) return HeadGesture::None;
-  if (abs(pos - startPos) > 40) {
-    done = true;
-    return pos > startPos ? HeadGesture::SwipeForward : HeadGesture::SwipeBack;
-  }
-  if (millis() - since < 400 || millis() - lastPat < 6000) return HeadGesture::None;
-  done = true;
+  lastPos = pos, minPos = min(minPos, pos), maxPos = max(maxPos, pos);
+  if (patted || maxPos - minPos >= 60 || millis() - since < 600 || millis() - lastPat < 6000) return HeadGesture::None;
+  patted = true;
   lastPat = millis();
   return HeadGesture::Pat;
 #else
@@ -596,6 +612,7 @@ const char* voiceStateName() { return "disabled"; }
 void voiceProgress(const char*) {}
 void voiceReact(const char*) {}
 bool voiceTakeGesture(String*) { return false; }
+uint32_t voiceLastTouchMs() { return 0; }
 bool voiceTakeDirection(SoundDirection*) { return false; }
 bool voiceOwnsAudio() { return false; }
 String voiceStatusJson() { return "{\"state\":\"disabled\"}"; }

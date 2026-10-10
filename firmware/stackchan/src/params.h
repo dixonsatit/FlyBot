@@ -17,7 +17,7 @@ struct Params {
   float vadSpeechFrac;      // ... with at least this share of its energy at 100-1000 Hz (voices)
   float motionLiftG;        // |accel| off 1 g by this much (servos still): lifted
   float motionTiltDeg;      // gravity turned this far from rest (servos still): tilted
-  float motionShakeG;       // three jolts this big within 1.5 s: shaken
+  float motionShakeG;       // 5 samples this far off 1 g within 0.6 s: shaken
   int ledBrightness;        // base RGB ring, 0..255 (0 = off)
   int faceSwap;             // 1: swap the RGB565 bytes before face detection
   float faceScore;          // detector score threshold
