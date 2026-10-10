@@ -221,6 +221,7 @@ def main(argv: list[str] | None = None) -> None:
                       help="start with the simulated robot on (turn off when a real robot is connected)")
     dash.add_argument("--tts-url", help="Wayu-TTS server for Thai speech, e.g. http://wayu-tts:7860")
     dash.add_argument("--tts-voice", help="default Wayu voice id (e.g. f_young_clear, m_young_clear)")
+    dash.add_argument("--tts-speed", type=float, default=1.0, help="Wayu speaking rate (1.0 is quick; 0.8 calmer)")
     dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
     dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
                       help="regex the robot's hands-free speech must contain (as asr-typhoon spells the name)")
@@ -307,7 +308,7 @@ def main(argv: list[str] | None = None) -> None:
         tts = None
         if args.tts_url:
             from .tts import WayuTTS
-            tts = WayuTTS(args.tts_url, args.tts_voice)
+            tts = WayuTTS(args.tts_url, args.tts_voice, speed=args.tts_speed)
         stt = None
         if args.stt_url:
             from .stt import AsrClient
