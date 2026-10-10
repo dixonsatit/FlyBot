@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.23.0 (2026-10-10)
+
+### Features
+
+- **voice**: --tts-speed for a calmer speaking rate
+  ([`a46321d`](https://github.com/dixonsatit/FlyBot/commit/a46321d304d76f01010f7c97e13fd86b0604909a))
+
+
 ## v0.22.1 (2026-10-10)
 
 ### Bug Fixes
