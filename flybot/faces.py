@@ -84,7 +84,7 @@ class FaceRegistry:
             raise ValueError("no face in the pictures")
         with self.lock:
             p = self.people.setdefault(pid, {"embeddings": []})
-            p.update({k: v for k, v in info.items() if k != "embeddings"})
+            p.update({k: v for k, v in info.items() if k != "embeddings" and v})  # adding pictures keeps the details
             p["embeddings"] = (p["embeddings"] + [list(map(float, e)) for e in embeddings])[-20:]
             p.setdefault("consent_at", time.strftime("%Y-%m-%d %H:%M:%S"))
             self._save()

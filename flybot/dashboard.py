@@ -267,6 +267,8 @@ class Dashboard:
             log.info("wake word recording: %s", self.collect)
         elif path == "/api/people/enroll":
             return self.enroll(body)
+        elif path == "/api/people/identify":  # a frame from the browser's camera: who is in it?
+            return self.identify(base64.b64decode(str(body.get("image", "")).split(",")[-1]))
         elif path == "/api/people/forget":
             if not self.faces:
                 raise ValueError("face recognition is off (--face-url)")
@@ -350,9 +352,10 @@ class Dashboard:
         finally:
             stop.set()
 
-    def enroll(self, body: dict, shots: int = 5, gap_s: float = 0.8) -> dict:
-        """Enroll the person in front of the robot: ``shots`` camera frames, the largest face in
-        each. Needs their consent (PDPA s.26: a face template is sensitive data)."""
+    def enroll(self, body: dict, gap_s: float = 0.8) -> dict:
+        """Enroll a person from webcam pictures (JPEG, base64) taken on the dashboard, or with
+        {"source": "robot"} from 5 robot camera frames: the largest face in each. Needs their
+        consent (PDPA s.26: a face template is sensitive data)."""
         if not self.faces:
             raise ValueError("face recognition is off (--face-url)")
         if body.get("consent") is not True:
@@ -368,19 +371,41 @@ class Dashboard:
                     "position": row.get("position") or "", "office": row.get("office_name") or ""}
         if not info["name"]:
             raise ValueError("name (or a staff code) is required")
+        images = body.get("images") or []
+        if body.get("source") == "robot":
+            for _ in range(5):
+                jpeg = self.bridge.snapshot(8.0)
+                if jpeg:
+                    images.append(base64.b64encode(jpeg).decode())
+                time.sleep(gap_s)
+        if not images:
+            raise ValueError("no pictures: take them with the webcam, or the robot is offline")
         embeddings = []
-        for _ in range(max(1, min(int(body.get("shots", shots)), 10))):
-            jpeg = self.bridge.snapshot(8.0)
-            found = client.embed(jpeg) if jpeg else []
+        for b64 in images[:10]:
+            found = client.embed(base64.b64decode(str(b64).split(",")[-1]))
             if found:
                 embeddings.append(found[0]["embedding"])
-            time.sleep(gap_s)
         if len(embeddings) < 3:
             raise ValueError(f"saw a face in only {len(embeddings)} of the frames; face the robot and try again")
         person = registry.enroll(code or info["name"], {**info, "code": code}, embeddings)
         log.info("enrolled %s (%d samples)", person.get("name"), person["samples"])
         self.add("event", {"type": "enrolled", "name": person.get("name")})
         return {"ok": True, "person": person}
+
+    def identify(self, jpeg: bytes) -> dict:
+        """Every face in one picture, with the enrolled person it matches (or none)."""
+        if not self.faces:
+            raise ValueError("face recognition is off (--face-url)")
+        if not jpeg:
+            raise ValueError("no picture")
+        client, registry, _ = self.faces
+        out = []
+        for f in client.embed(jpeg):
+            pid, score = registry.match(f["embedding"])
+            who = registry.summary(pid) if pid else None
+            out.append({"box": f["box"], "score": round(score, 3),
+                        "name": who and who.get("name"), "nick": who and who.get("nick")})
+        return {"ok": True, "faces": out}
 
     def keep_wake_sample(self, pcm: bytes) -> str:
         """Save one clip of a wake-word recording session and say what comes next."""

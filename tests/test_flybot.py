@@ -1199,8 +1199,10 @@ def test_faces_enroll_match_and_greet_once(gains, tmp_path):
     dash = Dashboard(bridge, port=0)
     dash.faces = (client, registry, None)
     with pytest.raises(ValueError):
-        dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ"}, gap_s=0)  # no consent
-    person = dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ", "consent": True}, gap_s=0)["person"]
+        dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ", "images": ["eA=="] * 5})  # no consent
+    person = dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ", "consent": True, "images": ["eA=="] * 5})["person"]
+    assert dash.identify(b"x")["faces"][0]["nick"] == "ต๊ะ"
+    assert dash.enroll({"name": "สาธิต สีถาพล", "consent": True, "source": "robot"}, gap_s=0)["person"]["samples"] == 10
     assert person["samples"] == 5 and person["consent_at"]
     assert FaceRegistry(str(tmp_path / "faces.json")).match(noisy(me))[0] == "สาธิต สีถาพล"  # kept on disk
     assert registry.match(list(other))[0] is None

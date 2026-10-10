@@ -109,7 +109,12 @@
       <div class="row"><input id="enCode" placeholder="รหัสพนักงาน" style="width:7em">
         <input id="enName" placeholder="ชื่อ-สกุล (ถ้าไม่มีรหัส)" style="flex:1"><input id="enNick" placeholder="ชื่อเล่น" style="width:6em"></div>
       <label class="hint"><input type="checkbox" id="enConsent"> เจ้าของใบหน้ายินยอมให้เก็บข้อมูลใบหน้า (เวกเตอร์ ไม่เก็บรูป) เพื่อให้หุ่นทักทาย และลบได้ทุกเมื่อ</label>
-      <div class="row"><button id="enroll">ให้หันหน้าเข้ากล้อง แล้วกดลงทะเบียน</button></div>
+      <div style="position:relative"><video id="webcam" autoplay playsinline muted style="display:none;width:100%;border-radius:10px;transform:scaleX(-1)"></video>
+        <div id="faceBoxes" style="position:absolute;inset:0;pointer-events:none"></div></div>
+      <div class="row">กล้อง <select id="camSource"><option value="webcam">webcam เครื่องนี้</option>
+        <option value="robot">กล้องหุ่น</option></select><select id="camDevice" style="display:none"></select></div>
+      <div class="row"><button id="enroll">ลงทะเบียน (5 ภาพ)</button>
+        <button id="identify">ทดสอบจดจำ</button><span id="whoIs" class="hint"></span></div>
       <div class="err" id="errPeople"></div>
     </div>
     <div class="card">
@@ -415,11 +420,70 @@ $("staffFind").onclick = async () => {
     $("staffList").append(b);
   }
 };
+// The browser's camera: enroll and test without the robot (needs https or localhost).
+let stream = null, identifying = false;
+async function openWebcam() {  // asked for on the first enroll / test, so the permission prompt has a reason
+  if (stream) return true;
+  const id = $("camDevice").value;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, ...(id ? { deviceId: { exact: id } } : {}) } }); }
+  catch (err) { $("errPeople").textContent = "เปิดกล้องไม่ได้: " + err.message; return false; }
+  $("webcam").srcObject = stream; $("webcam").style.display = "block";
+  await new Promise(ok => $("webcam").readyState >= 2 ? ok() : ($("webcam").onloadeddata = ok));
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  if (cams.length > 1 && !$("camDevice").options.length) {  // labels are known only after permission
+    for (const c of cams) $("camDevice").add(new Option(c.label || c.deviceId.slice(0, 8), c.deviceId));
+    $("camDevice").value = stream.getVideoTracks()[0].getSettings().deviceId || cams[0].deviceId;
+    $("camDevice").style.display = "inline-block";
+  }
+  return true;
+}
+function closeWebcam() {
+  identifying = false; if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; $("webcam").style.display = "none"; $("faceBoxes").innerHTML = "";
+}
+$("camDevice").onchange = async () => { closeWebcam(); await openWebcam(); };
+$("camSource").onchange = () => { if ($("camSource").value === "robot") closeWebcam(); };
+function grab() {
+  const v = $("webcam"), c = document.createElement("canvas");
+  c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0);
+  return c.toDataURL("image/jpeg", 0.85);
+}
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 $("enroll").onclick = async () => {
-  $("errPeople").textContent = "กำลังถ่าย 5 ภาพ ...";
-  await post("/api/people/enroll", { code: $("enCode").value, name: $("enName").value, nick: $("enNick").value,
-                                     consent: $("enConsent").checked }, "errPeople");
+  if (!$("enConsent").checked) { $("errPeople").textContent = "ต้องติ๊กยืนยันความยินยอมก่อน"; return; }
+  const body = { code: $("enCode").value, name: $("enName").value, nick: $("enNick").value, consent: true, images: [] };
+  if ($("camSource").value === "robot") {
+    body.source = "robot"; $("errPeople").textContent = "หันหน้าเข้ากล้องหุ่น ... กำลังถ่าย 5 ภาพ";
+  } else {
+    if (!await openWebcam()) return;
+    for (let i = 3; i > 0; i--) { $("errPeople").textContent = `มองกล้อง ... ${i}`; await sleep(700); }
+    for (let i = 0; i < 5; i++) { $("errPeople").textContent = `ถ่ายภาพ ${i + 1}/5 ... ขยับหน้าเล็กน้อย`; body.images.push(grab()); await sleep(700); }
+    $("errPeople").textContent = "กำลังส่งไปจดจำ ...";
+  }
+  await post("/api/people/enroll", body, "errPeople");
+  if (!$("errPeople").textContent) $("errPeople").textContent = "ลงทะเบียนแล้ว";
   $("enConsent").checked = false; loadPeople();
+};
+$("identify").onclick = async () => {
+  if (!identifying && !await openWebcam()) return;
+  identifying = !identifying; $("identify").textContent = identifying ? "หยุดทดสอบ" : "ทดสอบจดจำ";
+  while (identifying) {
+    try {
+      const r = await fetch("/api/people/identify", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                       body: JSON.stringify({ image: grab() }) });
+      const j = await r.json(); $("faceBoxes").innerHTML = "";
+      if (!r.ok) { $("errPeople").textContent = j.error || r.statusText; break; }
+      $("whoIs").textContent = j.faces.length ? j.faces.map(f => (f.name ? `${f.nick || f.name}` : "ไม่รู้จัก") + ` (${f.score})`).join(", ") : "ไม่เห็นหน้า";
+      for (const f of j.faces) {  // the preview is mirrored, so mirror the boxes too
+        const d = document.createElement("div"), [x, y, w, h] = f.box;
+        d.style.cssText = `position:absolute;left:${(1 - x - w) * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%;` +
+          `border:3px solid ${f.name ? "#2c2" : "#e33"};border-radius:6px;color:#fff;font:bold 14px sans-serif;text-shadow:0 0 3px #000`;
+        d.textContent = f.name ? (f.nick || f.name) : "?"; $("faceBoxes").append(d);
+      }
+    } catch (e) { $("errPeople").textContent = e.message; break; }
+    await sleep(800);
+  }
+  identifying = false; $("identify").textContent = "ทดสอบจดจำ";
 };
 loadPeople();
 document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => post("/api/sim", { action: b.dataset.act }, "err2"));
