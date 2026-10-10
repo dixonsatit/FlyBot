@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.29.0 (2026-10-10)
+
+### Features
+
+- **remote**: Stackchan.kkh.go.th for the robot away from the LAN, live camera on the dashboard
+  ([`b70b2c1`](https://github.com/dixonsatit/FlyBot/commit/b70b2c1ace331e24e40ffa9bbd07db1a9e03d5d5))
+
+
 ## v0.28.0 (2026-10-10)
 
 ### Features
