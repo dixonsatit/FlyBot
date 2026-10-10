@@ -285,7 +285,7 @@ class Cortex:
                  {"type": "object", "properties": {"name": {"type": "string", "enum": list(c.GESTURES)}},
                   "required": ["name"], "additionalProperties": False},
                  lambda name: c.gesture(name) or "moving"),
-            Tool("upcoming_meetings", "The user's meetings in the next 24 hours from their calendar.",
+            Tool("upcoming_meetings", "The user's meetings in the next 7 days from their calendar (start is local time).",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  self._meetings),
             Tool("github_status", "The user's GitHub: CI workflows currently failing on recently pushed "

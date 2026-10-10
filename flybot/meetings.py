@@ -64,13 +64,14 @@ def parse_meetings(ics: bytes, start: datetime, end: datetime, tz: tzinfo) -> li
 class MeetingReminder:
     def __init__(self, sources: list[str], on_reminder: Callable[[dict], None],
                  leads_min: tuple[float, ...] = (10, 1), refresh_s: float = 300.0,
-                 tz: tzinfo | None = None, grace_s: float = 120.0,
+                 tz: tzinfo | None = None, grace_s: float = 120.0, horizon_days: float = 7.0,
                  now: Callable[[], datetime] | None = None):
         self.sources = sources
         self.on_reminder = on_reminder
         self.leads = sorted(leads_min, reverse=True)
         self.refresh_s = refresh_s
         self.tz = tz or datetime.now().astimezone().tzinfo
+        self.horizon = timedelta(days=horizon_days)  # how far ahead the assistant can answer about
         self.grace = timedelta(seconds=grace_s)  # a reminder later than this is stale: skip it
         self.now = now or (lambda: datetime.now(self.tz))
         self.meetings: list[Meeting] = []
@@ -82,12 +83,12 @@ class MeetingReminder:
         found = []
         for source in self.sources:
             try:
-                found += parse_meetings(_read(source), now - self.grace, now + timedelta(days=1), self.tz)
+                found += parse_meetings(_read(source), now - self.grace, now + self.horizon, self.tz)
             except Exception as e:  # keep the last good list if a feed is down or malformed
                 log.warning("calendar %s: %s", source if not source.startswith("http") else "feed", e)
                 return
         self.meetings = sorted(found, key=lambda m: m.start)
-        log.info("calendar: %d meetings in the next 24 h", len(self.meetings))
+        log.info("calendar: %d meetings in the next %d days", len(self.meetings), self.horizon.days)
 
     def check(self) -> list[dict]:
         """Reminders due now (each fired once)."""
