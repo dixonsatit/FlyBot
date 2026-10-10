@@ -1144,6 +1144,21 @@ def test_robot_handled_and_battery_events(gains):
     assert len(said) == 2  # unplugged again after charging: warn again
 
 
+def test_wake_word_recording_keeps_clips_instead_of_answering(gains, tmp_path):
+    import wave as _wave
+    from flybot.dashboard import Dashboard
+    dash = Dashboard(_FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains)), port=0)
+    dash.archive_dir = str(tmp_path / "voice")
+    dash.post("/api/wakeword", {"kind": "positive", "count": 11})
+    lines = [dash.keep_wake_sample(b"\x00\x01" * 8000) for _ in range(11)]
+    assert lines[0] == "อีก 10 ครั้งครับ" and lines[1] == "ต่อเลยครับ" and lines[-1].startswith("ครบแล้ว")
+    assert dash.collect is None
+    clips = sorted((tmp_path / "wakeword" / "positive").glob("*.wav"))
+    assert len(clips) == 11
+    with _wave.open(str(clips[0])) as w:
+        assert w.getframerate() == 16000 and w.getnframes() == 8000
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

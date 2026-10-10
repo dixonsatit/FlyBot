@@ -28,10 +28,12 @@ import hmac
 import json
 import logging
 import math
+import os
 import random
 import re
 import threading
 import time
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
@@ -181,6 +183,9 @@ class Dashboard:
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.held: list[str] = []  # announcements kept while nobody was at the desk
         self.archive_dir: str | None = None  # set to keep recent voice clips (see archive_clip)
+        # Wake-word recording session (POST /api/wakeword): every hands-free clip is kept as a
+        # training sample under <archive_dir>/../wakeword/<kind>/ instead of being answered.
+        self.collect: dict | None = None
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -249,6 +254,15 @@ class Dashboard:
             c.set_personality(name)
         elif path == "/api/game":
             c.configure(game=bool(body.get("on")))
+        elif path == "/api/wakeword":
+            if body.get("stop"):
+                self.collect = None
+            else:
+                kind = body.get("kind", "positive")
+                if kind not in ("positive", "negative") or not self.archive_dir:
+                    raise ValueError("kind must be positive or negative, and the bridge needs --state-dir")
+                self.collect = {"kind": kind, "left": max(1, min(int(body.get("count", 50)), 500)), "saved": 0}
+            log.info("wake word recording: %s", self.collect)
         elif path == "/api/look":
             c.look_at(float(body.get("pan", 0)), float(body.get("tilt", 0)))
         elif path == "/api/say":
@@ -325,6 +339,22 @@ class Dashboard:
             yield say
         finally:
             stop.set()
+
+    def keep_wake_sample(self, pcm: bytes) -> str:
+        """Save one clip of a wake-word recording session and say what comes next."""
+        c = self.collect
+        folder = os.path.join(os.path.dirname(self.archive_dir.rstrip("/")), "wakeword", c["kind"])
+        os.makedirs(folder, exist_ok=True)
+        with wave.open(os.path.join(folder, f"{time.strftime('%Y%m%d-%H%M%S')}-{c['saved']:03d}.wav"), "wb") as w:
+            w.setnchannels(1), w.setsampwidth(2), w.setframerate(16000)
+            w.writeframes(pcm)
+        c["saved"] += 1
+        c["left"] -= 1
+        log.info("wake word sample %s #%d (%.1fs), %d to go", c["kind"], c["saved"], len(pcm) / 32000, c["left"])
+        if c["left"] <= 0:
+            self.collect = None
+            return "ครบแล้วครับ ขอบคุณมากครับ"
+        return f"อีก {c['left']} ครั้งครับ" if c["left"] % 10 == 0 else "ต่อเลยครับ"
 
     def archive_clip(self, pcm: bytes, info: dict) -> None:
         """Keep the last 30 voice clips with what happened to them (``<archive_dir>/``), so a turn
@@ -481,6 +511,8 @@ class Dashboard:
                     return self._json(502, {"error": f"TTS: {e}"})
 
             def _voice(self, pcm: bytes, wake: bool = False):
+                if dash.collect and dash.tts:
+                    return self._send(200, to_16k(dash.tts.speak(dash.keep_wake_sample(pcm))), "audio/wav")
                 if not (dash.stt and dash.tts and dash.bridge.cortex):
                     return self._json(404, {"error": "voice needs --stt-url, --tts-url and --llm"})
                 t0 = time.monotonic()
