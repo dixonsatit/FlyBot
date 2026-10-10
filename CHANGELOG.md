@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.1 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Colour QVGA frames and a person seen from any body part
+  ([`3a4b2fd`](https://github.com/dixonsatit/FlyBot/commit/3a4b2fd065058cac992e149f8022cf17a87cce6a))
+
+
 ## v0.24.0 (2026-10-10)
 
 ### Features
