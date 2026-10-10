@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.27.0 (2026-10-10)
+
+### Features
+
+- **robot**: React to being lifted, tilted or shaken; RGB ring, head swipes, battery and RTC
+  ([`238712a`](https://github.com/dixonsatit/FlyBot/commit/238712af4b9bfd3135b61da73c6ee9e5ddd58206))
+
+
 ## v0.26.1 (2026-10-10)
 
 ### Bug Fixes
