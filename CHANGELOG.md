@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.4 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Wait up to 10 s for a camera frame
+  ([`8bdce9d`](https://github.com/dixonsatit/FlyBot/commit/8bdce9df4fde94da112a09dfe1940bec4d1d40f9))
+
+
 ## v0.24.3 (2026-10-10)
 
 ### Bug Fixes
