@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.4 (2026-10-10)
+
+### Bug Fixes
+
+- **faces**: Glide to the tracked face instead of jumping at each frame
+  ([`2d48ce2`](https://github.com/dixonsatit/FlyBot/commit/2d48ce2a7373314705a6aeadb599e74826fef67b))
+
+
 ## v0.32.3 (2026-10-10)
 
 ### Bug Fixes
