@@ -984,7 +984,6 @@ def test_cortex_saves_a_note_the_llm_only_claimed(gains, tmp_path):
     assert "ทำแล้วในรอบนี้: remember" in cortex.history[-1]["content"]  # the next turn sees the action
 
 
-
 def test_presence_holds_announcements_and_welcomes_back(gains):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
@@ -1051,6 +1050,58 @@ def test_people_only_mode_ignores_motion_but_turns_to_a_face(gains):
         q.note_motion()
         q.tick()
     assert searches == [True, False, False, True]
+
+
+def test_places_searches_google_maps_near_the_robot():
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from flybot.places import Places
+    seen = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["body"] = _json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen["key"], seen["mask"] = self.headers["X-Goog-Api-Key"], self.headers["X-Goog-FieldMask"]
+            out = {"places": [{"displayName": {"text": "ก๋วยเตี๋ยวเรือ"}, "formattedAddress": "ถ.มิตรภาพ",
+                               "location": {"latitude": 16.44, "longitude": 102.83}, "rating": 4.5,
+                               "currentOpeningHours": {"openNow": True}}]}
+            data = _json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        r = Places("k", 16.43, 102.83, url=f"http://127.0.0.1:{srv.server_port}/").search("ก๋วยเตี๋ยว", open_now=True)
+    finally:
+        srv.shutdown()
+    assert seen["key"] == "k" and " " not in seen["mask"] and "places.location" in seen["mask"]
+    assert seen["body"]["openNow"] and seen["body"]["languageCode"] == "th"
+    p = r["places"][0]
+    assert p["name"] == "ก๋วยเตี๋ยวเรือ" and p["open_now"] is True and p["distance_km"] == 1.1
+
+
+def test_robot_face_detections_keep_the_face_centred(gains):
+    import json as _json
+    from flybot.mqtt_bridge import StackChanBridge
+    from flybot.presence import Presence
+    c = BrainController(ControllerConfig(backend="rate", track_motion=False), gains=gains)
+    b = StackChanBridge(c, "localhost", 1883, "stackchan", 20.0)
+    b.presence = Presence(lambda t: None, None)
+    msg = type("M", (), {"topic": "stackchan/sensor/face",
+                         "payload": _json.dumps({"found": 1, "x": 0.8, "y": 0.5, "pan": 10, "tilt": 15}).encode()})
+    b._on_message(None, None, msg)
+    assert b.presence.present
+    s = SensorState()
+    for _ in range(30):
+        c.step(s, 0.05)
+    assert abs(c.pan - (10 + 0.7 * 0.3 * c.cfg.hfov_deg)) < 3  # turned right towards the face
 
 
 def test_to_16k_resamples_wayu_wav():

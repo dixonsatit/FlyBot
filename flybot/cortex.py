@@ -117,6 +117,7 @@ class Cortex:
         self.github = None  # flybot.github.GitHubWatcher
         self.store = None  # flybot.assistant.AssistantStore: notes and reminders
         self.weather = None  # flybot.weather.Weather where the robot is
+        self.places = None  # flybot.places.Places (Google Maps) near the robot
         self.presence = None  # flybot.presence.Presence: whether the camera sees the user
         self.history: list[dict] = []
         self.history_turns = history_turns
@@ -311,6 +312,14 @@ class Cortex:
             Tool("weather", "Weather now, today and tomorrow, and PM2.5 / AQI where the robot is.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  lambda: self.weather.now() if self.weather else {"error": "no location configured"}),
+            Tool("places", "Search Google Maps near the robot: restaurants, cafes, shops, hospitals, petrol "
+                 "stations, any place by name or kind. Returns name, distance_km, rating, open_now, hours, phone "
+                 "and address. Say the best one or two briefly; never read links aloud.",
+                 {"type": "object", "properties": {"query": {"type": "string", "description": "e.g. ร้านก๋วยเตี๋ยว"},
+                                                   "open_now": {"type": "boolean"}},
+                  "required": ["query"], "additionalProperties": False},
+                 lambda query, open_now=False: self.places.search(query, open_now) if self.places
+                 else {"error": "Google Maps is not connected (no API key)"}),
             Tool("remember", "Save a note the user asks you to remember (จำไว้ว่า..., จดไว้...).",
                  {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"],
                   "additionalProperties": False},

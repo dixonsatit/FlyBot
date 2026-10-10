@@ -33,6 +33,8 @@ spec:
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: webhook-url, optional: true}}
             - name: FLYBOT_GITHUB_TOKEN        # read-only (Actions + Pull requests): CI failures, reviews
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: github-token, optional: true}}
+            - name: FLYBOT_GOOGLE_MAPS_KEY     # Places API (New): the assistant's places tool
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: google-maps-key, optional: true}}
             - name: LLM_API_KEY
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: llm-api-key, optional: true}}
             - name: FLYBOT_LLM_API_KEY_ENV

@@ -58,6 +58,7 @@ class StackChanBridge:
         self.dashboard = None  # flybot.dashboard.Dashboard, optional
         self._jpeg: bytes | None = None
         self.presence = None  # flybot.presence.Presence when --presence is on
+        self._last_face_turn = 0.0
         self._jpeg_ready = threading.Event()
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
@@ -86,6 +87,7 @@ class StackChanBridge:
         for kind in SENSOR_KINDS:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
         client.subscribe(f"{self.base}/selftest", qos=1)
+        client.subscribe(f"{self.base}/sensor/face", qos=0)
         if self.cortex:
             client.subscribe(f"{self.base}/chat/in", qos=1)
             client.subscribe(f"{self.base}/snapshot", qos=0)
@@ -93,6 +95,9 @@ class StackChanBridge:
     def _on_message(self, client, userdata, msg):
         if msg.topic == f"{self.base}/selftest":
             self._log_selftest(msg.payload)
+            return
+        if msg.topic == f"{self.base}/sensor/face":
+            self._on_face(msg.payload)
             return
         if msg.topic == f"{self.base}/snapshot":
             self._jpeg = bytes(msg.payload)
@@ -117,6 +122,26 @@ class StackChanBridge:
             self.sensors.update(kind, payload)
             if kind == "camera" and "x" in payload and self.presence:
                 self.presence.note_motion()
+
+    def _on_face(self, payload: bytes) -> None:
+        """The robot's face detector (several times a second): keep the face centred."""
+        try:
+            f = json.loads(payload)
+        except ValueError:
+            return
+        if not (f.get("found") and self.presence):
+            return
+        self.presence.note_face()
+        dx, dy = f["x"] - 0.5, f["y"] - 0.5
+        if abs(dx) < 0.08 and abs(dy) < 0.1:  # centred enough: hold still
+            return
+        now = time.monotonic()
+        if now - self._last_face_turn < 0.6:  # let the last turn land before the next
+            return
+        self._last_face_turn = now
+        c = self.controller
+        # 0.7 of the offset per step from the pose the frame was taken at: converges without overshoot
+        c.face(f["pan"] + 0.7 * dx * c.cfg.hfov_deg, f["tilt"] - 0.7 * dy * c.cfg.vfov_deg, hold_s=0.5)
 
     @staticmethod
     def _log_selftest(payload: bytes) -> None:
@@ -213,6 +238,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--presence", action="store_true",
                     help="check camera frames for a person (Claude Haiku); hold announcements while away")
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
+    gh.add_argument("--google-maps-key", help="Google Maps Platform key with Places API (New) for the places tool")
     gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
     gh.add_argument("--github-interval", type=float, default=120.0, help="seconds between polls")
     dash = ap.add_argument_group("web dashboard")
@@ -356,6 +382,9 @@ def main(argv: list[str] | None = None) -> None:
         from .weather import Weather
         lat, lon, *name = args.location.split(",")
         bridge.cortex.weather = Weather(float(lat), float(lon), name[0] if name else "")
+        if args.google_maps_key:
+            from .places import Places
+            bridge.cortex.places = Places(args.google_maps_key, float(lat), float(lon))
     if args.state_dir and bridge.dashboard:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
     if args.state_dir and bridge.cortex:

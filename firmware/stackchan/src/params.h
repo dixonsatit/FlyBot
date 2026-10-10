@@ -14,6 +14,10 @@ struct Params {
   float voiceGain;          // software gain on replies
   int vadMinRms;            // hands-free speech must be at least this loud ...
   float vadRatio;           // ... and this many times the room's noise
+  float vadSpeechFrac;      // ... with at least this share of its energy at 100-1000 Hz (voices)
+  int faceSwap;             // 1: swap the RGB565 bytes before face detection
+  float faceScore;          // detector score threshold
+  int faceTwoStage;         // 1: MSR01 candidates refined by MNP01 (slower, more accurate)
 };
 
 extern Params P;

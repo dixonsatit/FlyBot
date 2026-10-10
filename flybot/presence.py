@@ -39,12 +39,18 @@ class Presence:
         self.last_seen = -float("inf")  # wall clock, so meeting times compare
         self.left_at: float | None = None
         self._motion = -float("inf")
+        self.last_face = -float("inf")  # the robot's own face detector saw a face
         self._last_check = -float("inf")
         self._stop = threading.Event()
 
     # -- inputs (any thread) ----------------------------------------------------------
     def note_motion(self) -> None:
         self._motion = self.clock()
+
+    def note_face(self) -> None:
+        """The robot's face detector saw a face: present, and no vision call is needed."""
+        self.last_face = self.clock()
+        self._seen()
 
     def note_voice(self) -> None:
         """Someone spoke to the robot: they are here."""
@@ -90,6 +96,8 @@ class Presence:
             self.present, self.left_at = False, self.last_seen
             log.info("presence: user away since %s", time.strftime("%H:%M", time.localtime(self.last_seen)))
         recent_motion = now - self._motion < 15.0 or now - self._last_check >= self.scan_s
+        if now - self.last_face < 10.0:  # the on-device detector has it: skip the vision model
+            return
         every = self.track_s if self.present else self.check_s
         if (recent_motion or self.present) and now - self._last_check >= every:
             self._last_check = now

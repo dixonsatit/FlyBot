@@ -26,9 +26,12 @@
 #ifndef VAD_RATIO
 #define VAD_RATIO 3.0f
 #endif
+#ifndef VAD_SPEECH_FRAC
+#define VAD_SPEECH_FRAC 0.4f
+#endif
 
 static const Params DEFAULTS = {DIFF_THRESHOLD, MIN_MOTION_PIXELS, MAX_MOTION_FRACTION, EGO_MOTION_DEG_S,
-                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO};
+                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO, VAD_SPEECH_FRAC, 0, 0.3f, 0};
 Params P = DEFAULTS;
 
 struct Field {
@@ -47,6 +50,10 @@ static const Field FIELDS[] = {
     {"voice_gain", true, &P.voiceGain, 0.1f, 4},
     {"vad_min_rms", false, &P.vadMinRms, 0, 20000},
     {"vad_ratio", true, &P.vadRatio, 1, 20},
+    {"vad_speech_frac", true, &P.vadSpeechFrac, 0, 1},
+    {"face_swap", false, &P.faceSwap, 0, 1},
+    {"face_score", true, &P.faceScore, 0.05f, 0.95f},
+    {"face_two_stage", false, &P.faceTwoStage, 0, 1},
 };
 
 static float get(const Field& f) { return f.isFloat ? *(float*)f.ptr : float(*(int*)f.ptr); }

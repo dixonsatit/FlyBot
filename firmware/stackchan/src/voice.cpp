@@ -45,6 +45,7 @@ static volatile State state = State::Off;
 static int16_t* rec = nullptr;
 static volatile size_t recLen = 0;
 static int16_t block[BLOCK];
+static int16_t stereo[BLOCK * 2];  // L/R pairs from the two mics; block is their mean
 static int16_t preroll[PREROLL][BLOCK];
 
 static volatile bool micActive = false;  // main -> mic task: keep recording
@@ -69,6 +70,7 @@ static void logTurn(char kind, uint16_t ms) {
 static Turn& lastTurn() { return turns[(turnCount + 9) % 10]; }
 static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
 static volatile float micNoise = 0;
+static volatile float micShare = 0;  // voice-band share of the last block
 
 static bool needName = true;  // hands-free speech must call the robot by name
 static String pendingAnnounce;  // an announcement waiting for the robot to be free
@@ -90,9 +92,10 @@ size_t voiceRecording(const int16_t** pcm) {
 
 String voiceStatusJson() {
   static const char* NAMES[] = {"off", "listening", "capturing", "waiting", "speaking"};
-  char buf[160];
-  snprintf(buf, sizeof buf, "{\"state\":\"%s\",\"level\":%ld,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\",\"turns\":[",
-           NAMES[int(state)], long(micLevel), micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
+  char buf[200];
+  snprintf(buf, sizeof buf,
+           "{\"state\":\"%s\",\"level\":%ld,\"share\":%.2f,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\",\"turns\":[",
+           NAMES[int(state)], long(micLevel), micShare, micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
            voiceUrl.c_str());
   String out = buf;
   for (int i = max(0, turnCount - 10); i < turnCount; ++i) {
@@ -106,10 +109,85 @@ String voiceStatusJson() {
   return out + "]}";
 }
 
-static int32_t rms(const int16_t* s, size_t n) {
-  int64_t sum = 0;
-  for (size_t i = 0; i < n; ++i) sum += int32_t(s[i]) * s[i];
-  return int32_t(sqrtf(float(sum) / n));
+// RBJ biquad, run over the mic blocks so its state carries across them.
+struct Biquad {
+  float b0, b1, b2, a1, a2, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  Biquad(float fc, bool highPass) {
+    const float w = 2 * PI * fc / RATE, a = sinf(w) / (2 * 0.7071f), c = cosf(w), a0 = 1 + a;
+    b0 = b2 = (highPass ? (1 + c) : (1 - c)) / 2 / a0;
+    b1 = (highPass ? -(1 + c) : (1 - c)) / a0;
+    a1 = -2 * c / a0;
+    a2 = (1 - a) / a0;
+  }
+  float operator()(float x) {
+    const float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    x2 = x1, x1 = x, y2 = y1, y1 = y;
+    return y;
+  }
+};
+
+// RMS of the voice band (100-1000 Hz), and that band's share of the whole block's RMS. A
+// steady ~4 kHz noise in the room is as loud as a voice in this band but has a share of
+// 0.07-0.15, while speech has 0.85-0.95 (0.3+ even with that noise on top).
+static int32_t voiceBand(const int16_t* s, size_t n, float* share) {
+  static Biquad hp(100, true), lp(1000, false);
+  double band = 0, all = 0;
+  for (size_t i = 0; i < n; ++i) {
+    const float v = lp(hp(s[i]));
+    band += v * v;
+    all += float(s[i]) * s[i];
+  }
+  *share = all > 0 ? sqrtf(band / all) : 0;
+  return int32_t(sqrtf(band / n));
+}
+
+// Direction from the two mics: cross-correlate them over the voice blocks of a sentence
+// (300-3000 Hz, so room rumble and the 4 kHz noise weigh little) and take the best lag.
+static constexpr int MAX_LAG = 8;            // samples; the mics are a few cm apart
+static constexpr int DIRECTION_BLOCKS = 5;   // voice blocks to collect before reporting
+static double xcorr[2 * MAX_LAG + 1], energyL, energyR;
+static int dirBlocks = 0;
+static volatile bool dirReady = false;
+static SoundDirection dirResult;
+static float bandL[BLOCK], bandR[BLOCK];
+
+static void directionReset() {
+  memset(xcorr, 0, sizeof xcorr);
+  energyL = energyR = 0;
+  dirBlocks = 0;
+}
+
+static void directionAdd() {
+  static Biquad hpL(300, true), lpL(3000, false), hpR(300, true), lpR(3000, false);
+  for (size_t i = 0; i < BLOCK; ++i) {
+    bandL[i] = lpL(hpL(stereo[2 * i]));
+    bandR[i] = lpR(hpR(stereo[2 * i + 1]));
+  }
+  for (size_t i = MAX_LAG; i < BLOCK - MAX_LAG; ++i) {
+    energyL += bandL[i] * bandL[i];
+    energyR += bandR[i] * bandR[i];
+    for (int k = -MAX_LAG; k <= MAX_LAG; ++k) xcorr[k + MAX_LAG] += bandL[i] * bandR[i + k];
+  }
+  if (++dirBlocks != DIRECTION_BLOCKS || dirReady) return;
+  int best = 0;
+  for (int k = 1; k <= 2 * MAX_LAG; ++k)
+    if (xcorr[k] > xcorr[best]) best = k;
+  float lag = best - MAX_LAG;
+  if (best > 0 && best < 2 * MAX_LAG) {  // parabola through the peak and its neighbours
+    const double a = xcorr[best - 1], b = xcorr[best], c = xcorr[best + 1], d = a - 2 * b + c;
+    if (d < 0) lag += 0.5f * float((a - c) / d);
+  }
+  dirResult.lag = lag;
+  dirResult.ildDb = 10 * log10f(float((energyL + 1) / (energyR + 1)));
+  dirResult.corr = float(xcorr[best] / sqrt(energyL * energyR + 1));
+  dirReady = true;
+}
+
+bool voiceTakeDirection(SoundDirection* out) {
+  if (!dirReady) return false;
+  *out = dirResult;
+  dirReady = false;
+  return true;
 }
 
 // Energy VAD over 0.1 s blocks: a sentence starts after two loud blocks (keeping the
@@ -126,21 +204,25 @@ static void micTask(void*) {
       continue;
     }
     micParked = false;
-    if (!M5.Mic.record(block, BLOCK, RATE)) {
+    if (!M5.Mic.record(stereo, BLOCK * 2, RATE, true)) {
       delay(5);
       continue;
     }
     while (M5.Mic.isRecording()) delay(1);
     if (!micActive) continue;
-    const int32_t level = rms(block, BLOCK);
+    for (size_t i = 0; i < BLOCK; ++i) block[i] = int16_t((int32_t(stereo[2 * i]) + stereo[2 * i + 1]) / 2);
+    float share;
+    const int32_t level = voiceBand(block, BLOCK, &share);  // only voices start or hold a sentence
+    const bool voice = share >= P.vadSpeechFrac;
     micLevel = level;
+    micShare = share;
     micNoise = noise;
 
     if (state == State::Listening) {
       if (noise == 0 || level < noise * 2) noise = noise == 0 ? level : noise * 0.95f + level * 0.05f;
       memcpy(preroll[ring], block, sizeof block);
       ring = (ring + 1) % PREROLL;
-      loud = level > max(float(P.vadMinRms), noise * P.vadRatio) ? loud + 1 : 0;
+      loud = voice && level > max(float(P.vadMinRms), noise * P.vadRatio) ? loud + 1 : 0;
       if (warmup > 0) {
         --warmup;
         loud = 0;
@@ -153,6 +235,8 @@ static void micTask(void*) {
         }
         recLen = n;
         quiet = 0;
+        directionReset();
+        if (voice) directionAdd();
         state = State::Capturing;
         M5_LOGW("voice: capture (%s, level %d, noise %d)", fromHold ? "screen" : "speech", int(level), int(noise));
       }
@@ -164,7 +248,8 @@ static void micTask(void*) {
         memcpy(rec + recLen, block, sizeof block);
         recLen += BLOCK;
       }
-      quiet = level < max(float(P.vadMinRms) * 0.7f, noise * P.vadRatio * 0.7f) ? quiet + 1 : 0;
+      quiet = !voice || level < max(float(P.vadMinRms) * 0.7f, noise * P.vadRatio * 0.7f) ? quiet + 1 : 0;
+      if (!quiet) directionAdd();
       const bool full = recLen + BLOCK > MAX_SAMPLES;
       const bool done = fromHold ? (!holding || full) : (quiet >= END_QUIET || full);
       if (!done) continue;

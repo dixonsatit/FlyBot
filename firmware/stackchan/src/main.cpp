@@ -17,6 +17,7 @@
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
+#include "face.h"
 #include "params.h"
 #include "stream.h"
 #include "voice.h"
@@ -60,6 +61,9 @@ static struct {
   float gyro[3] = {}, accel[3] = {}, pan = 0, tilt = 0;
   uint16_t ps = 0, als = 0;
   String face = "", brain = "{}";
+  bool faceFound = false;
+  float faceX = 0, faceY = 0;
+  uint16_t faceMs = 0;
 } tele;
 
 // -- tone queue: [Hz, ms] pairs played without blocking the main loop -------
@@ -163,6 +167,7 @@ static void processCamera() {
       }
     }
   }
+  faceOffer(fb, tele.pan, tele.tilt);  // copied only when the detector is free
   esp_camera_fb_return(fb);
   if (!havePrev) {
     havePrev = true;
@@ -369,6 +374,10 @@ static void publishStatus() {
   lastCommands = tele.commands;
   String s = head;
   s += "\"brain\":" + (tele.brain.length() ? tele.brain : String("{}"));
+  char fbuf[96];
+  snprintf(fbuf, sizeof fbuf, ",\"faceDet\":{\"found\":%d,\"x\":%.2f,\"y\":%.2f,\"ms\":%u}", tele.faceFound, tele.faceX,
+           tele.faceY, tele.faceMs);
+  s += fbuf;
   s += ",\"voice\":" + voiceStatusJson();
   s += ",\"params\":" + paramsJson() + "}";
   streamSetStatus(s);
@@ -479,6 +488,7 @@ void setup() {
 
   cameraOk = initCamera();
   if (!cameraOk) M5_LOGE("camera init failed");
+  if (cameraOk) faceBegin();
 
   bool servoOk = servoBegin();  // after the camera has handed the shared I2C bus back
   M5_LOGW("servo: %s", servoInfo());
@@ -543,6 +553,24 @@ void loop() {
     publishSnapshot();
   }
   if (cameraOk) processCamera();
+  FaceResult face;
+  if (faceTake(&face)) {
+    tele.faceFound = face.found, tele.faceX = face.x, tele.faceY = face.y, tele.faceMs = face.inferMs;
+    char buf[160];
+    int n = snprintf(buf, sizeof buf,
+                     "{\"found\":%d,\"x\":%.3f,\"y\":%.3f,\"w\":%.3f,\"score\":%.2f,\"pan\":%.1f,\"tilt\":%.1f,\"ms\":%u}",
+                     face.found, face.x, face.y, face.w, face.score, face.pan, face.tilt, face.inferMs);
+    mqtt.publish((topicBase + "/sensor/face").c_str(), (const uint8_t*)buf, n);
+  }
+
+  SoundDirection dir;
+  if (voiceTakeDirection(&dir)) {
+    char buf[120];
+    int n = snprintf(buf, sizeof buf, "{\"lag\":%.2f,\"ild_db\":%.1f,\"corr\":%.2f,\"pan\":%.1f,\"tilt\":%.1f}",
+                     dir.lag, dir.ildDb, dir.corr, tele.pan, tele.tilt);
+    mqtt.publish((topicBase + "/sensor/sound").c_str(), (const uint8_t*)buf, n);
+    M5_LOGW("sound: %s", buf);
+  }
 
   static uint32_t lastImu = 0, lastPs = 0;
   const uint32_t now = millis();
