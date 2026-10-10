@@ -154,7 +154,7 @@ class SimRobot:
 
 class Dashboard:
     def __init__(self, bridge, port: int = 8080, user: str = "stackchan", password: str | None = None,
-                 sim: bool = False, tts=None, stt=None, wake_name: str = r"^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
+                 sim: bool = False, tts=None, stt=None, wake_name: str = r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
                  follow_up_s: float = 20.0):
         self.bridge = bridge
         self.wake = re.compile(wake_name, re.IGNORECASE)
@@ -162,6 +162,7 @@ class Dashboard:
         self._last_reply = -math.inf
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.held: list[str] = []  # announcements kept while nobody was at the desk
+        self.archive_dir: str | None = None  # set to keep recent voice clips (see archive_clip)
         self._announce_seq = 0
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
@@ -271,6 +272,28 @@ class Dashboard:
         self.add("chat", {"type": "announce", "text": text, "voice": True})
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return True
+
+    def archive_clip(self, pcm: bytes, info: dict) -> None:
+        """Keep the last 30 voice clips with what happened to them (``<archive_dir>/``), so a turn
+        that got no answer can be listened to and traced afterwards."""
+        if not self.archive_dir:
+            return
+        import os
+        import struct
+        try:
+            os.makedirs(self.archive_dir, exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            header = (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " +
+                      struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16) + b"data" + struct.pack("<I", len(pcm)))
+            with open(os.path.join(self.archive_dir, f"{stamp}.wav"), "wb") as f:
+                f.write(header + pcm)
+            with open(os.path.join(self.archive_dir, "log.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"clip": f"{stamp}.wav", **info}, ensure_ascii=False) + "\n")
+            clips = sorted(n for n in os.listdir(self.archive_dir) if n.endswith(".wav"))
+            for old in clips[:-30]:
+                os.remove(os.path.join(self.archive_dir, old))
+        except OSError as e:
+            log.warning("voice archive: %s", e)
 
     def welcome_back(self, left_at: float, now: float, meetings=()) -> str:
         """What to say when the user returns: a meeting they were away for, then what was held."""
@@ -413,16 +436,20 @@ class Dashboard:
                     log.warning("voice: ASR failed (%.1fs, wake=%d): %s", len(pcm) / 32000, wake, e)
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
-                follow_up = time.monotonic() - dash._last_reply < dash.follow_up_s
+                presence = getattr(dash.bridge, "presence", None)
+                window = dash.follow_up_s * (3 if presence and presence.present else 1)  # at the desk: still talking
+                follow_up = time.monotonic() - dash._last_reply < window
                 # A call is the name said alone, which asr-typhoon hears as one short word ("หวี่" came
                 # out as มี / นี่ / วี): answer it and open the follow-up window for the question.
                 if wake and not follow_up and text and len(text.replace(" ", "")) <= CALL_MAX_CHARS:
                     dash._last_reply = time.monotonic()
                     log.info("voice: call %r (%.1fs) -> %r", text, seconds, CALL_REPLY)
+                    dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "call"})
                     return self._send(200, to_16k(dash.tts.speak(CALL_REPLY)), "audio/wav")
                 if not text or (wake and not follow_up and not dash.wake.search(text)):  # not for the robot
                     log.info("voice: %s (%.1fs) -> 204", f"heard {text!r} without the wake name" if text
                              else "nothing understood", seconds)
+                    dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
                 if getattr(dash.bridge, "presence", None):
@@ -439,6 +466,7 @@ class Dashboard:
                          seconds, wake, ", follow-up" if follow_up else "", reply, t_asr - t0, t_llm - t_asr,
                          time.monotonic() - t_llm, len(wav) // 1024)
                 dash._last_reply = time.monotonic()
+                dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "answered", "reply": reply})
                 return self._send(200, wav, "audio/wav") if wav else self._send(204, b"", "audio/wav")
 
         return Handler

@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--tts-url", help="Wayu-TTS server for Thai speech, e.g. http://wayu-tts:7860")
     dash.add_argument("--tts-voice", help="default Wayu voice id (e.g. f_young_clear, m_young_clear)")
     dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
-    dash.add_argument("--wake-name", default=r"^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
+    dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
                       help="regex the robot's hands-free speech must contain (as asr-typhoon spells the name)")
     dash.add_argument("--follow-up", type=float, default=20.0,
                       help="seconds after a spoken reply during which the next sentence needs no wake name")
@@ -330,6 +330,8 @@ def main(argv: list[str] | None = None) -> None:
         bridge.presence = Presence(bridge.snapshot, eyes, arrived)
         bridge.presence.start()
         log.info("Presence: camera checks with %s", eyes.model)
+    if args.state_dir and bridge.dashboard:
+        bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
     if args.state_dir and bridge.cortex:
         from .assistant import AssistantStore
         store = AssistantStore(os.path.join(args.state_dir, "assistant.json"),
