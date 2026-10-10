@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.3 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Look back at the desk when nobody is in view, scan now and then
+  ([`28d1b43`](https://github.com/dixonsatit/FlyBot/commit/28d1b43c28c5e3fb9cec9c28126cd40221a965f8))
+
+
 ## v0.24.2 (2026-10-10)
 
 ### Bug Fixes
