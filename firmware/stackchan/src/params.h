@@ -15,6 +15,10 @@ struct Params {
   int vadMinRms;            // hands-free speech must be at least this loud ...
   float vadRatio;           // ... and this many times the room's noise
   float vadSpeechFrac;      // ... with at least this share of its energy at 100-1000 Hz (voices)
+  float motionLiftG;        // |accel| off 1 g by this much (servos still): lifted
+  float motionTiltDeg;      // gravity turned this far from rest (servos still): tilted
+  float motionShakeG;       // three jolts this big within 1.5 s: shaken
+  int ledBrightness;        // base RGB ring, 0..255 (0 = off)
   int faceSwap;             // 1: swap the RGB565 bytes before face detection
   float faceScore;          // detector score threshold
   int faceTwoStage;         // 1: MSR01 candidates refined by MNP01 (slower, more accurate)

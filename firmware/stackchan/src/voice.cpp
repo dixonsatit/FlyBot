@@ -41,6 +41,7 @@ static constexpr size_t MAX_WAV = 4 * 1024 * 1024;
 // is answering. Speaking: the reply plays (mic off, they share the I2S bus).
 enum class State { Off, Listening, Capturing, Waiting, Speaking };
 static volatile State state = State::Off;
+static volatile bool reacting = false;  // a reaction line is playing (the mic waits for it)
 
 static int16_t* rec = nullptr;
 static volatile size_t recLen = 0;
@@ -82,7 +83,14 @@ void voiceSetUrl(const char* url, bool wakeName) {
   needName = wakeName;
 }
 
-bool voiceBusy() { return state == State::Capturing || state == State::Waiting || state == State::Speaking; }
+const char* voiceStateName() {
+  static const char* NAMES[] = {"off", "listening", "capturing", "waiting", "speaking"};
+  return reacting ? "reacting" : NAMES[int(state)];
+}
+
+bool voiceBusy() {
+  return reacting || state == State::Capturing || state == State::Waiting || state == State::Speaking;
+}
 bool voiceOwnsAudio() { return state != State::Off; }
 
 size_t voiceRecording(const int16_t** pcm) {
@@ -315,9 +323,11 @@ static int voiceRequest() {
 
 // Filler lines (the bridge's /api/filler/<name>), fetched once and kept in PSRAM so they play
 // at once while a reply is still being made, without a request during the wait.
-static const char* const FILLER_NAMES[] = {"search", "wait"};
-static uint8_t* filler[2] = {nullptr, nullptr};
-static size_t fillerLen[2] = {0, 0};
+static const char* const FILLER_NAMES[] = {"search", "wait", "lift1", "lift2", "lift3",
+                                           "tilt1", "tilt2", "shake1", "shake2"};
+static constexpr int FILLERS = sizeof FILLER_NAMES / sizeof *FILLER_NAMES;
+static uint8_t* filler[FILLERS] = {};
+static size_t fillerLen[FILLERS] = {};
 static volatile bool fillerFetching = false;
 static uint32_t fillerTried = 0;
 
@@ -352,22 +362,49 @@ static void fetchFiller(int i) {
   http.end();
 }
 
+static bool fillersComplete() {
+  for (int i = 0; i < FILLERS; ++i)
+    if (!filler[i]) return false;
+  return true;
+}
+
 static void fillerTask(void*) {
-  for (int i = 0; i < 2; ++i)
+  for (int i = 0; i < FILLERS; ++i)
     if (!filler[i]) fetchFiller(i);
   fillerFetching = false;
   vTaskDelete(nullptr);
 }
 
-void voiceProgress(const char* name) {
-  if (state != State::Waiting || M5.Speaker.isPlaying()) return;
-  for (int i = 0; i < 2; ++i) {
-    if (strcmp(name, FILLER_NAMES[i]) || !filler[i]) continue;
-    M5.Speaker.begin();  // the mic is off while waiting
-    M5.Speaker.setVolume(P.voiceVolume);
-    M5.Speaker.playWav(filler[i], fillerLen[i]);
-  }
+// Play a kept line whose name starts with ``prefix`` (one at random), on a free speaker.
+static bool playFiller(const char* prefix) {
+  int pick[FILLERS], n = 0;
+  for (int i = 0; i < FILLERS; ++i)
+    if (filler[i] && !strncmp(FILLER_NAMES[i], prefix, strlen(prefix))) pick[n++] = i;
+  if (!n) return false;
+  const int i = pick[esp_random() % n];
+  M5.Speaker.begin();  // the mic is off
+  M5.Speaker.setVolume(P.voiceVolume);
+  return M5.Speaker.playWav(filler[i], fillerLen[i]);
 }
+
+void voiceProgress(const char* name) {
+  if (state == State::Waiting && !M5.Speaker.isPlaying()) playFiller(name);
+}
+
+static String pendingReaction;
+void voiceReact(const char* kind) { pendingReaction = kind; }
+
+static String pendingGesture;
+bool voiceTakeGesture(String* name) {
+  if (!pendingGesture.length()) return false;
+  *name = pendingGesture;
+  pendingGesture = "";
+  return true;
+}
+
+// The last spoken reply, kept so a backward swipe can say it again.
+static uint8_t* lastReply = nullptr;
+static size_t lastReplyLen = 0;
 
 static void sendTask(void*) {
   httpCode = voiceRequest();
@@ -412,25 +449,41 @@ void voiceBegin() {
   xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
 }
 
-// Head stroke on the base's touch strip: held ~0.2 s, then a pause before the next one.
-static bool patted() {
+// The base's touch strip (3 pads): a stroke held ~0.4 s is a pat (then a pause before the next
+// one); moving along the strip is a swipe. Position as in M5Stack's hal_head_touch.cpp: the
+// intensity-weighted pad, -100..100, and a swipe once it has moved 40 from where it started.
+enum class HeadGesture { None, Pat, SwipeForward, SwipeBack };
+static HeadGesture headGesture() {
 #if STACKCHAN_OFFICIAL
   static uint32_t lastPoll = 0, since = 0, lastPat = 0;
-  if (millis() - lastPoll < 50) return false;
+  static int startPos = 0;
+  static bool done = false;  // this touch already gave a gesture
+  if (millis() - lastPoll < 50) return HeadGesture::None;
   lastPoll = millis();
   headTouch.read_touch_result();
   headTouch.parse_touch_result();
-  const bool on = headTouch.point_type[0] || headTouch.point_type[1] || headTouch.point_type[2];
-  if (!on) {
+  const uint8_t* t = headTouch.point_type;
+  const int total = t[0] + t[1] + t[2];
+  if (!total) {
     since = 0;
-    return false;
+    return HeadGesture::None;
   }
-  if (!since) since = millis();
-  if (millis() - since < 200 || millis() - lastPat < 6000) return false;
+  const int pos = (t[2] - t[0]) * 100 / total;
+  if (!since) {
+    since = millis(), startPos = pos, done = false;
+    return HeadGesture::None;
+  }
+  if (done) return HeadGesture::None;
+  if (abs(pos - startPos) > 40) {
+    done = true;
+    return pos > startPos ? HeadGesture::SwipeForward : HeadGesture::SwipeBack;
+  }
+  if (millis() - since < 400 || millis() - lastPat < 6000) return HeadGesture::None;
+  done = true;
   lastPat = millis();
-  return true;
+  return HeadGesture::Pat;
 #else
-  return false;
+  return HeadGesture::None;
 #endif
 }
 
@@ -438,9 +491,24 @@ void voiceUpdate() {
   if (!rec) return;
   holding = M5.Touch.getCount() > 0 && M5.Touch.getDetail(0).isPressed();
   static State shown = State::Off;
+  const HeadGesture g = headGesture();
+  if (g == HeadGesture::SwipeForward || g == HeadGesture::SwipeBack)
+    pendingGesture = g == HeadGesture::SwipeForward ? "swipe_forward" : "swipe_back";
+  if (g == HeadGesture::SwipeForward && state == State::Speaking) M5.Speaker.stop();  // enough: stop talking
+  if (pendingReaction.length() && state != State::Capturing && state != State::Speaking && !M5.Speaker.isPlaying()) {
+    const String kind = pendingReaction;
+    pendingReaction = "";
+    if (state == State::Listening) stopMic(), state = State::Off;
+    reacting = playFiller(kind.c_str());
+    if (reacting) avatar.setExpression(m5avatar::Expression::Doubt);
+  }
+  if (reacting) {
+    if (M5.Speaker.isPlaying()) return;
+    reacting = false;
+  }
   switch (state) {
     case State::Off:
-      if ((!filler[0] || !filler[1]) && !fillerFetching && voiceUrl.length() && WiFi.status() == WL_CONNECTED &&
+      if (!fillersComplete() && !fillerFetching && voiceUrl.length() && WiFi.status() == WL_CONNECTED &&
           (!fillerTried || millis() - fillerTried > 60000)) {
         fillerTried = millis();
         fillerFetching = true;
@@ -457,7 +525,13 @@ void voiceUpdate() {
     case State::Listening:
       if (shown == State::Capturing) avatar.setSpeechText("");
       shown = state;
-      if (patted()) {
+      if (g == HeadGesture::SwipeBack && lastReply) {  // say that again
+        stopMic();
+        wav = lastReply, wavLen = lastReplyLen, lastReply = nullptr;
+        state = State::Speaking;
+        return;
+      }
+      if (g == HeadGesture::Pat) {
         stopMic();
         avatar.setExpression(m5avatar::Expression::Happy);
         request("/api/pat", nullptr);
@@ -500,7 +574,8 @@ void voiceUpdate() {
       }
       avatar.setMouthOpenRatio(0);
       M5.Speaker.setVolume(64 * P.speakerVolumePct / 100);
-      free(wav);
+      free(lastReply);  // keep this one for a backward swipe
+      lastReply = wav, lastReplyLen = wavLen;
       wav = nullptr;
       wavLen = 0;
       started = false;
@@ -517,6 +592,11 @@ void voiceSetUrl(const char*, bool) {}
 void voiceAnnounce(const char*) {}
 void voiceUpdate() {}
 bool voiceBusy() { return false; }
+const char* voiceStateName() { return "disabled"; }
+void voiceProgress(const char*) {}
+void voiceReact(const char*) {}
+bool voiceTakeGesture(String*) { return false; }
+bool voiceTakeDirection(SoundDirection*) { return false; }
 bool voiceOwnsAudio() { return false; }
 String voiceStatusJson() { return "{\"state\":\"disabled\"}"; }
 size_t voiceRecording(const int16_t** pcm) {

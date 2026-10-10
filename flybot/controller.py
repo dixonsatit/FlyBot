@@ -299,6 +299,13 @@ class BrainController:
         """Head stroked (the base's touch strip): a happy face, like the petting reward."""
         self._inbox.put(lambda: self.mb.hold("happy", hold_s))
 
+    def handled(self, kind: str, hold_s: float = 3.0) -> None:
+        """The robot was lifted, tilted or shaken (it already said so itself): a startled face."""
+        def apply():
+            self.mb.startle()
+            self.mb.hold("alert", hold_s)
+        self._inbox.put(apply)
+
     def remind(self, reminder: dict, hold_s: float = 8.0) -> None:
         """Meeting reminder: look at the user, alert face, chime, balloon, and an event."""
         def apply():

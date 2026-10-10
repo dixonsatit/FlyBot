@@ -48,8 +48,19 @@ CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot be
 CALL_REPLY = "ว่าไงครับ"
 
 # What the robot says when its head is stroked (it calls itself หนู).
-# Played by the robot while a voice reply is being made (Dashboard.progress)
-FILLERS = {"search": "กำลังค้นหาข้อมูลให้นะครับ", "wait": "รอแป๊บนึงนะครับ ยังหาอยู่ครับ"}
+# Lines the robot keeps and plays itself: while a voice reply is being made (Dashboard.progress),
+# and at once when it is lifted, tilted or shaken (firmware motion.cpp picks one per kind).
+FILLERS = {
+    "search": "กำลังค้นหาข้อมูลให้นะครับ",
+    "wait": "รอแป๊บนึงนะครับ ยังหาอยู่ครับ",
+    "lift1": "เฮ้ย! ระวังหนูหน่อยนะครับ เดี๋ยวหล่น!",
+    "lift2": "อุ๊ย จะพาหนูไปไหนครับเนี่ย",
+    "lift3": "ว้าย ตกใจหมดเลย วางหนูเบาๆ นะครับ",
+    "tilt1": "เอียงแล้วๆ หนูจะล้มแล้วครับ!",
+    "tilt2": "โอ๊ะ เวียนหัวแล้วครับ วางตรงๆ หน่อย",
+    "shake1": "หยุดเขย่าก่อนครับ หนูมึนแล้ว!",
+    "shake2": "โอ๊ยยย อย่าเขย่าหนูสิครับ",
+}
 
 PAT_LINES = (
     "โอยยยย ฟินจังเอาอีกๆ",

@@ -53,6 +53,9 @@ static constexpr uint32_t SERVO_BAUD = 1000000;
 static constexpr uint8_t PY32_ADDR = 0x6F;
 static constexpr uint8_t PY32_VERSION = 0x02, PY32_DIR_L = 0x03, PY32_OUT_L = 0x05, PY32_PU_L = 0x09,
                          PY32_PD_L = 0x0B;
+static constexpr uint8_t PY32_DIR_H = 0x04, PY32_PU_H = 0x0A, PY32_PD_H = 0x0C, PY32_DRV_H = 0x14,
+                         PY32_LED_CFG = 0x24, PY32_LED_RAM = 0x30;
+static bool ledsOk = false;
 static constexpr uint32_t I2C_FREQ = 100000;  // as M5Stack's PY32 drivers; it misses reads at 400 kHz
 
 static SCSCL scs;
@@ -86,6 +89,12 @@ static bool enableServoPower() {
       M5.In_I2C.bitOn(PY32_ADDR, PY32_PU_L, 0x01, I2C_FREQ);
       M5.In_I2C.bitOn(PY32_ADDR, PY32_OUT_L, 0x01, I2C_FREQ);   // VM on
       delay(200);
+      // RGB ring on pin 13, 12 LEDs (M5Stack hal_io_expander.cpp): push-pull output, pull-up
+      M5.In_I2C.bitOn(PY32_ADDR, PY32_DIR_H, 1 << 5, I2C_FREQ);
+      M5.In_I2C.bitOff(PY32_ADDR, PY32_PD_H, 1 << 5, I2C_FREQ);
+      M5.In_I2C.bitOn(PY32_ADDR, PY32_PU_H, 1 << 5, I2C_FREQ);
+      M5.In_I2C.bitOff(PY32_ADDR, PY32_DRV_H, 1 << 5, I2C_FREQ);
+      ledsOk = M5.In_I2C.writeRegister8(PY32_ADDR, PY32_LED_CFG, BASE_LEDS, I2C_FREQ);
       return true;
     }
   }
@@ -208,6 +217,21 @@ void servoUpdate() {
   releaseIdle(pitchAxis);
 }
 
+uint32_t servoLastMoveMs() { return max(yawAxis.lastMoveMs, pitchAxis.lastMoveMs); }
+
+bool baseLedsOk() { return ledsOk; }
+
+void baseLedsShow(const uint8_t rgb[BASE_LEDS][3]) {
+  if (!ledsOk) return;
+  uint8_t ram[BASE_LEDS * 2];
+  for (int i = 0; i < BASE_LEDS; ++i) {  // RGB565, low byte first
+    const uint16_t c = ((rgb[i][0] & 0xF8) << 8) | ((rgb[i][1] & 0xFC) << 3) | (rgb[i][2] >> 3);
+    ram[2 * i] = c & 0xFF, ram[2 * i + 1] = c >> 8;
+  }
+  M5.In_I2C.writeRegister(PY32_ADDR, PY32_LED_RAM, ram, sizeof ram, I2C_FREQ);
+  M5.In_I2C.writeRegister8(PY32_ADDR, PY32_LED_CFG, BASE_LEDS | (1 << 6), I2C_FREQ);  // refresh
+}
+
 #else
 #include <ESP32Servo.h>
 
@@ -227,6 +251,9 @@ void servoWrite(float pan, float tilt) {
 }
 
 void servoUpdate() {}
+uint32_t servoLastMoveMs() { return 0; }
+bool baseLedsOk() { return false; }
+void baseLedsShow(const uint8_t[BASE_LEDS][3]) {}
 
 static char info[] = "SG90 PWM";
 #endif

@@ -13,11 +13,14 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
+#include <esp_sntp.h>
 #include "esp_camera.h"
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
 #include "face.h"
+#include "leds.h"
+#include "motion.h"
 #include "params.h"
 #include "stream.h"
 #include "voice.h"
@@ -64,7 +67,11 @@ static struct {
   bool faceFound = false;
   float faceX = 0, faceY = 0;
   uint16_t faceMs = 0;
+  int battery = -1;  // %, -1 = unknown
+  bool charging = false;
+  String reaction = "";
 } tele;
+static bool faceDirty = false;  // a reaction changed the face: put the bridge's back
 
 // -- tone queue: [Hz, ms] pairs played without blocking the main loop -------
 struct Tone { uint16_t hz; uint16_t ms; };
@@ -235,11 +242,90 @@ static void processCamera() {
 }
 
 // -- IMU / proximity -----------------------------------------------------------
+static void publishBodyEvent(const char* type) {
+  if (!mqtt.connected()) return;
+  char buf[64];
+  int n = snprintf(buf, sizeof buf, "{\"type\":\"%s\"}", type);
+  mqtt.publish((topicBase + "/event/body").c_str(), (const uint8_t*)buf, n);
+}
+
+static void publishImu();
+
+// Wall clock: NTP once online, kept in the CoreS3's RTC so it is right after a reboot offline.
+static void serviceClock() {
+  static bool ntpStarted = false, rtcWritten = false, rtcRead = false;
+  if (!rtcRead) {
+    rtcRead = true;
+    if (M5.Rtc.isEnabled()) {
+      const auto dt = M5.Rtc.getDateTime();  // UTC
+      if (dt.date.year >= 2025) {
+        struct tm t = {};
+        t.tm_year = dt.date.year - 1900, t.tm_mon = dt.date.month - 1, t.tm_mday = dt.date.date;
+        t.tm_hour = dt.time.hours, t.tm_min = dt.time.minutes, t.tm_sec = dt.time.seconds;
+        setenv("TZ", "UTC0", 1);
+        tzset();
+        const timeval tv = {mktime(&t), 0};
+        settimeofday(&tv, nullptr);
+      }
+    }
+    setenv("TZ", "ICT-7", 1);
+    tzset();
+  }
+  if (!ntpStarted && WiFi.status() == WL_CONNECTED) {
+    ntpStarted = true;
+    configTzTime("ICT-7", "pool.ntp.org", "time.google.com");
+  }
+  static uint32_t lastCheck = 0;
+  if (rtcWritten || !ntpStarted || millis() - lastCheck < 10000) return;
+  lastCheck = millis();
+  if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && time(nullptr) < 1735689600) return;  // not synced yet
+  const time_t now = time(nullptr);
+  if (now < 1735689600) return;
+  if (M5.Rtc.isEnabled()) M5.Rtc.setDateTime(gmtime(&now));
+  rtcWritten = true;
+}
+
+// Being handled (IMU), head-strip swipes, battery and the LED ring: these work offline too.
+static void serviceBody() {
+  static uint32_t lastImu = 0, lastPower = 0;
+  const uint32_t now = millis();
+  if (now - lastImu >= IMU_PERIOD_MS && M5.Imu.update()) {
+    lastImu = now;
+    float gx, gy, gz, ax, ay, az;
+    M5.Imu.getGyro(&gx, &gy, &gz);
+    M5.Imu.getAccel(&ax, &ay, &az);
+    tele.gyro[0] = gx, tele.gyro[1] = gy, tele.gyro[2] = gz, tele.accel[0] = ax, tele.accel[1] = ay, tele.accel[2] = az;
+    if (const char* ev = motionUpdate(ax, ay, az, gx, gy, gz)) {
+      M5_LOGW("body: %s", ev);
+      tele.reaction = ev;
+      voiceReact(ev);
+      faceDirty = true;
+      publishBodyEvent(ev);
+    }
+    if (mqtt.connected()) publishImu();
+  }
+  String gesture;
+  if (voiceTakeGesture(&gesture)) {
+    M5_LOGW("body: %s", gesture.c_str());
+    publishBodyEvent(gesture.c_str());
+  }
+  if (!lastPower || now - lastPower >= 30000) {
+    lastPower = now;
+    tele.battery = M5.Power.getBatteryLevel();
+    tele.charging = M5.Power.isCharging() == m5::Power_Class::is_charging;
+    ledsBattery(tele.battery >= 0 && tele.battery <= 15 && !tele.charging);
+    if (mqtt.connected()) {
+      char buf[64];
+      int n = snprintf(buf, sizeof buf, "{\"battery\":%d,\"charging\":%d}", tele.battery, tele.charging);
+      mqtt.publish((topicBase + "/sensor/power").c_str(), (const uint8_t*)buf, n);
+    }
+  }
+  ledsUpdate();
+}
+
 static void publishImu() {
-  float gx, gy, gz, ax, ay, az;
-  M5.Imu.getGyro(&gx, &gy, &gz);
-  M5.Imu.getAccel(&ax, &ay, &az);
-  tele.gyro[0] = gx, tele.gyro[1] = gy, tele.gyro[2] = gz, tele.accel[0] = ax, tele.accel[1] = ay, tele.accel[2] = az;
+  const float *g = tele.gyro, *a = tele.accel;
+  const float gx = g[0], gy = g[1], gz = g[2], ax = a[0], ay = a[1], az = a[2];
   char buf[160];
   int n = snprintf(buf, sizeof buf, "{\"gyro\":[%.2f,%.2f,%.2f],\"accel\":[%.3f,%.3f,%.3f]}",
                    gx, gy, gz, ax, ay, az);
@@ -304,6 +390,12 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     snapshotRequested = true;
     return;
   }
+  if (topicBase + "/leds" == topic) {  // {"rgb": [r, g, b], "mode": "solid|blink|spin", "seconds": 5}
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len))
+      ledsSet(a["rgb"][0] | 0, a["rgb"][1] | 0, a["rgb"][2] | 0, a["mode"] | "solid", a["seconds"] | 5.0f);
+    return;
+  }
   if (topicBase + "/voice/progress" == topic) {  // still making the reply: {"say": "search" | "wait"}
     JsonDocument a;
     if (!deserializeJson(a, payload, len) && a["say"].is<const char*>()) voiceProgress(a["say"]);
@@ -329,8 +421,9 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
 
   static String lastFace;
   const char* face = doc["face"]["expression"];
-  if (face && lastFace != face && !voiceBusy()) {  // keep the face steady while talking
+  if (face && (lastFace != face || faceDirty) && !voiceBusy()) {  // keep the face steady while talking
     lastFace = face;
+    faceDirty = false;
     tele.face = face;
     avatar.setExpression(toExpression(face));
   }
@@ -383,6 +476,14 @@ static void publishStatus() {
   snprintf(fbuf, sizeof fbuf, ",\"faceDet\":{\"found\":%d,\"x\":%.2f,\"y\":%.2f,\"ms\":%u}", tele.faceFound, tele.faceX,
            tele.faceY, tele.faceMs);
   s += fbuf;
+  char bbuf[160];
+  char clock[24] = "";
+  const time_t wall = time(nullptr);
+  if (wall > 1735689600) strftime(clock, sizeof clock, "%Y-%m-%d %H:%M:%S", localtime(&wall));
+  snprintf(bbuf, sizeof bbuf, ",\"power\":{\"battery\":%d,\"charging\":%d},\"reaction\":\"%s\",\"time\":\"%s\"",
+           tele.battery, tele.charging, tele.reaction.c_str(), clock);
+  s += bbuf;
+  s += ",\"motion\":" + motionStatusJson();
   s += ",\"voice\":" + voiceStatusJson();
   s += ",\"params\":" + paramsJson() + "}";
   streamSetStatus(s);
@@ -464,6 +565,7 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/snapshot/request").c_str());
     mqtt.subscribe((topicBase + "/announce").c_str(), 1);
     mqtt.subscribe((topicBase + "/voice/progress").c_str(), 0);
+    mqtt.subscribe((topicBase + "/leds").c_str(), 0);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
@@ -545,6 +647,8 @@ void loop() {
   mqtt.loop();
   serviceTones();
   servoUpdate();
+  serviceBody();
+  serviceClock();
   if (!mqtt.connected()) {
     if (cameraOk) {  // keep the frame buffers moving so the driver never runs out
       camera_fb_t* fb = esp_camera_fb_get();
@@ -578,12 +682,8 @@ void loop() {
     M5_LOGW("sound: %s", buf);
   }
 
-  static uint32_t lastImu = 0, lastPs = 0;
+  static uint32_t lastPs = 0;
   const uint32_t now = millis();
-  if (now - lastImu >= IMU_PERIOD_MS && M5.Imu.update()) {
-    lastImu = now;
-    publishImu();
-  }
   if (proximityOk && now - lastPs >= PROXIMITY_PERIOD_MS) {
     lastPs = now;
     publishProximity();

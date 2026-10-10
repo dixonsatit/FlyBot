@@ -1123,6 +1123,27 @@ def test_voice_progress_says_searching_then_still_waiting(gains):
     assert [w for _, w in sent].count("search") == 1 and "wait" in [w for _, w in sent]
 
 
+def test_robot_handled_and_battery_events(gains):
+    import json as _json
+    from flybot.mqtt_bridge import StackChanBridge
+    c = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    b = StackChanBridge(c, "localhost", 1883, "stackchan", 20.0)
+    said = []
+    b.dashboard = type("D", (), {"add": lambda *a: None, "announce": lambda self, t, force=False: said.append(t)})()
+    msg = lambda topic, p: type("M", (), {"topic": f"stackchan/{topic}", "payload": _json.dumps(p).encode()})
+    b._on_message(None, None, msg("event/body", {"type": "lift"}))
+    s = SensorState()
+    for _ in range(3):
+        c.step(s, 0.05)
+    assert c.mb.expression == "alert"  # startled
+    for level in (40, 12, 11):
+        b._on_message(None, None, msg("sensor/power", {"battery": level, "charging": 0}))
+    assert len(said) == 1 and "12" in said[0]  # warned once
+    b._on_message(None, None, msg("sensor/power", {"battery": 12, "charging": 1}))
+    b._on_message(None, None, msg("sensor/power", {"battery": 10, "charging": 0}))
+    assert len(said) == 2  # unplugged again after charging: warn again
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

@@ -11,7 +11,12 @@ void voiceSetUrl(const char* url, bool wakeName);
 void voiceAnnounce(const char* id);  // play the bridge's /api/announce/<id> when free
 // The bridge is still making the reply: play the kept "search" or "wait" line meanwhile.
 void voiceProgress(const char* name);
+// The robot was lifted, tilted or shaken ("lift", "tilt", "shake"): say a kept line about it.
+void voiceReact(const char* kind);
+// A swipe on the head strip since the last call: "swipe_forward" (stops speech) or "swipe_back" (repeats).
+bool voiceTakeGesture(String* name);
 void voiceUpdate();  // call every loop()
+const char* voiceStateName();  // off, listening, capturing, waiting, speaking, reacting
 bool voiceBusy();        // capturing, waiting or speaking: the face stays steady
 bool voiceOwnsAudio();   // the mic or a reply holds the I2S bus: no tones (they would crash it)
 String voiceStatusJson();  // for the monitor page

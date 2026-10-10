@@ -59,6 +59,8 @@ class StackChanBridge:
         self._jpeg: bytes | None = None
         self.presence = None  # flybot.presence.Presence when --presence is on
         self._last_face_turn = 0.0
+        self.power: dict = {}  # last <base>/sensor/power
+        self._battery_warned = False
         self._jpeg_ready = threading.Event()
 
     def attach_cortex(self, llm, narrate: bool = True, narrate_cooldown_s: float = 20.0,
@@ -88,6 +90,8 @@ class StackChanBridge:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
         client.subscribe(f"{self.base}/selftest", qos=1)
         client.subscribe(f"{self.base}/sensor/face", qos=0)
+        client.subscribe(f"{self.base}/sensor/power", qos=0)
+        client.subscribe(f"{self.base}/event/body", qos=0)
         if self.cortex:
             client.subscribe(f"{self.base}/chat/in", qos=1)
             client.subscribe(f"{self.base}/snapshot", qos=0)
@@ -98,6 +102,12 @@ class StackChanBridge:
             return
         if msg.topic == f"{self.base}/sensor/face":
             self._on_face(msg.payload)
+            return
+        if msg.topic == f"{self.base}/event/body":
+            self._on_body(msg.payload)
+            return
+        if msg.topic == f"{self.base}/sensor/power":
+            self._on_power(msg.payload)
             return
         if msg.topic == f"{self.base}/snapshot":
             self._jpeg = bytes(msg.payload)
@@ -122,6 +132,40 @@ class StackChanBridge:
             self.sensors.update(kind, payload)
             if kind == "camera" and "x" in payload and self.presence:
                 self.presence.note_motion()
+
+    def leds(self, rgb: tuple[int, int, int], mode: str = "blink", seconds: float = 8.0) -> None:
+        """Signal on the base's RGB ring: mode solid, blink or spin."""
+        self.client.publish(f"{self.base}/leds", json.dumps({"rgb": list(rgb), "mode": mode, "seconds": seconds}))
+
+    def _on_body(self, payload: bytes) -> None:
+        """The robot was handled (lift, tilt, shake: it already reacted) or its head swiped."""
+        try:
+            kind = json.loads(payload).get("type", "")
+        except (ValueError, AttributeError):
+            return
+        log.info("body: %s", kind)
+        if self.presence:
+            self.presence.note_voice()  # somebody is right there
+        if kind in ("lift", "tilt", "shake"):
+            self.controller.handled(kind)
+        if self.dashboard:
+            self.dashboard.add("event", {"type": "body", "kind": kind})
+
+    def _on_power(self, payload: bytes) -> None:
+        """Battery reports every 30 s: say so once when it runs low."""
+        try:
+            p = json.loads(payload)
+        except ValueError:
+            return
+        self.power = p
+        level, charging = p.get("battery", -1), p.get("charging", 0)
+        if 0 <= level <= 15 and not charging and not self._battery_warned:
+            self._battery_warned = True
+            log.info("battery low: %d%%", level)
+            if self.dashboard:
+                self.dashboard.announce(f"แบตหนูเหลือ {level} เปอร์เซ็นต์แล้วครับ ช่วยเสียบสายชาร์จหน่อยนะครับ", force=True)
+        elif charging or level > 25:
+            self._battery_warned = False
 
     def _on_face(self, payload: bytes) -> None:
         """The robot's face detector (several times a second): keep the face centred."""
@@ -320,6 +364,7 @@ def main(argv: list[str] | None = None) -> None:
             ap.error(f"--remind-minutes / --tz: {e}")
         def remind(r: dict) -> None:
             bridge.controller.remind(r)
+            bridge.leds((255, 140, 0), "blink", 15)
             title = r.get("title") or "ประชุม"
             where = f" ที่ {r['location']}" if r.get("location") else ""
             when = f"อีก {r.get('minutes', 0)} นาทีมี" if r.get("minutes") else "ถึงเวลา"
@@ -396,8 +441,12 @@ def main(argv: list[str] | None = None) -> None:
         log.info("Assistant memory: %s (%d notes, %d reminders)", store.path, len(store.notes), len(store.reminders))
     if args.github_token:
         from .github import GitHubWatcher
-        watcher = GitHubWatcher(args.github_token, lambda line: bridge.dashboard and bridge.dashboard.announce(line),
-                                args.github_interval)
+        def github_news(line: str) -> None:
+            bridge.leds((150, 0, 255) if line.startswith("มี PR") else (255, 0, 0), "blink", 15)  # review / CI broke
+            if bridge.dashboard:
+                bridge.dashboard.announce(line)
+
+        watcher = GitHubWatcher(args.github_token, github_news, args.github_interval)
         watcher.start()
         if bridge.cortex:
             bridge.cortex.github = watcher
