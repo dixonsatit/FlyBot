@@ -6,15 +6,20 @@ asks about a meeting they were away for.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from typing import Callable
 
 log = logging.getLogger(__name__)
 
-PROMPT = ("Is a person (a face, head or upper body) visible in this camera frame? If yes, answer "
-          "'yes X Y' where X and Y are the centre of the nearest face as fractions of the image width "
-          "and height (0 = left/top, 1 = right/bottom), e.g. 'yes 0.42 0.35'. If not, answer 'no'.")
+PROMPT = ("Is any part of a person visible in this camera frame (face, head, shoulders, arms, body)? "
+          "If yes, reply 'yes X Y' with X and Y the centre of their face as fractions of the image "
+          "width and height (0 = left/top, 1 = right/bottom); if the face is out of frame, give the "
+          "centre of the visible part instead. If no person, reply 'no'. Reply with only that line.")
+_POSITION = re.compile(r"\byes\b\D{0,20}?(\d(?:\.\d+)?)\D{1,10}?(\d(?:\.\d+)?)", re.IGNORECASE)
+_YES = re.compile(r"\byes\b|ใช่", re.IGNORECASE)
+_NO = re.compile(r"\bno\b|ไม่มี", re.IGNORECASE)
 
 
 class Presence:
@@ -61,16 +66,18 @@ class Presence:
         if not jpeg:
             return None
         reply = self.vision.ask("You check a desk robot's camera frame.", [], PROMPT, image_jpeg=jpeg)
-        words = reply.strip().lower().replace(",", " ").split()
-        if not words or not words[0].startswith(("yes", "ใช่")):
-            return False
-        try:
-            x, y = (min(1.0, max(0.0, float(v))) for v in words[1:3])
-        except ValueError:
+        return self.parse(reply)
+
+    def parse(self, reply: str) -> bool:
+        """'yes X Y' anywhere in the reply (Haiku sometimes explains first) -> seen, at (X, Y)."""
+        m = _POSITION.search(reply)
+        if m:
+            x, y = (min(1.0, max(0.0, float(v))) for v in m.groups())
+            if self.on_person:
+                self.on_person(x, y)
             return True
-        if self.on_person:
-            self.on_person(x, y)
-        return True
+        yes, no = list(_YES.finditer(reply)), list(_NO.finditer(reply))
+        return bool(yes) and (not no or yes[-1].start() > no[-1].start())  # the last verdict wins
 
     def tick(self) -> None:
         now = self.clock()

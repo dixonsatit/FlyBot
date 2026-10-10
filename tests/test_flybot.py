@@ -1032,6 +1032,8 @@ def test_people_only_mode_ignores_motion_but_turns_to_a_face(gains):
     p = Presence(lambda t: b"jpeg", type("E", (), {"ask": lambda self, *a, **k: "yes 0.8 0.3"})(),
                  on_person=lambda x, y: seen.append((x, y)))
     assert p.person_visible() and seen == [(0.8, 0.3)]
+    assert p.parse("The person's shoulder is at the right edge.\n\nyes 0.9 0.7") and seen[-1] == (0.9, 0.7)
+    assert not p.parse("There is a door and a wall.\n\nAnswer: no")
 
 
 def test_to_16k_resamples_wayu_wav():

@@ -34,8 +34,11 @@
 
 using namespace m5avatar;
 
-static constexpr int FRAME_W = 160;  // FRAMESIZE_QQVGA
+static constexpr int FRAME_W = 160;  // what the motion detector works on (QQVGA luma)
 static constexpr int FRAME_H = 120;
+#ifndef CAMERA_COLOR  // 1: the camera captures colour QVGA (snapshots for the vision model), the
+#define CAMERA_COLOR 1  // detector subsamples it; 0: grayscale QQVGA as before
+#endif
 
 Avatar avatar;
 WiFiClient wifiClient;
@@ -95,8 +98,8 @@ static bool initCamera() {
   cfg.xclk_freq_hz = 20000000;
   cfg.ledc_timer = LEDC_TIMER_0;
   cfg.ledc_channel = LEDC_CHANNEL_0;
-  cfg.pixel_format = PIXFORMAT_GRAYSCALE;
-  cfg.frame_size = FRAMESIZE_QQVGA;
+  cfg.pixel_format = CAMERA_COLOR ? PIXFORMAT_RGB565 : PIXFORMAT_GRAYSCALE;
+  cfg.frame_size = CAMERA_COLOR ? FRAMESIZE_QVGA : FRAMESIZE_QQVGA;
   cfg.fb_count = 2;
   cfg.fb_location = CAMERA_FB_IN_PSRAM;
   cfg.grab_mode = CAMERA_GRAB_LATEST;
@@ -130,7 +133,8 @@ static inline uint8_t luma(const camera_fb_t* fb, int i) {
 static void processCamera() {
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) return;
-  if (fb->width != FRAME_W || fb->height != FRAME_H) {
+  const int scale = fb->width / FRAME_W;  // 2 for colour QVGA: sample every other pixel
+  if (scale < 1 || fb->width != FRAME_W * scale || fb->height != FRAME_H * scale) {
     esp_camera_fb_return(fb);
     return;
   }
@@ -141,7 +145,7 @@ static void processCamera() {
   uint32_t lumL = 0, lumR = 0, lumT = 0, lumB = 0;
   for (int y = 0, i = 0; y < FRAME_H; ++y) {
     for (int x = 0; x < FRAME_W; ++x, ++i) {
-      uint8_t v = luma(fb, i);
+      uint8_t v = luma(fb, (y * scale) * fb->width + x * scale);
       (x < FRAME_W / 2 ? lumL : lumR) += v;
       (y < FRAME_H / 2 ? lumT : lumB) += v;
       int d = int(v) - int(prevFrame[i]);
