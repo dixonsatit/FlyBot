@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.2 (2026-10-10)
+
+### Bug Fixes
+
+- **faces**: The assistant knows it recognised the face itself
+  ([`64c2f46`](https://github.com/dixonsatit/FlyBot/commit/64c2f46fda208093b1ca956e11b3336579bc734c))
+
+
 ## v0.32.1 (2026-10-10)
 
 ### Bug Fixes

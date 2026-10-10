@@ -1,6 +1,6 @@
 [project]
 name = "flybot"
-version = "0.32.1"
+version = "0.32.2"
 description = "FlyWire Codex connectome circuits driving an M5Stack StackChan over MQTT"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "pandas>=2.0", "nengo>=4.0", "paho-mqtt>=2.0"]
