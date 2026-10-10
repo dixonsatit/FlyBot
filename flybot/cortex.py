@@ -63,7 +63,7 @@ def now_line(tz: str | None = None) -> str:
 
 REMEMBER_RE = re.compile(r"^(จำ|จด)(ไว้|ไหม|หน่อย|ด้วย)?\s*(นะ|ที)?\s*(ว่า)?\s*")
 
-VOICE_RULE = " This reply is spoken aloud by the robot: one short sentence, no lists or emoji."
+VOICE_RULE = (" This reply is spoken aloud by the robot: keep it under about 20 Thai words, no lists, markdown or emoji. For several items (meetings, notes, PRs) say how many, then only time and a 2-4 word name for each, without places or full titles unless asked; offer details if they want.")
 
 SCREEN_RULES = {
     "th": "Text you pass to the `say` tool must be very short Thai (at most 14 characters): the "
