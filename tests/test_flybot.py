@@ -853,6 +853,11 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 7
+        dash._last_reply = -1e9
+        bridge.presence = type("P", (), {"present": True, "note_voice": lambda self: None})()
+        heard["text"] = "ดีหันหน้ามา"  # name lost, but at the desk and addressed to the robot
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        bridge.presence = None
         status, body = _http_raw(dash.port, "/api/pat", b"")
         assert status == 200 and body == wav
         sent = []

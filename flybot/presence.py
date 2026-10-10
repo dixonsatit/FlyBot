@@ -73,6 +73,7 @@ class Presence:
         m = _POSITION.search(reply)
         if m:
             x, y = (min(1.0, max(0.0, float(v))) for v in m.groups())
+            log.info("presence: person at x=%.2f y=%.2f", x, y)
             if self.on_person:
                 self.on_person(x, y)
             return True
@@ -93,6 +94,7 @@ class Presence:
             except Exception as e:  # vision model down: decide on the next round
                 log.warning("presence check failed: %s", e)
                 return
+            log.info("presence check: %s", {None: "no frame from the robot", True: "person", False: "nobody"}[seen])
             if seen:
                 self._seen()
 

@@ -40,6 +40,9 @@ from .plant import PlantConfig, StackChanPlant, World
 log = logging.getLogger(__name__)
 
 
+# Words that only make sense said to the robot (its eyes, its head, "you"), for when the name was lost.
+ADDRESSED_RE = re.compile(r"เห็น(ผม|ฉัน|หนู|ไหม)|ได้ยิน(ผม|ไหม)|หัน(หน้า|มา|ซ้าย|ขวา|ไป)|มองมา|เงย|ก้ม|พยักหน้า|"
+                          r"ส่ายหน้า|หนู(ช่วย|ทำ|รู้|จำ|จด|เตือน)|ช่วย(บอก|ดู|เตือน|จำ|จด|เปิด|หา)|ตอบ(ผม|หน่อย)")
 CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot being called
 CALL_REPLY = "ว่าไงคะ"
 
@@ -437,8 +440,14 @@ class Dashboard:
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
                 presence = getattr(dash.bridge, "presence", None)
+                if presence and text:
+                    presence.note_voice()  # someone is talking next to the robot: they are here
                 window = dash.follow_up_s * (3 if presence and presence.present else 1)  # at the desk: still talking
                 follow_up = time.monotonic() - dash._last_reply < window
+                # At the desk and talking about the robot itself ("เห็นผมไหม", "หันหน้ามา"): that is
+                # addressed to it even when the ASR lost the name.
+                if wake and presence and presence.present and ADDRESSED_RE.search(text):
+                    follow_up = True
                 # A call is the name said alone, which asr-typhoon hears as one short word ("หวี่" came
                 # out as มี / นี่ / วี): answer it and open the follow-up window for the question.
                 if wake and not follow_up and text and len(text.replace(" ", "")) <= CALL_MAX_CHARS:
@@ -452,8 +461,6 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
-                if getattr(dash.bridge, "presence", None):
-                    dash.bridge.presence.note_voice()
                 t_asr = time.monotonic()
                 try:
                     reply = dash.bridge.cortex.ask(text)
