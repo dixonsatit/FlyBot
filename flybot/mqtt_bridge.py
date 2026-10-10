@@ -330,15 +330,24 @@ def main(argv: list[str] | None = None) -> None:
             if line:
                 bridge.dashboard.announce(line, force=True)
 
+        pose_at_frame = [0.0, 0.0]  # head pose when the frame was asked for: it arrives seconds later
+
+        def snapshot(timeout: float) -> bytes | None:
+            pose_at_frame[:] = bridge.controller.pan, bridge.controller.tilt
+            return bridge.snapshot(timeout)
+
         def look_at_person(x: float, y: float) -> None:  # face at (x, y) of the frame -> turn to it
             c = bridge.controller
-            c.look_at(c.pan + (x - 0.5) * c.cfg.hfov_deg, c.tilt - (y - 0.5) * c.cfg.vfov_deg)
+            pan, tilt = pose_at_frame
+            target = pan + (x - 0.5) * c.cfg.hfov_deg, tilt - (y - 0.5) * c.cfg.vfov_deg
+            log.info("presence: head at pan %.0f tilt %.0f when the frame was taken -> %.0f, %.0f", pan, tilt, *target)
+            c.face(*target)
 
         def search(scan: bool) -> None:  # nobody in view: face the desk, now and then look around
             c = bridge.controller
-            c.gesture("spin") if scan else c.look_at(c.cfg.home_pan, c.cfg.home_tilt)
+            c.gesture("spin") if scan else c.face(c.cfg.home_pan, c.cfg.home_tilt)
 
-        bridge.presence = Presence(bridge.snapshot, eyes, arrived, on_person=look_at_person, on_search=search)
+        bridge.presence = Presence(snapshot, eyes, arrived, on_person=look_at_person, on_search=search)
         bridge.presence.start()
         log.info("Presence: camera checks with %s", eyes.model)
     if args.location and bridge.cortex:

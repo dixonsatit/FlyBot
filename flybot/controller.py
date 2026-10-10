@@ -281,6 +281,16 @@ class BrainController:
             self._gesture = [[float(np.clip(p_, lo, hi)), float(np.clip(t_, tlo, thi)), d, 0.0] for p_, t_, d in moves]
         self._inbox.put(apply)
 
+    def face(self, pan_deg: float, tilt_deg: float, hold_s: float = 1.5) -> None:
+        """Turn the head to an absolute pose (e.g. towards a person found in a camera frame), the
+        way a gesture does, and leave the FC2 goal there. look_at only steers through the goal,
+        slowly and relative to the IMU heading, and left the head far from the pose asked for."""
+        def apply():
+            pan = float(np.clip(pan_deg, *self.cfg.pan_limits))
+            tilt = float(np.clip(tilt_deg, *self.cfg.tilt_limits))
+            self._gesture = [[pan, tilt, hold_s, 0.0]]
+        self._inbox.put(apply)
+
     def say(self, text: str, seconds: float = 6.0) -> None:
         """Show ``text`` in the speech balloon for ``seconds`` (overrides the game score)."""
         self._inbox.put(lambda: setattr(self, "_say", (text, self._clock + seconds)))

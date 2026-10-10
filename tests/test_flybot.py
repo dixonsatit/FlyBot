@@ -891,6 +891,10 @@ def test_gesture_overrides_reflexes_then_holds(gains):
     assert min(pans) < -55 and max(pans) > 55  # looked all the way round within the limits
     with pytest.raises(ValueError):
         c.gesture("backflip")
+    c.face(30, 20)  # absolute pose, reached directly
+    for _ in range(40):
+        c.step(s, 0.05)
+    assert abs(c.pan - 30) < 3 and abs(c.tilt - 20) < 3
 
 
 def test_github_watcher_reports_new_failures_and_reviews():
