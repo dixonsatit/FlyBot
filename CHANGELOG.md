@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.6 (2026-10-10)
+
+### Bug Fixes
+
+- **assistant**: The LLM knows what the camera sees and can look on request
+  ([`3fdac0b`](https://github.com/dixonsatit/FlyBot/commit/3fdac0b1e64856859851e6e6d3f17083b4075040))
+
+
 ## v0.24.5 (2026-10-10)
 
 ### Bug Fixes
