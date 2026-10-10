@@ -71,6 +71,8 @@ class ControllerConfig:
     game_lock: float = 0.3  # |x| (half-frames) counted as "looking at it"
     game_grace_s: float = 0.8  # gaps shorter than this keep the streak
     # reminders turn the head to where the user usually sits
+    follow_gain: float = 2.5  # 1/s: how briskly the head eases to a tracked face
+    follow_max_deg_s: float = 45.0
     home_pan: float = 0.0
     home_tilt: float = 10.0
     # balloon text language: "th" needs the firmware's Thai font, "en" works on any firmware
@@ -150,6 +152,7 @@ class BrainController:
                              refractory_s=cfg.gf_refractory_s)
         self._escape_until = -math.inf
         self._gesture: list[list] = []  # [pan, tilt, seconds, elapsed] waypoints a command plays
+        self._follow: list | None = None  # [pan, tilt, seconds left]: a target to ease towards (face tracking)
         self._escape_dir = 1.0
         self._tilt_home: float | None = None  # tilt to settle back to after an escape
         self.events: list[dict] = []
@@ -289,6 +292,16 @@ class BrainController:
             pan = float(np.clip(pan_deg, *self.cfg.pan_limits))
             tilt = float(np.clip(tilt_deg, *self.cfg.tilt_limits))
             self._gesture = [[pan, tilt, hold_s, 0.0]]
+        self._inbox.put(apply)
+
+    def follow(self, pan_deg: float, tilt_deg: float, hold_s: float = 1.5) -> None:
+        """Ease the head towards a pose that is updated a few times a second (a tracked face). A
+        gesture jumps at 6/s and stops, which looked jerky at 3 frames a second; this glides at
+        ``follow_gain`` and never faster than ``follow_max_deg_s``, so successive targets blend."""
+        def apply():
+            pan = float(np.clip(pan_deg, *self.cfg.pan_limits))
+            tilt = float(np.clip(tilt_deg, *self.cfg.tilt_limits))
+            self._follow = [pan, tilt, hold_s]  # seconds left, counted down in step()
         self._inbox.put(apply)
 
     def say(self, text: str, seconds: float = 6.0) -> None:
@@ -439,6 +452,7 @@ class BrainController:
             pan_rate += cfg.k_heading * self.cx.steering(self.pan)
 
         if self._gesture:  # a commanded movement overrides the reflexes until it has played
+            self._follow = None  # ... and a face being followed
             step = self._gesture[0]
             step[3] += dt
             pan_rate, tilt_rate = 6.0 * (step[0] - self.pan), 6.0 * (step[1] - self.tilt)
@@ -447,6 +461,17 @@ class BrainController:
                 if not self._gesture:
                     self.cx.set_goal(self.cx.heading + step[0])
                     self._tilt_home = step[1]
+
+        elif self._follow:  # a tracked face: glide to it, and leave the gaze there when it stops coming
+            fp, ft, _ = self._follow
+            lim = cfg.follow_max_deg_s
+            pan_rate = float(np.clip(cfg.follow_gain * (fp - self.pan), -lim, lim))
+            tilt_rate = float(np.clip(cfg.follow_gain * (ft - self.tilt), -lim, lim))
+            self.cx.set_goal(self.cx.heading + fp)
+            self._tilt_home = ft
+            self._follow[2] -= dt
+            if self._follow[2] <= 0:
+                self._follow = None
 
         pan_rate = float(np.clip(pan_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))
         tilt_rate = float(np.clip(tilt_rate, -cfg.max_rate_deg_s, cfg.max_rate_deg_s))

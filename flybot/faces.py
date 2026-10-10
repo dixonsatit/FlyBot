@@ -179,7 +179,7 @@ class FaceTracker:
     """
 
     def __init__(self, snapshot, stream: Callable[..., None], client: FaceClient, controller, greeter: Greeter,
-                 active: Callable[[], bool], gain: float = 0.6, deadband: tuple[float, float] = (0.07, 0.09),
+                 active: Callable[[], bool], gain: float = 0.8, deadband: tuple[float, float] = (0.06, 0.08),
                  fps: int = 3, idle_s: float = 20.0, clock: Callable[[], float] = time.monotonic,
                  on_seen: Callable[[], None] | None = None):
         self.snapshot, self.stream, self.client, self.c, self.greeter = snapshot, stream, client, controller, greeter
@@ -218,8 +218,7 @@ class FaceTracker:
         dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
         self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}
         if abs(dx) > self.deadband[0] or abs(dy) > self.deadband[1]:
-            self.c.face(pan + self.gain * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg,
-                        hold_s=1.0)
+            self.c.follow(pan + self.gain * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg)
         self.greeter.consider(faces)
         if self.on_seen:
             self.on_seen()
