@@ -33,6 +33,7 @@ import random
 import re
 import threading
 import time
+import urllib.parse
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -186,6 +187,7 @@ class Dashboard:
         # Wake-word recording session (POST /api/wakeword): every hands-free clip is kept as a
         # training sample under <archive_dir>/../wakeword/<kind>/ instead of being answered.
         self.collect: dict | None = None
+        self.faces = None  # (FaceClient, FaceRegistry, StaffDirectory | None) when --face-url is set
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -263,6 +265,12 @@ class Dashboard:
                     raise ValueError("kind must be positive or negative, and the bridge needs --state-dir")
                 self.collect = {"kind": kind, "left": max(1, min(int(body.get("count", 50)), 500)), "saved": 0}
             log.info("wake word recording: %s", self.collect)
+        elif path == "/api/people/enroll":
+            return self.enroll(body)
+        elif path == "/api/people/forget":
+            if not self.faces:
+                raise ValueError("face recognition is off (--face-url)")
+            return {"ok": self.faces[1].forget(str(body.get("id", "")))}
         elif path == "/api/face":  # absolute pose, held so the reflexes leave it there a while
             c.face(float(body.get("pan", 0)), float(body.get("tilt", 0)), hold_s=20.0)
         elif path == "/api/look":
@@ -341,6 +349,38 @@ class Dashboard:
             yield say
         finally:
             stop.set()
+
+    def enroll(self, body: dict, shots: int = 5, gap_s: float = 0.8) -> dict:
+        """Enroll the person in front of the robot: ``shots`` camera frames, the largest face in
+        each. Needs their consent (PDPA s.26: a face template is sensitive data)."""
+        if not self.faces:
+            raise ValueError("face recognition is off (--face-url)")
+        if body.get("consent") is not True:
+            raise ValueError("the person's consent is required")
+        client, registry, staff = self.faces
+        info = {k: str(body.get(k, "")).strip() for k in ("name", "nick", "position", "office")}
+        code = str(body.get("code", "")).strip()
+        if code and staff:
+            row = staff.get(int(code))
+            if not row:
+                raise ValueError(f"no active staff with code {code}")
+            info = {"name": f"{row['name']} {row['surname']}", "nick": row.get("nicname") or "",
+                    "position": row.get("position") or "", "office": row.get("office_name") or ""}
+        if not info["name"]:
+            raise ValueError("name (or a staff code) is required")
+        embeddings = []
+        for _ in range(max(1, min(int(body.get("shots", shots)), 10))):
+            jpeg = self.bridge.snapshot(8.0)
+            found = client.embed(jpeg) if jpeg else []
+            if found:
+                embeddings.append(found[0]["embedding"])
+            time.sleep(gap_s)
+        if len(embeddings) < 3:
+            raise ValueError(f"saw a face in only {len(embeddings)} of the frames; face the robot and try again")
+        person = registry.enroll(code or info["name"], {**info, "code": code}, embeddings)
+        log.info("enrolled %s (%d samples)", person.get("name"), person["samples"])
+        self.add("event", {"type": "enrolled", "name": person.get("name")})
+        return {"ok": True, "person": person}
 
     def keep_wake_sample(self, pcm: bytes) -> str:
         """Save one clip of a wake-word recording session and say what comes next."""
@@ -441,6 +481,14 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path == "/api/people":
+                    return self._json(200, {"people": dash.faces[1].list() if dash.faces else [],
+                                            "on": bool(dash.faces), "staff": bool(dash.faces and dash.faces[2])})
+                if self.path.startswith("/api/staff?"):
+                    q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("q", [""])[0]
+                    if not (dash.faces and dash.faces[2]) or len(q.strip()) < 2:
+                        return self._json(200, {"staff": []})
+                    return self._json(200, {"staff": dash.faces[2].search(q)})
                 if self.path.split("?")[0] == "/api/camera.jpg":  # one frame from the robot's camera
                     jpeg = dash.bridge.snapshot(8.0) if hasattr(dash.bridge, "snapshot") else None
                     if not jpeg:

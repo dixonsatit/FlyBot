@@ -101,6 +101,17 @@
       </div>
       <div class="err" id="errCam"></div>
     </div>
+    <div class="card" id="peopleCard" style="display:none">
+      <h2>คนที่รู้จัก</h2>
+      <div id="people" class="hint"></div>
+      <div class="row"><input id="staffQ" placeholder="ค้นชื่อพนักงาน" style="flex:1"><button id="staffFind">ค้น</button></div>
+      <div id="staffList"></div>
+      <div class="row"><input id="enCode" placeholder="รหัสพนักงาน" style="width:7em">
+        <input id="enName" placeholder="ชื่อ-สกุล (ถ้าไม่มีรหัส)" style="flex:1"><input id="enNick" placeholder="ชื่อเล่น" style="width:6em"></div>
+      <label class="hint"><input type="checkbox" id="enConsent"> เจ้าของใบหน้ายินยอมให้เก็บข้อมูลใบหน้า (เวกเตอร์ ไม่เก็บรูป) เพื่อให้หุ่นทักทาย และลบได้ทุกเมื่อ</label>
+      <div class="row"><button id="enroll">ให้หันหน้าเข้ากล้อง แล้วกดลงทะเบียน</button></div>
+      <div class="err" id="errPeople"></div>
+    </div>
     <div class="card">
       <h2>สั่งหุ่น</h2>
       <div class="row">นิสัย <select id="personality"></select></div>
@@ -378,6 +389,39 @@ $("cam").onclick = (e) => {
   const dx = (e.clientX - r.left) / r.width - 0.5, dy = (e.clientY - r.top) / r.height - 0.5;
   post("/api/face", { pan: p + dx * HFOV, tilt: t - dy * VFOV }, "errCam");
 };
+// ---- people the robot knows (faces) ----
+async function loadPeople() {
+  const j = await (await fetch("/api/people")).json();
+  $("peopleCard").style.display = j.on ? "block" : "none";
+  $("staffQ").parentElement.style.display = j.staff ? "flex" : "none";
+  $("people").innerHTML = j.people.length ? "" : "ยังไม่มีใครลงทะเบียน";
+  for (const p of j.people) {
+    const d = document.createElement("div"); d.className = "row";
+    d.textContent = `${p.name} (${p.nick || "-"}) ${p.position || ""} · ${p.samples} ภาพ · ยินยอม ${p.consent_at} `;
+    const b = document.createElement("button"); b.textContent = "ลบ";
+    b.onclick = async () => {  // two clicks: no modal dialog
+      if (b.textContent !== "ยืนยันลบ") { b.textContent = "ยืนยันลบ"; return; }
+      await post("/api/people/forget", { id: p.id }, "errPeople"); loadPeople(); };
+    d.append(b); $("people").append(d);
+  }
+}
+$("staffFind").onclick = async () => {
+  const j = await (await fetch("/api/staff?q=" + encodeURIComponent($("staffQ").value))).json();
+  $("staffList").innerHTML = "";
+  for (const s of j.staff) {
+    const b = document.createElement("button");
+    b.textContent = `${s.code} ${s.name} ${s.surname} (${s.nicname || "-"}) ${s.office_name || ""}`;
+    b.onclick = () => { $("enCode").value = s.code; $("enName").value = s.name + " " + s.surname; $("enNick").value = s.nicname || ""; };
+    $("staffList").append(b);
+  }
+};
+$("enroll").onclick = async () => {
+  $("errPeople").textContent = "กำลังถ่าย 5 ภาพ ...";
+  await post("/api/people/enroll", { code: $("enCode").value, name: $("enName").value, nick: $("enNick").value,
+                                     consent: $("enConsent").checked }, "errPeople");
+  $("enConsent").checked = false; loadPeople();
+};
+loadPeople();
 document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => post("/api/sim", { action: b.dataset.act }, "err2"));
 $("simOn").onchange = (e) => post("/api/sim", { enabled: e.target.checked }, "err2");
 $("game").onclick = () => post("/api/game", { on: !(state && state.game_on) }, "err1");

@@ -58,6 +58,7 @@ class StackChanBridge:
         self.dashboard = None  # flybot.dashboard.Dashboard, optional
         self._jpeg: bytes | None = None
         self.presence = None  # flybot.presence.Presence when --presence is on
+        self.greeter = None  # flybot.faces.Greeter when --face-url is set
         self._last_face_turn = 0.0
         self.power: dict = {}  # last <base>/sensor/power
         self._battery_warned = False
@@ -173,7 +174,11 @@ class StackChanBridge:
             f = json.loads(payload)
         except ValueError:
             return
-        if not (f.get("found") and self.presence):
+        if not f.get("found"):
+            return
+        if self.greeter:
+            self.greeter.on_face_seen()
+        if not self.presence:
             return
         self.presence.note_face()
         dx, dy = f["x"] - 0.5, f["y"] - 0.5
@@ -282,6 +287,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--presence", action="store_true",
                     help="check camera frames for a person (Claude Haiku); hold announcements while away")
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
+    gh.add_argument("--face-url", help="tools/face_server.py (e.g. http://192.168.3.57:7880): greet enrolled people")
+    gh.add_argument("--face-token", help="the face server's FACE_TOKEN")
+    gh.add_argument("--staff-dsn", help="mysql://user:pass@host/db with a narrow staff view (v_stackchan_staff)")
     gh.add_argument("--google-maps-key", help="Google Maps Platform key with Places API (New) for the places tool")
     gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
     gh.add_argument("--github-interval", type=float, default=120.0, help="seconds between polls")
@@ -451,6 +459,24 @@ def main(argv: list[str] | None = None) -> None:
         if bridge.cortex:
             bridge.cortex.github = watcher
         log.info("GitHub: watching CI and review requests every %.0f s", args.github_interval)
+    if args.face_url and bridge.dashboard and args.state_dir:
+        from .faces import FaceClient, FaceRegistry, Greeter, StaffDirectory
+        registry = FaceRegistry(os.path.join(args.state_dir, "faces.json"))
+        client = FaceClient(args.face_url, args.face_token or "")
+
+        def greet(person: dict) -> None:
+            hour = time.localtime().tm_hour
+            hello = "อรุณสวัสดิ์" if hour < 11 else "สวัสดีตอนบ่าย" if 12 <= hour < 17 else "สวัสดี"
+            bridge.dashboard.announce(f"{hello}ครับพี่{person.get('nick') or person.get('name', '')}", force=True)
+            bridge.controller.pet(3.0)  # a happy face
+            log.info("greeted %s", person.get("name"))
+
+        bridge.greeter = Greeter(bridge.snapshot, client, registry, greet)
+        bridge.dashboard.faces = (client, registry, StaffDirectory(args.staff_dsn) if args.staff_dsn else None)
+        if bridge.cortex:
+            bridge.cortex.greeter = bridge.greeter
+        log.info("Faces: %s, %d people enrolled%s", args.face_url, len(registry.people),
+                 ", staff directory on" if args.staff_dsn else "")
     bridge.run(heartbeat=args.heartbeat)
 
 

@@ -1179,6 +1179,45 @@ def test_dashboard_camera_frames_and_absolute_turns(gains):
     assert abs(brain.pan - 30) < 3 and abs(brain.tilt - 20) < 3
 
 
+def test_faces_enroll_match_and_greet_once(gains, tmp_path):
+    import numpy as _np
+    from flybot.dashboard import Dashboard
+    from flybot.faces import FaceRegistry, Greeter
+    rng = _np.random.default_rng(1)
+    me = rng.normal(size=128); me /= _np.linalg.norm(me)
+    other = rng.normal(size=128); other /= _np.linalg.norm(other)
+    noisy = lambda v: list((v + rng.normal(scale=0.03, size=128)) / _np.linalg.norm(v))
+
+    class FakeClient:
+        face = me
+        def embed(self, jpeg):
+            return [{"box": [0.4, 0.3, 0.2, 0.3], "score": 0.9, "embedding": noisy(self.face)}]
+
+    registry, client = FaceRegistry(str(tmp_path / "faces.json")), FakeClient()
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    bridge.snapshot = lambda timeout: b"jpeg"
+    dash = Dashboard(bridge, port=0)
+    dash.faces = (client, registry, None)
+    with pytest.raises(ValueError):
+        dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ"}, gap_s=0)  # no consent
+    person = dash.enroll({"name": "สาธิต สีถาพล", "nick": "ต๊ะ", "consent": True}, gap_s=0)["person"]
+    assert person["samples"] == 5 and person["consent_at"]
+    assert FaceRegistry(str(tmp_path / "faces.json")).match(noisy(me))[0] == "สาธิต สีถาพล"  # kept on disk
+    assert registry.match(list(other))[0] is None
+
+    greeted, now = [], [1000.0]
+    g = Greeter(bridge.snapshot, client, registry, greeted.append, every_s=0, clock=lambda: now[0])
+    for _ in range(3):
+        g.on_face_seen()
+        g._busy.acquire(); g._busy.release()  # wait for the check thread
+        import time as _t; _t.sleep(0.05)
+    assert [p["nick"] for p in greeted] == ["ต๊ะ"] and g.who()["nick"] == "ต๊ะ"  # greeted once
+    client.face = other
+    now[0] += 7 * 3600
+    g.on_face_seen(); _t.sleep(0.1)
+    assert len(greeted) == 1  # a stranger is not greeted
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

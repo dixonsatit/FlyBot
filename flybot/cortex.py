@@ -122,6 +122,7 @@ class Cortex:
         self.weather = None  # flybot.weather.Weather where the robot is
         self.places = None  # flybot.places.Places (Google Maps) near the robot
         self.presence = None  # flybot.presence.Presence: whether the camera sees the user
+        self.greeter = None  # flybot.faces.Greeter: who the camera recognised
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -197,6 +198,10 @@ class Cortex:
                         else " Your camera does not see anyone at the desk right now.")
             if self.snapshot:
                 persona += " To answer about what you see, call the `look` tool."
+        who = self.greeter.who() if self.greeter else None
+        if who:  # a face matched an enrolled person: talk to them by name
+            persona += (f" The person in front of you now is {who.get('name', '')} (nickname {who.get('nick') or '-'}"
+                        f", {who.get('position') or ''} {who.get('office') or ''}); call them พี่{who.get('nick') or who.get('name', '')}.")
         notes = self.store.notes[-30:] if self.store else []
         if notes:  # small enough to carry every turn, so "what did I tell you" needs no tool call
             persona += " Notes the user asked you to remember: " + "; ".join(f"[{n['id']}] {n['text']}" for n in notes)
