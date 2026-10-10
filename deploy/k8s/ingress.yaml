@@ -20,7 +20,7 @@ spec:
         paths:
           - path: /mqtt
             pathType: Prefix
-            backend: {service: {name: mosquitto, port: {number: 9001}}}
+            backend: {service: {name: mosquitto-ws, port: {number: 9001}}}
           - path: /
             pathType: Prefix
             backend: {service: {name: flybot-dashboard, port: {number: 8080}}}

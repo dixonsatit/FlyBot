@@ -25,6 +25,7 @@ static volatile int clients = 0;
 static volatile bool rawView = false;  // plain camera image instead of the detector's view
 static String status = "{}";
 static String authHeader;  // "Basic ..." for MQTT_USER / MQTT_PASSWORD; empty = open
+static String streamToken;  // random per boot: the stream's URL must not carry the password
 
 void streamFrame(const uint8_t* luma, const uint8_t* changed, int w, int h, int minX, int minY, int maxX,
                  int maxY, bool skipped) {
@@ -66,11 +67,11 @@ static bool authorized(httpd_req_t* req) {
 }
 
 static esp_err_t streamHandler(httpd_req_t* req) {
-  // its own port is another origin, so the page passes the credentials as a token
+  // its own port is another origin, so the page passes a token it got from /status (which needs the login)
   char query[160] = "", token[128] = "";
   httpd_req_get_url_query_str(req, query, sizeof query);
   httpd_query_key_value(query, "token", token, sizeof token);
-  if (authHeader.length() && authHeader.substring(6) != token && !authorized(req)) return ESP_OK;
+  if (authHeader.length() && streamToken != token && !authorized(req)) return ESP_OK;
   rawView = strstr(query, "raw=1") != nullptr;
   static const char* BOUNDARY = "\r\n--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
   httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=frame");
@@ -105,7 +106,7 @@ static esp_err_t statusHandler(httpd_req_t* req) {
   String copy = status;
   xSemaphoreGive(lock);
   // tell the page where the stream is (port + 1) and the token it needs there
-  copy = "{\"stream\":\":" + String(STREAM_PORT + 1) + "/stream?token=" + (authHeader.length() ? authHeader.substring(6) : String()) +
+  copy = "{\"stream\":\":" + String(STREAM_PORT + 1) + "/stream?token=" + (authHeader.length() ? streamToken : String()) +
          "\"," + copy.substring(1);
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -224,6 +225,10 @@ void streamBegin() {
   if (!view) return;
   lock = xSemaphoreCreateMutex();
   if (strlen(MQTT_PASSWORD)) authHeader = "Basic " + base64::encode(String(MQTT_USER) + ":" + MQTT_PASSWORD);
+  char hex[33];
+  snprintf(hex, sizeof hex, "%08lx%08lx%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random(),
+           (unsigned long)esp_random(), (unsigned long)esp_random());
+  streamToken = hex;
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.server_port = STREAM_PORT;
   cfg.ctrl_port = STREAM_PORT + 32768;

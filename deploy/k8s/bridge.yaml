@@ -31,9 +31,11 @@ spec:
           envFrom:
             - configMapRef: {name: flybot-config}
           env:
-            - name: FLYBOT_PASSWORD
-              valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
-            - name: FLYBOT_DASHBOARD_PASSWORD   # dashboard basic auth: user stackchan, same password as MQTT
+            - name: FLYBOT_PASSWORD            # the bridge's own MQTT login (user flybot)
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: bridge-mqtt-password}}
+            - name: FLYBOT_DASHBOARD_PASSWORD   # dashboard basic auth (user admin): not the robot's password
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: dashboard-password}}
+            - name: FLYBOT_ROBOT_PASSWORD      # the robot's login (user stackchan): MQTT, and only its own HTTP calls
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
             - name: FLYBOT_CALENDAR            # ICS URL(s), whitespace-separated
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: calendar-url, optional: true}}

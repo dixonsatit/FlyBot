@@ -323,6 +323,8 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--dashboard-port", type=int, help="serve the dashboard on this port (off if unset)")
     dash.add_argument("--dashboard-user", default="stackchan")
     dash.add_argument("--dashboard-password", help="HTTP basic auth password (no auth if unset)")
+    dash.add_argument("--robot-user", default="stackchan", help="the robot's login for its own calls (voice, pat, ...)")
+    dash.add_argument("--robot-password", help="the robot's password: good only for the paths the robot calls")
     dash.add_argument("--dashboard-sim", action="store_true",
                       help="start with the simulated robot on (turn off when a real robot is connected)")
     dash.add_argument("--tts-url", help="Wayu-TTS server for Thai speech, e.g. http://wayu-tts:7860")
@@ -423,6 +425,7 @@ def main(argv: list[str] | None = None) -> None:
         bridge.dashboard = Dashboard(bridge, args.dashboard_port, args.dashboard_user, args.dashboard_password,
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
+        bridge.dashboard.robot_user, bridge.dashboard.robot_password = args.robot_user, args.robot_password
         bridge.dashboard.start()
     if args.presence and bridge.dashboard:
         from .presence import Presence

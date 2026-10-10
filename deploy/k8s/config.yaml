@@ -5,7 +5,8 @@ metadata:
   name: flybot-config
 data:
   FLYBOT_HOST: mosquitto
-  FLYBOT_USERNAME: stackchan          # same MQTT user as MQTT_USER in the robot's flybot_config.h
+  FLYBOT_USERNAME: flybot             # the bridge's MQTT user; the robot logs in as stackchan (mosquitto.yaml acl)
+  FLYBOT_DASHBOARD_USER: admin        # dashboard login, with the dashboard-password secret
   FLYBOT_TZ: Asia/Bangkok
   FLYBOT_REMIND_MINUTES: "10,1"
   FLYBOT_PERSONALITY: curious

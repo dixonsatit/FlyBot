@@ -65,6 +65,10 @@ FILLERS = {
     "shake2": "โอ๊ยยย อย่าเขย่าหนูสิครับ",
 }
 
+# What the robot itself calls, with its own (MQTT) login
+ROBOT_PATHS = ("/api/voice", "/api/pat", "/api/announce/", "/api/filler/")
+MAX_FAILURES, LOCKOUT_S = 8, 300.0
+
 PAT_LINES = (
     "โอยยยย ฟินจังเอาอีกๆ",
     "อุ๊ยยย ตรงนั้นแหละ ฟินมาก",
@@ -194,6 +198,10 @@ class Dashboard:
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
+        # The robot's own login (its MQTT user/password) is good only for what the robot calls
+        # (ROBOT_PATHS): a password read out of its flash does not open the dashboard.
+        self.robot_user, self.robot_password = "stackchan", None
+        self._failures: dict[str, list[float]] = {}  # client -> times of recent wrong passwords
         self.sim = SimRobot(bridge)
         self.sim.enabled = sim
         self.feed: collections.deque = collections.deque(maxlen=80)
@@ -465,7 +473,7 @@ class Dashboard:
         self._last_reply = time.monotonic()  # they can answer without the wake name
         return " ".join(parts)
 
-    def _authorized(self, header: str | None) -> bool:
+    def _authorized(self, header: str | None, path: str = "/") -> bool:
         if not self.password:
             return True
         if not header or not header.startswith("Basic "):
@@ -474,7 +482,24 @@ class Dashboard:
             user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
         except ValueError:
             return False
-        return hmac.compare_digest(user, self.user) and hmac.compare_digest(pw, self.password)
+        if hmac.compare_digest(user, self.user) and hmac.compare_digest(pw, self.password):
+            return True
+        return bool(self.robot_password and path.split("?")[0].startswith(ROBOT_PATHS)
+                    and hmac.compare_digest(user, self.robot_user) and hmac.compare_digest(pw, self.robot_password))
+
+    def locked_out(self, client: str, failed: bool | None = None) -> bool:
+        """Wrong passwords per client: MAX_FAILURES within LOCKOUT_S locks that client out for the
+        rest of it. ``failed`` records one more (True) or clears them after a good login (False)."""
+        now = time.monotonic()
+        with self._lock:
+            recent = [t for t in self._failures.get(client, []) if now - t < LOCKOUT_S]
+            if failed:
+                recent.append(now)
+            if failed is False or not recent:
+                self._failures.pop(client, None)
+            else:
+                self._failures[client] = recent
+            return len(recent) >= MAX_FAILURES
 
     def _handler(self):
         dash = self
@@ -494,9 +519,24 @@ class Dashboard:
             def _json(self, code: int, obj) -> None:
                 self._send(code, json.dumps(obj, ensure_ascii=False).encode())
 
+            def _client(self) -> str:  # behind the ingress the peer is the proxy
+                return (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+
             def _auth(self) -> bool:
-                if dash._authorized(self.headers.get("Authorization")):
+                who, header = self._client(), self.headers.get("Authorization")
+                # the robot's calls are never locked out: behind a proxy everyone shares one address,
+                # and guesses at the dashboard must not silence the robot
+                robot_call = self.path.split("?")[0].startswith(ROBOT_PATHS)
+                if not robot_call and dash.locked_out(who):
+                    self._json(429, {"error": "too many wrong passwords; wait a few minutes"})
+                    return False
+                if dash._authorized(header, self.path):
+                    if header:
+                        dash.locked_out(who, failed=False)
                     return True
+                if header and not robot_call:  # a browser's first request carries none: only real attempts count
+                    dash.locked_out(who, failed=True)
+                    log.warning("dashboard: wrong password from %s for %s", who, self.path.split("?")[0])
                 self.send_response(401)
                 self.send_header("WWW-Authenticate", 'Basic realm="FlyBot"')
                 self.send_header("Content-Length", "0")
@@ -551,6 +591,11 @@ class Dashboard:
                 self._json(404, {"error": "not found"})
 
             def do_POST(self):
+                # Another site's page must not post with a logged-in browser's saved password (CSRF):
+                # a browser always sends Origin on such a request; the robot sends none.
+                origin = self.headers.get("Origin")
+                if origin and urllib.parse.urlsplit(origin).netloc != self.headers.get("Host"):
+                    return self._json(403, {"error": "cross-site request refused"})
                 if not self._auth():
                     return
                 try:

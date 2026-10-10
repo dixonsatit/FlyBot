@@ -12,8 +12,27 @@ data:
     protocol websockets
     allow_anonymous false
     password_file /mosquitto/auth/passwd
+    acl_file /mosquitto/auth/acl
     persistence false
     log_dest stdout
+  # Two logins: the bridge may do anything under the base topic; the robot (whose password sits
+  # in its flash) may only publish what a robot publishes and read what is sent to it, so a
+  # password taken from a robot cannot command it as the bridge or read the bridge's side.
+  acl: |
+    user flybot
+    topic readwrite stackchan/#
+    user stackchan
+    topic write stackchan/sensor/#
+    topic write stackchan/snapshot
+    topic write stackchan/selftest
+    topic write stackchan/event/#
+    topic write stackchan/debug/#
+    topic read stackchan/command
+    topic read stackchan/snapshot/request
+    topic read stackchan/announce
+    topic read stackchan/voice/progress
+    topic read stackchan/leds
+    topic read stackchan/camera/stream
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -40,15 +59,27 @@ spec:
         # hash matches what the bridge (FLYBOT_PASSWORD, stripped) and the robot send.
         - name: passwd
           image: eclipse-mosquitto:2
-          command: ["sh", "-c", "pw=$(printf %s \"$MQTT_PASSWORD\" | tr -d '\\r\\n') && mosquitto_passwd -b -c /mosquitto/auth/passwd \"$MQTT_USER\" \"$pw\" && chmod 0600 /mosquitto/auth/passwd"]
+          command:
+            - sh
+            - -c
+            - |
+              clean() { printf %s "$1" | tr -d '\r\n'; }
+              mosquitto_passwd -b -c /mosquitto/auth/passwd "$BRIDGE_USER" "$(clean "$BRIDGE_PASSWORD")" &&
+              mosquitto_passwd -b /mosquitto/auth/passwd "$ROBOT_USER" "$(clean "$ROBOT_PASSWORD")" &&
+              cp /mosquitto/config/acl /mosquitto/auth/acl && chmod 0600 /mosquitto/auth/passwd /mosquitto/auth/acl
           env:
-            - name: MQTT_USER
+            - name: BRIDGE_USER
               valueFrom: {configMapKeyRef: {name: flybot-config, key: FLYBOT_USERNAME}}
-            - name: MQTT_PASSWORD
+            - name: BRIDGE_PASSWORD
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: bridge-mqtt-password}}
+            - name: ROBOT_USER
+              value: stackchan
+            - name: ROBOT_PASSWORD
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: mqtt-password}}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           volumeMounts:
             - {name: auth, mountPath: /mosquitto/auth}
+            - {name: config, mountPath: /mosquitto/config}
       containers:
         - name: mosquitto
           image: eclipse-mosquitto:2
@@ -85,4 +116,13 @@ spec:
   selector: {app: mosquitto}
   ports:
     - {name: mqtt, port: 1883, targetPort: mqtt, nodePort: 31883}
+---
+# MQTT over WebSocket only through the ingress (stackchan.kkh.go.th/mqtt): no port on the nodes
+apiVersion: v1
+kind: Service
+metadata:
+  name: mosquitto-ws
+spec:
+  selector: {app: mosquitto}
+  ports:
     - {name: ws, port: 9001, targetPort: ws}

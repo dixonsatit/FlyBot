@@ -1291,6 +1291,31 @@ def test_move_head_tool_turns_by_degrees_within_limits(gains):
     assert r["pan"] == round(c.pan - 15)
 
 
+def test_dashboard_robot_login_csrf_and_lockout(gains):
+    import urllib.request
+    from flybot.dashboard import Dashboard, MAX_FAILURES
+    dash = Dashboard(_FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains)), port=0, password="admin-pw")
+    dash.robot_password = "robot-pw"
+    dash.start()
+    try:
+        assert _http(dash.port, "GET", "/api/state", auth="stackchan:admin-pw")[0] == 200
+        assert _http(dash.port, "GET", "/api/state", auth="stackchan:robot-pw")[0] == 401  # robot login: not the dashboard
+        assert _http(dash.port, "GET", "/api/filler/nope", auth="stackchan:robot-pw")[0] == 404  # ... but its own paths
+        req = urllib.request.Request(f"http://127.0.0.1:{dash.port}/api/look", data=b"{}", method="POST",
+                                     headers={"Origin": "https://evil.example", "Authorization": "Basic c3RhY2tjaGFuOmFkbWluLXB3"})
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            raise AssertionError("cross-site POST went through")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403
+        dash.locked_out("127.0.0.1", failed=False)
+        for _ in range(MAX_FAILURES):
+            assert _http(dash.port, "GET", "/api/state", auth="stackchan:guess")[0] == 401
+        assert _http(dash.port, "GET", "/api/state", auth="stackchan:admin-pw")[0] == 429  # locked out for a while
+    finally:
+        dash.stop()
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k
