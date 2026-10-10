@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.21.0 (2026-10-10)
+
+### Features
+
+- **assistant**: Shorter spoken summaries
+  ([`96b4354`](https://github.com/dixonsatit/FlyBot/commit/96b43542f836f9eaa6e8ba6be220c23dcebfef5e))
+
+
 ## v0.20.1 (2026-10-10)
 
 ### Bug Fixes
