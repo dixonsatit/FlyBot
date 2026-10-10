@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.31.0 (2026-10-10)
+
+### Chores
+
+- **k8s**: Keep the bridge off tyranus
+  ([`5c69932`](https://github.com/dixonsatit/FlyBot/commit/5c699327d4ec44b62fb1cf3e237d9291a63bf061))
+
+### Features
+
+- **faces**: Enroll and test with the browser's webcam, or the robot camera
+  ([`ee5ee47`](https://github.com/dixonsatit/FlyBot/commit/ee5ee4773d898f2ed4dbdfb9efb511cb8f9d8882))
+
+
 ## v0.30.0 (2026-10-10)
 
 ### Features
