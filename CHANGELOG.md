@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.22.1 (2026-10-10)
+
+### Bug Fixes
+
+- **voice**: Greetings call the robot; longer follow-up at the desk; keep clips
+  ([`338cafe`](https://github.com/dixonsatit/FlyBot/commit/338cafe038ab7e98732e8bfac9f7119e1872cb00))
+
+
 ## v0.22.0 (2026-10-10)
 
 ### Features
