@@ -54,8 +54,8 @@ static String mqttHost;  // host name only (setServer keeps the pointer)
 String topicBase = MQTT_BASE_TOPIC;
 
 // In PSRAM: internal RAM is kept for TLS (mbedTLS allocates only there in this core).
-static uint8_t* prevFrame = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);
-static uint8_t* changedMask = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);  // for the camera monitor
+static uint8_t* prevFrame = nullptr;    // FRAME_W * FRAME_H, allocated in setup()
+static uint8_t* changedMask = nullptr;  // for the camera monitor
 static bool havePrev = false;
 static bool cameraOk = false;
 static bool proximityOk = false;
@@ -628,7 +628,10 @@ void setup() {
     CoreS3.Ltr553.setAlsMode(LTR5XX_ALS_ACTIVE_MODE);
   }
 
-  cameraOk = initCamera();
+  // PSRAM is set up after static initialisation (Arduino 2.x): allocate here, not at the declaration
+  prevFrame = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);
+  changedMask = (uint8_t*)ps_calloc(FRAME_W * FRAME_H, 1);
+  cameraOk = prevFrame && changedMask && initCamera();
   if (!cameraOk) M5_LOGE("camera init failed");
   if (cameraOk) faceBegin();
 

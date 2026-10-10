@@ -18,7 +18,7 @@
 
 static constexpr int W = 160, H = 120;
 static constexpr uint32_t FRAME_MS = 200;  // 5 fps is enough to watch and keeps the CPU for the brain
-static uint8_t* view = (uint8_t*)ps_calloc(W * H, 1);  // PSRAM: internal RAM is kept for TLS
+static uint8_t* view = nullptr;  // W * H in PSRAM (internal RAM is kept for TLS), allocated in streamBegin()
 static SemaphoreHandle_t lock;
 static volatile uint32_t viewSeq = 0;
 static volatile int clients = 0;
@@ -219,6 +219,9 @@ static esp_err_t indexHandler(httpd_req_t* req) {
 }
 
 void streamBegin() {
+  // PSRAM is set up after static initialisation (Arduino 2.x): allocate here, not at the declaration
+  view = (uint8_t*)ps_calloc(W * H, 1);
+  if (!view) return;
   lock = xSemaphoreCreateMutex();
   if (strlen(MQTT_PASSWORD)) authHeader = "Basic " + base64::encode(String(MQTT_USER) + ":" + MQTT_PASSWORD);
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();

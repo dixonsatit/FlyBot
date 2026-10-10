@@ -52,7 +52,7 @@ static int16_t* rec = nullptr;
 static volatile size_t recLen = 0;
 static int16_t block[BLOCK];
 static int16_t stereo[BLOCK * 2];  // L/R pairs from the two mics; block is their mean
-static int16_t (*preroll)[BLOCK] = (int16_t(*)[BLOCK])ps_calloc(PREROLL, sizeof(int16_t[BLOCK]));  // PSRAM
+static int16_t (*preroll)[BLOCK] = nullptr;  // PREROLL blocks in PSRAM, allocated in voiceBegin()
 
 static volatile bool micActive = false;  // main -> mic task: keep recording
 static volatile bool micParked = true;   // mic task -> main: not inside record()
@@ -166,8 +166,8 @@ static double xcorr[2 * MAX_LAG + 1], energyL, energyR;
 static int dirBlocks = 0;
 static volatile bool dirReady = false;
 static SoundDirection dirResult;
-static float* bandL = (float*)ps_calloc(BLOCK, sizeof(float));  // PSRAM: internal RAM is kept for TLS
-static float* bandR = (float*)ps_calloc(BLOCK, sizeof(float));
+static float* bandL = nullptr;  // BLOCK floats each in PSRAM (internal RAM is kept for TLS), see voiceBegin()
+static float* bandR = nullptr;
 
 static void directionReset() {
   memset(xcorr, 0, sizeof xcorr);
@@ -454,7 +454,11 @@ static void request(const char* p, const char* balloon) {
 }
 
 void voiceBegin() {
-  rec = (int16_t*)ps_malloc(MAX_SAMPLES * sizeof(int16_t));
+  // PSRAM is set up after static initialisation (Arduino 2.x): allocate here, not at the declaration
+  preroll = (int16_t(*)[BLOCK])ps_calloc(PREROLL, sizeof(int16_t[BLOCK]));
+  bandL = (float*)ps_calloc(BLOCK, sizeof(float));
+  bandR = (float*)ps_calloc(BLOCK, sizeof(float));
+  rec = preroll && bandL && bandR ? (int16_t*)ps_malloc(MAX_SAMPLES * sizeof(int16_t)) : nullptr;
   if (!rec) {
     M5_LOGE("voice: no PSRAM for the recording buffer");
     return;
