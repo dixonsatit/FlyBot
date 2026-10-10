@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.26.1 (2026-10-10)
+
+### Bug Fixes
+
+- **assistant**: น้องหวี่ is a boy and ends with ครับ
+  ([`df42b54`](https://github.com/dixonsatit/FlyBot/commit/df42b540b41bb6f3add9927549473124b9f56643))
+
+### Testing
+
+- **presence**: Expect the welcome-back question with ครับ
+  ([`b618b11`](https://github.com/dixonsatit/FlyBot/commit/b618b11b4b028d31d0f0c8ed9e7e3e321f7ed988))
+
+
 ## v0.26.0 (2026-10-10)
 
 ### Features
