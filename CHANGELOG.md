@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.30.0 (2026-10-10)
+
+### Features
+
+- **faces**: Recognise enrolled people and greet them by name
+  ([`246f001`](https://github.com/dixonsatit/FlyBot/commit/246f0016cb7f75c9bd88c2e50bd9e7d2853c5fca))
+
+
 ## v0.29.0 (2026-10-10)
 
 ### Features
