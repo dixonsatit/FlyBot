@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.27.1 (2026-10-10)
+
+### Bug Fixes
+
+- **robot**: Name handling after a 0.6 s look, swipes on release, no startle from a hand on the head
+  ([`772af7e`](https://github.com/dixonsatit/FlyBot/commit/772af7e29bbe2ec6c3b77a9031ce8553dfa8bcba))
+
+
 ## v0.27.0 (2026-10-10)
 
 ### Features
