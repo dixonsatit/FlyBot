@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.1 (2026-10-10)
+
+### Bug Fixes
+
+- **firmware**: Allocate the PSRAM buffers at start-up, not at static initialisation
+  ([`1eb248f`](https://github.com/dixonsatit/FlyBot/commit/1eb248fab64cf1bfd6703d72fd10f76996d995c8))
+
+
 ## v0.32.0 (2026-10-10)
 
 ### Features
