@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.22.0 (2026-10-10)
+
+### Features
+
+- **assistant**: Know when the user is at the desk
+  ([`37e4ca0`](https://github.com/dixonsatit/FlyBot/commit/37e4ca0994af3b27727ee09df83066672c17a6f5))
+
+
 ## v0.21.0 (2026-10-10)
 
 ### Features
