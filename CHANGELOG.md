@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.33.0 (2026-10-10)
+
+### Features
+
+- **security**: Separate logins for the dashboard, the bridge and the robot
+  ([`6ccee83`](https://github.com/dixonsatit/FlyBot/commit/6ccee8368d340b126825dae8312626cb40185ba7))
+
+
 ## v0.32.5 (2026-10-10)
 
 ### Bug Fixes
