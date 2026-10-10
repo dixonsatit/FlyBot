@@ -225,13 +225,27 @@ class Cortex:
         # spoken replies: TTS time grows with length, so keep them to one sentence
         persona = self.persona + (VOICE_RULE if voice else "")
         notes_before = len(self.store.notes) if self.store else 0
-        reply = self.llm.ask(persona, self.history, text, tools=self.tools())
+        done: list[str] = []
+        reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done))
         self._ensure_saved(text, notes_before)
-        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "..."}]
+        # History keeps only text, so note the actions taken: without them the next turn sees
+        # "จดแล้ว" with no tool call behind it and the model redoes it (duplicate notes/reminders).
+        said = (reply or "...") + (f"\n[ทำแล้วในรอบนี้: {', '.join(done)}]" if done else "")
+        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": said}]
         self.history = self.history[-2 * self.history_turns:]
         # voice: the robot speaks it, so the dashboard page must not say it again
         self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
         return reply
+
+    @staticmethod
+    def _recording(tools: list[Tool], done: list[str]) -> list[Tool]:
+        """The same tools, appending "name(args)" to ``done`` when one runs."""
+        def wrap(t: Tool) -> Tool:
+            def fn(**args):
+                done.append(f"{t.name}({json.dumps(args, ensure_ascii=False)})" if args else t.name)
+                return t.fn(**args)
+            return Tool(t.name, t.description, t.parameters, fn)
+        return [wrap(t) for t in tools]
 
     def _ensure_saved(self, text: str, notes_before: int) -> None:
         """A sentence starting with จำ/จด is a note even when the LLM only said it saved it (qwen

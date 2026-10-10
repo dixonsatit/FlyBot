@@ -966,6 +966,14 @@ def test_cortex_saves_a_note_the_llm_only_claimed(gains, tmp_path):
     assert [n["text"] for n in cortex.store.notes] == ["ห้องเซิร์ฟเวอร์อยู่ชั้นสาม"]
     cortex._chat("วันนี้กี่โมง")  # not a note
     assert len(cortex.store.notes) == 1
+    def script(text, tools, img):  # a model that saves through the tool
+        tools["remember"].call({"text": "license หมดสิ้นเดือน"})
+        return "จดแล้วค่ะ"
+    cortex.llm = _ScriptedLLM(script)
+    cortex._chat("จดไว้ว่า license หมดสิ้นเดือน")
+    assert len(cortex.store.notes) == 2  # saved once, not forced twice
+    assert "ทำแล้วในรอบนี้: remember" in cortex.history[-1]["content"]  # the next turn sees the action
+
 
 
 def test_to_16k_resamples_wayu_wav():
