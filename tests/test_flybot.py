@@ -1023,7 +1023,7 @@ def test_presence_holds_announcements_and_welcomes_back(gains):
     tz = ZoneInfo("Asia/Bangkok")
     meeting = Meeting("u1", "หัวหน้างาน IT", datetime.fromtimestamp(1_000_900, tz))
     line = dash.welcome_back(1_000_000.0, 1_004_000.0, [meeting])
-    assert line == "กลับมาแล้ว ประชุมหัวหน้างาน IT เป็นยังไงบ้างคะ ระหว่างที่ไม่อยู่ CI ของ FlyBot พังนะ"
+    assert line == "กลับมาแล้ว ประชุมหัวหน้างาน IT เป็นยังไงบ้างครับ ระหว่างที่ไม่อยู่ CI ของ FlyBot พังนะ"
     assert dash.held == []
 
 
