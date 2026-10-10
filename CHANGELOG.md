@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.5 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Turn to the person from the pose the frame was taken at
+  ([`da6390c`](https://github.com/dixonsatit/FlyBot/commit/da6390c547635d29fc570ba3d0d4a380bafbf476))
+
+
 ## v0.24.4 (2026-10-10)
 
 ### Bug Fixes
