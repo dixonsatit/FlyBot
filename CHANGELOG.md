@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.25.0 (2026-10-10)
+
+### Features
+
+- **assistant**: On-device face tracking, speech-only listening and Google Maps places
+  ([`66367d2`](https://github.com/dixonsatit/FlyBot/commit/66367d2fca922ad0e1f1c788683efc485e0e9fbf))
+
+
 ## v0.24.6 (2026-10-10)
 
 ### Bug Fixes
