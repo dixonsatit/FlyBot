@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
 import hmac
 import json
 import logging
@@ -47,6 +48,9 @@ CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot be
 CALL_REPLY = "ว่าไงคะ"
 
 # What the robot says when its head is stroked (it calls itself หนู).
+# Played by the robot while a voice reply is being made (Dashboard.progress)
+FILLERS = {"search": "กำลังค้นหาข้อมูลให้นะคะ", "wait": "รอแป๊บนึงนะคะ ยังหาอยู่ค่ะ"}
+
 PAT_LINES = (
     "โอยยยย ฟินจังเอาอีกๆ",
     "อุ๊ยยย ตรงนั้นแหละ ฟินมาก",
@@ -167,6 +171,7 @@ class Dashboard:
         self.held: list[str] = []  # announcements kept while nobody was at the desk
         self.archive_dir: str | None = None  # set to keep recent voice clips (see archive_clip)
         self._announce_seq = 0
+        self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
         self.stt = stt  # flybot.stt.AsrClient or None
         self.user, self.password = user, password
@@ -276,6 +281,40 @@ class Dashboard:
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return True
 
+    def filler(self, name: str) -> bytes | None:
+        """A short line the robot keeps and plays while it waits for a reply (FILLERS)."""
+        if name not in FILLERS or not self.tts:
+            return None
+        if name not in self._fillers:
+            self._fillers[name] = to_16k(self.tts.speak(FILLERS[name]))
+        return self._fillers[name]
+
+    @contextlib.contextmanager
+    def progress(self, first_wait_s: float = 8.0, every_s: float = 15.0):
+        """While a voice reply is being made, tell the robot on ``<base>/voice/progress`` to play a
+        filler: "search" once when a lookup starts (the yielded function), and "wait" after
+        ``first_wait_s`` and then every ``every_s`` until the reply is ready."""
+        stop = threading.Event()
+        sent: set[str] = set()
+
+        def say(name: str) -> None:
+            if name == "search" and name in sent:
+                return
+            sent.add(name)
+            self.bridge.client.publish(f"{self.bridge.base}/voice/progress", json.dumps({"say": name}), qos=0)
+
+        def waiting():
+            if not stop.wait(first_wait_s):
+                say("wait")
+                while not stop.wait(every_s):
+                    say("wait")
+
+        threading.Thread(target=waiting, name="voice-progress", daemon=True).start()
+        try:
+            yield say
+        finally:
+            stop.set()
+
     def archive_clip(self, pcm: bytes, info: dict) -> None:
         """Keep the last 30 voice clips with what happened to them (``<archive_dir>/``), so a turn
         that got no answer can be listened to and traced afterwards."""
@@ -359,6 +398,9 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path.startswith("/api/filler/"):
+                    wav = dash.filler(self.path.rsplit("/", 1)[-1])
+                    return self._send(200, wav, "audio/wav") if wav else self._json(404, {"error": "no such filler"})
                 if self.path.startswith("/api/announce/"):
                     with dash._lock:
                         wav = dash._announcements.get(self.path.rsplit("/", 1)[-1])
@@ -463,7 +505,8 @@ class Dashboard:
                 dash.add("you", {"text": text, "voice": True})
                 t_asr = time.monotonic()
                 try:
-                    reply = dash.bridge.cortex.ask(text)
+                    with dash.progress() as said:
+                        reply = dash.bridge.cortex.ask(text, on_lookup=lambda tool: said("search"))
                     t_llm = time.monotonic()
                     wav = to_16k(dash.tts.speak(reply)) if reply else b""
                 except Exception as e:

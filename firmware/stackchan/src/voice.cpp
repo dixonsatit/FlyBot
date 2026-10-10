@@ -313,6 +313,62 @@ static int voiceRequest() {
   return code;
 }
 
+// Filler lines (the bridge's /api/filler/<name>), fetched once and kept in PSRAM so they play
+// at once while a reply is still being made, without a request during the wait.
+static const char* const FILLER_NAMES[] = {"search", "wait"};
+static uint8_t* filler[2] = {nullptr, nullptr};
+static size_t fillerLen[2] = {0, 0};
+static volatile bool fillerFetching = false;
+static uint32_t fillerTried = 0;
+
+static void fetchFiller(int i) {
+  HTTPClient http;
+  http.setReuse(false);
+  String url = voiceUrl;
+  url.replace("/api/voice", String("/api/filler/") + FILLER_NAMES[i]);
+  http.begin(url);
+  http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
+  http.setConnectTimeout(5000);
+  http.setTimeout(20000);
+  if (http.GET() == 200) {
+    const int len = http.getSize();
+    uint8_t* buf = len > 0 && size_t(len) <= MAX_WAV ? (uint8_t*)ps_malloc(len) : nullptr;
+    if (buf) {
+      WiFiClient* s = http.getStreamPtr();
+      size_t got = 0;
+      for (uint32_t t0 = millis(); got < size_t(len) && millis() - t0 < 20000;) {
+        int n = s->read(buf + got, len - got);
+        if (n > 0) got += n;
+        else delay(2);
+      }
+      if (got == size_t(len)) {
+        amplify(buf, got);
+        filler[i] = buf, fillerLen[i] = got;
+      } else {
+        free(buf);
+      }
+    }
+  }
+  http.end();
+}
+
+static void fillerTask(void*) {
+  for (int i = 0; i < 2; ++i)
+    if (!filler[i]) fetchFiller(i);
+  fillerFetching = false;
+  vTaskDelete(nullptr);
+}
+
+void voiceProgress(const char* name) {
+  if (state != State::Waiting || M5.Speaker.isPlaying()) return;
+  for (int i = 0; i < 2; ++i) {
+    if (strcmp(name, FILLER_NAMES[i]) || !filler[i]) continue;
+    M5.Speaker.begin();  // the mic is off while waiting
+    M5.Speaker.setVolume(P.voiceVolume);
+    M5.Speaker.playWav(filler[i], fillerLen[i]);
+  }
+}
+
 static void sendTask(void*) {
   httpCode = voiceRequest();
   if (turnCount) lastTurn().code = httpCode, lastTurn().bytes = wavLen;
@@ -384,6 +440,12 @@ void voiceUpdate() {
   static State shown = State::Off;
   switch (state) {
     case State::Off:
+      if ((!filler[0] || !filler[1]) && !fillerFetching && voiceUrl.length() && WiFi.status() == WL_CONNECTED &&
+          (!fillerTried || millis() - fillerTried > 60000)) {
+        fillerTried = millis();
+        fillerFetching = true;
+        if (xTaskCreate(fillerTask, "filler", 6144, nullptr, 1, nullptr) != pdPASS) fillerFetching = false;
+      }
       if (httpCode) {  // a request just ended without a reply
         if (httpCode != 200 && httpCode != 204) M5_LOGW("voice: bridge answered %d", httpCode);
         avatar.setSpeechText(httpCode == 200 || httpCode == 204 ? "" : "voice error");
@@ -423,6 +485,7 @@ void voiceUpdate() {
     case State::Speaking: {
       static bool started = false;
       shown = state;
+      if (!started && M5.Speaker.isPlaying()) return;  // let a filler line finish first
       if (!started) {
         avatar.setSpeechText("");
         M5.Speaker.begin();

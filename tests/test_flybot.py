@@ -1104,6 +1104,25 @@ def test_robot_face_detections_keep_the_face_centred(gains):
     assert abs(c.pan - (10 + 0.7 * 0.3 * c.cfg.hfov_deg)) < 3  # turned right towards the face
 
 
+def test_voice_progress_says_searching_then_still_waiting(gains):
+    import json as _json
+    import time as _time
+    from flybot.dashboard import Dashboard
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    bridge.base, sent = "stackchan", []
+    bridge.client.publish = lambda topic, payload, qos=0: sent.append((topic, _json.loads(payload)["say"]))
+    dash = Dashboard(bridge, port=0)
+    with dash.progress(first_wait_s=0.05, every_s=0.05) as said:
+        said("search")
+        said("search")  # a second lookup in the same turn stays quiet
+        _time.sleep(0.13)
+    n = len(sent)
+    _time.sleep(0.12)
+    assert len(sent) == n  # nothing after the reply
+    assert sent[0] == ("stackchan/voice/progress", "search")
+    assert [w for _, w in sent].count("search") == 1 and "wait" in [w for _, w in sent]
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

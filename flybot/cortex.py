@@ -26,6 +26,9 @@ from .llm import LLM, Tool
 
 log = logging.getLogger(__name__)
 
+# Tools that fetch something over the network: the robot says it is searching while they run.
+LOOKUPS = {"places", "weather", "github_status", "upcoming_meetings", "look"}
+
 PERSONA = """You are น้องหวี่ (Nong Wee), a desk assistant robot (an M5Stack StackChan) for a hospital IT
 manager and full-stack developer (TypeScript, Vue/Nuxt, Hono, Drizzle, PostgreSQL, Kubernetes). You are a
 sharp IT and software sidekick: clever, playful and a little cheeky, you like to tease (gently, never
@@ -141,14 +144,15 @@ class Cortex:
     def on_chat(self, text: str) -> None:
         self._submit(self._chat, text)
 
-    def ask(self, text: str, timeout: float = 60.0) -> str:
+    def ask(self, text: str, timeout: float = 60.0, on_lookup: Callable[[str], None] | None = None) -> str:
         """Chat and wait for the reply (the robot's voice turn); runs on the cortex thread
-        like any other job, so it never overlaps a narration."""
+        like any other job, so it never overlaps a narration. ``on_lookup(tool)`` is called when
+        the model starts fetching something (LOOKUPS), so the robot can say it is searching."""
         done: Future = Future()
 
         def voice_chat():
             try:
-                done.set_result(self._chat(text, voice=True))
+                done.set_result(self._chat(text, voice=True, on_lookup=on_lookup))
             except Exception as e:
                 done.set_exception(e)
                 raise
@@ -230,12 +234,12 @@ class Cortex:
             self.emit_event({"type": "seen", "description": thai or screen, "screen": screen})
         return json.dumps({"seen": thai or screen}, ensure_ascii=False)
 
-    def _chat(self, text: str, voice: bool = False) -> str:
+    def _chat(self, text: str, voice: bool = False, on_lookup: Callable[[str], None] | None = None) -> str:
         # spoken replies: TTS time grows with length, so keep them to one sentence
         persona = self.persona + (VOICE_RULE if voice else "")
         notes_before = len(self.store.notes) if self.store else 0
         done: list[str] = []
-        reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done))
+        reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done, on_lookup))
         self._ensure_saved(text, notes_before)
         # History keeps only text, so note the actions taken: without them the next turn sees
         # "จดแล้ว" with no tool call behind it and the model redoes it (duplicate notes/reminders).
@@ -247,11 +251,16 @@ class Cortex:
         return reply
 
     @staticmethod
-    def _recording(tools: list[Tool], done: list[str]) -> list[Tool]:
+    def _recording(tools: list[Tool], done: list[str], on_lookup: Callable[[str], None] | None = None) -> list[Tool]:
         """The same tools, appending "name(args)" to ``done`` when one runs."""
         def wrap(t: Tool) -> Tool:
             def fn(**args):
                 done.append(f"{t.name}({json.dumps(args, ensure_ascii=False)})" if args else t.name)
+                if on_lookup and t.name in LOOKUPS:
+                    try:
+                        on_lookup(t.name)
+                    except Exception:
+                        log.exception("on_lookup failed")
                 return t.fn(**args)
             return Tool(t.name, t.description, t.parameters, fn)
         return [wrap(t) for t in tools]
