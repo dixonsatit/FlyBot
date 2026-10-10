@@ -334,7 +334,11 @@ def main(argv: list[str] | None = None) -> None:
             c = bridge.controller
             c.look_at(c.pan + (x - 0.5) * c.cfg.hfov_deg, c.tilt - (y - 0.5) * c.cfg.vfov_deg)
 
-        bridge.presence = Presence(bridge.snapshot, eyes, arrived, on_person=look_at_person)
+        def search(scan: bool) -> None:  # nobody in view: face the desk, now and then look around
+            c = bridge.controller
+            c.gesture("spin") if scan else c.look_at(c.cfg.home_pan, c.cfg.home_tilt)
+
+        bridge.presence = Presence(bridge.snapshot, eyes, arrived, on_person=look_at_person, on_search=search)
         bridge.presence.start()
         log.info("Presence: camera checks with %s", eyes.model)
     if args.location and bridge.cortex:

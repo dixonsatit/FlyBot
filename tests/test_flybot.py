@@ -1039,6 +1039,14 @@ def test_people_only_mode_ignores_motion_but_turns_to_a_face(gains):
     assert p.person_visible() and seen == [(0.8, 0.3)]
     assert p.parse("The person's shoulder is at the right edge.\n\nyes 0.9 0.7") and seen[-1] == (0.9, 0.7)
     assert not p.parse("There is a door and a wall.\n\nAnswer: no")
+    searches, clock = [], [0.0]
+    q = Presence(lambda t: b"jpeg", type("E", (), {"ask": lambda self, *a, **k: "no"})(),
+                 on_search=searches.append, check_s=30, scan_s=120, clock=lambda: clock[0])
+    for t in (0, 40, 80, 130):  # nobody in view: face the desk; look around at most every 2 min
+        clock[0] = t
+        q.note_motion()
+        q.tick()
+    assert searches == [True, False, False, True]
 
 
 def test_to_16k_resamples_wayu_wav():

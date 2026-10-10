@@ -26,11 +26,15 @@ class Presence:
     def __init__(self, snapshot: Callable[[float], bytes | None], vision_llm,
                  on_arrive: Callable[[float, float], None] | None = None, check_s: float = 30.0,
                  away_s: float = 300.0, clock: Callable[[], float] = time.time,
-                 on_person: Callable[[float, float], None] | None = None, track_s: float = 8.0):
+                 on_person: Callable[[float, float], None] | None = None, track_s: float = 8.0,
+                 on_search: Callable[[bool], None] | None = None, scan_s: float = 120.0):
         self.snapshot, self.vision = snapshot, vision_llm
         self.on_arrive = on_arrive  # (left_at, now) when the user comes back
         self.check_s, self.away_s, self.clock = check_s, away_s, clock
         self.on_person, self.track_s = on_person, track_s  # where the face is (0..1), re-checked while present
+        # nobody in view: look back at the desk (False), and every scan_s look around for them (True)
+        self.on_search, self.scan_s = on_search, scan_s
+        self._last_scan = -float("inf")
         self.present = False
         self.last_seen = -float("inf")  # wall clock, so meeting times compare
         self.left_at: float | None = None
@@ -85,7 +89,7 @@ class Presence:
         if self.present and now - self.last_seen > self.away_s:
             self.present, self.left_at = False, self.last_seen
             log.info("presence: user away since %s", time.strftime("%H:%M", time.localtime(self.last_seen)))
-        recent_motion = now - self._motion < 15.0
+        recent_motion = now - self._motion < 15.0 or now - self._last_check >= self.scan_s
         every = self.track_s if self.present else self.check_s
         if (recent_motion or self.present) and now - self._last_check >= every:
             self._last_check = now
@@ -95,6 +99,11 @@ class Presence:
                 log.warning("presence check failed: %s", e)
                 return
             log.info("presence check: %s", {None: "no frame from the robot", True: "person", False: "nobody"}[seen])
+            if seen is False and self.on_search:
+                scan = now - self._last_scan >= self.scan_s
+                if scan:
+                    self._last_scan = now
+                self.on_search(scan)
             if seen:
                 self._seen()
 
