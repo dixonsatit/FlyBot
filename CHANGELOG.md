@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.32.5 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Run without Claude, from faces, speech and handling
+  ([`b83d97a`](https://github.com/dixonsatit/FlyBot/commit/b83d97ab332ac92b4473a890ae4f35bba75ceffc))
+
+
 ## v0.32.4 (2026-10-10)
 
 ### Bug Fixes
