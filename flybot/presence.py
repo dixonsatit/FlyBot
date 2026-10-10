@@ -66,7 +66,7 @@ class Presence:
             self.left_at = None
 
     def person_visible(self) -> bool | None:
-        jpeg = self.snapshot(3.0)
+        jpeg = self.snapshot(10.0)  # through a home VPN relay a frame takes 3-7 s
         if not jpeg:
             return None
         reply = self.vision.ask("You check a desk robot's camera frame.", [], PROMPT, image_jpeg=jpeg)
