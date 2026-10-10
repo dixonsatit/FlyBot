@@ -1265,6 +1265,14 @@ def test_face_tracker_centres_the_face_and_pauses_for_manual_moves(gains, tmp_pa
     assert not t.step()  # someone moved the head on purpose
     now[0] += 16
     assert t.step()
+    Client.embed = lambda self, jpeg: []  # the person left
+    for _ in range(60):
+        c.step(s, 0.05)
+    now[0] += 31
+    assert not t.step()
+    for _ in range(80):
+        c.step(s, 0.05)
+    assert abs(c.pan - c.cfg.home_pan) < 3  # back to the desk, once
 
 
 def test_move_head_tool_turns_by_degrees_within_limits(gains):

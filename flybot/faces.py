@@ -187,6 +187,7 @@ class FaceTracker:
         self.on_seen = on_seen  # e.g. presence.note_face: a face means someone is there
         self.paused_until = 0.0  # a person or the assistant moved the head on purpose
         self.last_face = -float("inf")
+        self._homed = True  # the head already went back to the home pose after the last face
         self.last_seen: dict | None = None  # the box of the face last centred on, for the dashboard
         self._stop = threading.Event()
 
@@ -199,6 +200,9 @@ class FaceTracker:
         if now < self.paused_until or not self.active():
             return False
         recent = now - self.last_face < self.idle_s
+        if not recent and not self._homed and now - self.last_face > 30.0:
+            self._homed = True  # nobody for a while: face the desk again, once, then stay still
+            self.c.face(self.c.cfg.home_pan, self.c.cfg.home_tilt, hold_s=2.0)
         if recent:  # someone is in view: keep frames coming without a request each time
             self.stream(seconds=10.0, fps=self.fps)
         jpeg = self.snapshot(3.0, 0.0)
@@ -209,6 +213,7 @@ class FaceTracker:
         if not faces:
             return False
         self.last_face = self.clock()
+        self._homed = False
         x, y, w, h = faces[0]["box"]
         dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
         self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}

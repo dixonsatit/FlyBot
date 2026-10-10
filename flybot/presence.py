@@ -41,6 +41,7 @@ class Presence:
         self._motion = -float("inf")
         self.last_face = -float("inf")  # the robot's own face detector saw a face
         self._last_check = -float("inf")
+        self.use_vision = True  # False: faces come from the face tracker, no vision-model checks
         self._stop = threading.Event()
 
     # -- inputs (any thread) ----------------------------------------------------------
@@ -96,7 +97,7 @@ class Presence:
             self.present, self.left_at = False, self.last_seen
             log.info("presence: user away since %s", time.strftime("%H:%M", time.localtime(self.last_seen)))
         recent_motion = now - self._motion < 15.0 or now - self._last_check >= self.scan_s
-        if now - self.last_face < 10.0:  # the on-device detector has it: skip the vision model
+        if not self.use_vision or now - self.last_face < 10.0:  # the face tracker has it: no vision model
             return
         every = self.track_s if self.present else self.check_s
         if (recent_motion or self.present) and now - self._last_check >= every:

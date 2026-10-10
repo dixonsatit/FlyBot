@@ -508,6 +508,10 @@ def main(argv: list[str] | None = None) -> None:
 
         bridge.tracker = FaceTracker(bridge.snapshot, bridge.stream, client, bridge.controller, bridge.greeter,
                                      someone_around, on_seen=bridge.presence.note_face if bridge.presence else None)
+        if bridge.presence:
+            # A vision model's guess of where the person is turned the head to the left edge again and
+            # again (x=0.03 three times running); the face tracker's detections steer and decide instead.
+            bridge.presence.use_vision = False
         bridge.tracker.start()
         bridge.dashboard.tracker = bridge.tracker
         if bridge.cortex:
