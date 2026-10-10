@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.24.2 (2026-10-10)
+
+### Bug Fixes
+
+- **presence**: Log every check; any speech means someone is here
+  ([`3fa7979`](https://github.com/dixonsatit/FlyBot/commit/3fa79796989d80bde7fb82b160d9db60ffef1f4b))
+
+
 ## v0.24.1 (2026-10-10)
 
 ### Bug Fixes
