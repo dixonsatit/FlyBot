@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.20.0 (2026-10-10)
+
+### Features
+
+- **assistant**: Calendar answers cover the next 7 days
+  ([`f87ac82`](https://github.com/dixonsatit/FlyBot/commit/f87ac82fd506713960f4ee1cb1b2eb82aee82833))
+
+
 ## v0.19.3 (2026-10-10)
 
 ### Bug Fixes
