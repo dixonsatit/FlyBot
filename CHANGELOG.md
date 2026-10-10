@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.26.0 (2026-10-10)
+
+### Features
+
+- **voice**: Say "searching" while the assistant looks something up, and "still working" on long
+  waits
+  ([`0a6f31b`](https://github.com/dixonsatit/FlyBot/commit/0a6f31bd48011e8a9247dfd1f0c0ddfcdcf34728))
+
+
 ## v0.25.0 (2026-10-10)
 
 ### Features
