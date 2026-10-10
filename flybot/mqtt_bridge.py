@@ -349,6 +349,8 @@ def main(argv: list[str] | None = None) -> None:
 
         bridge.presence = Presence(snapshot, eyes, arrived, on_person=look_at_person, on_search=search)
         bridge.presence.start()
+        if bridge.cortex:
+            bridge.cortex.presence = bridge.presence
         log.info("Presence: camera checks with %s", eyes.model)
     if args.location and bridge.cortex:
         from .weather import Weather

@@ -117,6 +117,7 @@ class Cortex:
         self.github = None  # flybot.github.GitHubWatcher
         self.store = None  # flybot.assistant.AssistantStore: notes and reminders
         self.weather = None  # flybot.weather.Weather where the robot is
+        self.presence = None  # flybot.presence.Presence: whether the camera sees the user
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -133,7 +134,7 @@ class Cortex:
         if self.narrate and (kind in URGENT or now - self._last_narration >= self.narrate_cooldown_s):
             self._last_narration = now
             self._submit(self._narrate, event, brain or {})
-        if self.snapshot and kind == "presence":
+        if self.snapshot and self.narrate and kind == "presence":
             self._submit(self._describe)
 
     def on_chat(self, text: str) -> None:
@@ -185,6 +186,12 @@ class Cortex:
     @property
     def persona(self) -> str:
         persona = PERSONA.format(screen_rule=SCREEN_RULES[self.lang], now=now_line())
+        if self.presence:  # what the camera knows, so "เห็นผมไหม" isn't answered with "I have no camera"
+            ago = time.time() - self.presence.last_seen
+            persona += (" Your camera sees the user at the desk right now." if self.presence.present and ago < 60
+                        else " Your camera does not see anyone at the desk right now.")
+            if self.snapshot:
+                persona += " To answer about what you see, call the `look` tool."
         notes = self.store.notes[-30:] if self.store else []
         if notes:  # small enough to carry every turn, so "what did I tell you" needs no tool call
             persona += " Notes the user asked you to remember: " + "; ".join(f"[{n['id']}] {n['text']}" for n in notes)
@@ -211,7 +218,7 @@ class Cortex:
             self._out({"type": "narration", "event": event.get("type"), "text": thai, "screen": screen})
 
     def _describe(self) -> str:
-        jpeg = self.snapshot(2.0) if self.snapshot else None
+        jpeg = self.snapshot(10.0) if self.snapshot else None  # 3-7 s through a home VPN relay
         if not jpeg:
             return json.dumps({"error": "no camera frame"})
         prompt = DESCRIBE.format(screen_line=SCREEN_LINE[self.lang])
@@ -258,6 +265,14 @@ class Cortex:
         if len(fact) >= 4:
             log.info("remember (forced, the LLM didn't save it): %s", fact)
             self.store.remember(fact)
+
+    def _look(self, question: str) -> str:
+        jpeg = self.snapshot(10.0) if self.snapshot else None
+        if not jpeg:
+            return json.dumps({"error": "no camera frame"})
+        prompt = (f"This is a frame from your own camera (colour, 320x240). Answer in Thai, briefly: {question}\n"
+                  "Do not try to identify who a person is.")
+        return json.dumps({"seen": self.vision_llm.ask(self.persona, [], prompt, image_jpeg=jpeg)}, ensure_ascii=False)
 
     def _store(self):
         if not self.store:
@@ -336,9 +351,11 @@ class Cortex:
                  lambda text: c.say(text[:SCREEN_MAX[self.lang]]) or "shown"),
         ]
         if self.snapshot:
-            tools.append(Tool("look_and_describe", "Take a camera frame and describe what is in front of the robot.",
-                              {"type": "object", "properties": {}, "additionalProperties": False},
-                              self._describe))
+            tools.append(Tool("look", "Look through your camera now and answer a question about what you see "
+                              "(is the user there, what they wear or hold, what is on the desk...).",
+                              {"type": "object", "properties": {"question": {"type": "string"}},
+                               "required": ["question"], "additionalProperties": False},
+                              self._look))
         return tools
 
     def _set_personality(self, name: str) -> str:
