@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.34.0 (2026-10-12)
+
+### Features
+
+- **firmware**: MTLS client certificate and Cloudflare's roots for the public endpoint
+  ([`cafa35b`](https://github.com/dixonsatit/FlyBot/commit/cafa35b6e2f5dd72a3400db38ced529b7b32b89b))
+
+
 ## v0.33.0 (2026-10-10)
 
 ### Features
