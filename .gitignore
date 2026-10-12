@@ -8,3 +8,7 @@ firmware/*/.pio/
 firmware/*/src/flybot_config.h
 *.key
 firmware/*/backup/
+
+# the robot's mTLS identity (firmware/stackchan/certs/, generated header)
+firmware/stackchan/certs/
+firmware/stackchan/src/robot_cert.h

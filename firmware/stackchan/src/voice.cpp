@@ -296,8 +296,18 @@ static void amplify(uint8_t* w, size_t len) {
 
 // https:// (the public endpoint) checks the server against the hospital certificate's roots.
 static void beginUrl(HTTPClient& http, const String& url) {
-  if (url.startsWith("https://")) http.begin(url, KKH_ROOT_CA);
-  else http.begin(url);
+  if (!url.startsWith("https://")) http.begin(url);
+#if HAVE_ROBOT_CERT
+  else {  // mTLS at the public endpoint; this overload wants host, port and path apart
+    const int slash = url.indexOf('/', 8);
+    const String hostPort = slash < 0 ? url.substring(8) : url.substring(8, slash);
+    const int colon = hostPort.indexOf(':');
+    http.begin(colon < 0 ? hostPort : hostPort.substring(0, colon), colon < 0 ? 443 : hostPort.substring(colon + 1).toInt(),
+               slash < 0 ? String("/") : url.substring(slash), KKH_ROOT_CA, ROBOT_CLIENT_CERT, ROBOT_CLIENT_KEY);
+  }
+#else
+  else http.begin(url, KKH_ROOT_CA);
+#endif
 }
 
 // vTaskDelete() never returns, so locals' destructors don't run: the request lives in its own

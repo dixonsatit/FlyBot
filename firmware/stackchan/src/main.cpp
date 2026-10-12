@@ -561,6 +561,9 @@ static void joinNetwork() {
     const int slash = host.indexOf('/');
     wssClient.setPath(slash < 0 ? "/mqtt" : host.substring(slash));
     if (slash >= 0) host = host.substring(0, slash);
+#if HAVE_ROBOT_CERT
+    wssClient.setClientCert(ROBOT_CLIENT_CERT, ROBOT_CLIENT_KEY);  // the public endpoint asks for it (mTLS)
+#endif
     mqtt.setClient(wssClient);
   } else {
     mqtt.setClient(wifiClient);

@@ -11,6 +11,8 @@ class WsClient : public Client {
  public:
   explicit WsClient(const char* caCert) { tls_.setCACert(caCert); }
   void setPath(const String& path) { path_ = path; }
+  // mTLS: the robot's own certificate and key (PEM, must outlive this object)
+  void setClientCert(const char* cert, const char* key) { tls_.setCertificate(cert); tls_.setPrivateKey(key); }
 
   int connect(IPAddress ip, uint16_t port) override { return 0; }  // needs the host name (SNI)
   int connect(const char* host, uint16_t port) override;
