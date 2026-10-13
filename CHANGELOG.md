@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.34.1 (2026-10-13)
+
+### Bug Fixes
+
+- **k8s**: Build the broker's two-user password file, and a one-shot roll-out script
+  ([`0518b18`](https://github.com/dixonsatit/FlyBot/commit/0518b189b9bbc8dd4ee1ce7c0b8f3764e6bfcb9f))
+
+
 ## v0.34.0 (2026-10-12)
 
 ### Features
