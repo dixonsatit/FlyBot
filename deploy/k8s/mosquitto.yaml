@@ -64,9 +64,13 @@ spec:
             - -c
             - |
               clean() { printf %s "$1" | tr -d '\r\n'; }
-              mosquitto_passwd -b -c /mosquitto/auth/passwd "$BRIDGE_USER" "$(clean "$BRIDGE_PASSWORD")" &&
-              mosquitto_passwd -b /mosquitto/auth/passwd "$ROBOT_USER" "$(clean "$ROBOT_PASSWORD")" &&
-              cp /mosquitto/config/acl /mosquitto/auth/acl && chmod 0600 /mosquitto/auth/passwd /mosquitto/auth/acl
+              # one file per user, then joined: mosquitto_passwd 2.1 refused to add a second user to an
+              # existing file here ("Unable to open file ... for writing. File exists")
+              cd /mosquitto/auth && rm -f passwd bridge robot &&
+              mosquitto_passwd -b -c bridge "$BRIDGE_USER" "$(clean "$BRIDGE_PASSWORD")" &&
+              mosquitto_passwd -b -c robot "$ROBOT_USER" "$(clean "$ROBOT_PASSWORD")" &&
+              cat bridge robot > passwd && rm -f bridge robot &&
+              cp /mosquitto/config/acl acl && chmod 0600 passwd acl
           env:
             - name: BRIDGE_USER
               valueFrom: {configMapKeyRef: {name: flybot-config, key: FLYBOT_USERNAME}}
