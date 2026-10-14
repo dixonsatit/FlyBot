@@ -1316,6 +1316,27 @@ def test_dashboard_robot_login_csrf_and_lockout(gains):
         dash.stop()
 
 
+def test_dashboard_overview_voice_log_and_clips(gains, tmp_path):
+    import json as _json
+    from flybot.dashboard import Dashboard
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    dash = Dashboard(bridge, port=0)
+    dash.archive_dir = str(tmp_path)
+    dash.archive_clip(b"\0\0" * 1600, {"text": "สวัสดี", "wake": True, "outcome": "answered", "reply": "ครับ"})
+    (tmp_path.parent / "secret.wav").write_bytes(b"x")
+    dash.start()
+    try:
+        status, body = _http(dash.port, "GET", "/api/overview")
+        assert status == 200 and _json.loads(body)["robot"]["online"] is False
+        turns = _json.loads(_http(dash.port, "GET", "/api/voice/log")[1])["turns"]
+        assert turns[0]["text"] == "สวัสดี" and turns[0]["playable"]
+        assert _http(dash.port, "GET", "/api/voice/clip/" + turns[0]["clip"])[0] == 200
+        assert _http(dash.port, "GET", "/api/voice/clip/..%2Fsecret.wav")[0] == 404  # stays in the archive
+        assert _http(dash.port, "POST", "/api/speak", {"text": "ทดสอบ"})[0] == 400  # no TTS here
+    finally:
+        dash.stop()
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

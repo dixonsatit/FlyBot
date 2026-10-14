@@ -3,513 +3,385 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>FlyBot Dashboard</title>
+<title>น้องหวี่ · FlyBot</title>
 <style>
-  :root {
-    --bg: #f4f5f7; --card: #ffffff; --ink: #1d2330; --muted: #6b7385; --line: #e2e5eb;
-    --accent: #3b6ef6; --warm: #f08a24; --good: #1f9d63; --bad: #d64545; --face: #fdfdfd;
-    --bar-bg: #eef0f4;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #11141a; --card: #1a1f28; --ink: #e8ebf1; --muted: #9aa3b5; --line: #2a313d;
-            --accent: #6b93ff; --warm: #ffa04d; --good: #3cc68a; --bad: #ff6b6b; --face: #262c37; --bar-bg: #252b36; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.5 "Sarabun", "Noto Sans Thai", "Leelawadee UI", Tahoma, system-ui, sans-serif; }
-  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line);
-           background: var(--card); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
-  .pill { font-size: 13px; padding: 2px 10px; border-radius: 999px; background: var(--bar-bg); color: var(--muted); }
-  .pill.ok { color: var(--good); } .pill.off { color: var(--bad); }
-  .spacer { flex: 1; }
-  main { display: grid; gap: 16px; padding: 16px 20px; grid-template-columns: 300px minmax(320px, 1fr) 360px; }
-  @media (max-width: 1100px) { main { grid-template-columns: 1fr 1fr; } .col3 { grid-column: 1 / -1; } }
-  @media (max-width: 720px) { main { grid-template-columns: 1fr; padding: 12px; } }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
-  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
-  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-  .robot { position: relative; display: flex; justify-content: center; padding-top: 52px; }
-  .balloon { position: absolute; top: 0; left: 50%; transform: translateX(-50%); max-width: 100%;
-             background: var(--card); border: 2px solid var(--ink); border-radius: 16px; padding: 4px 14px;
-             font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
-  .balloon.hide { opacity: 0; }
-  .readout { display: flex; justify-content: space-around; font-variant-numeric: tabular-nums; color: var(--muted);
-             font-size: 13px; margin-top: 8px; }
-  .readout b { color: var(--ink); font-weight: 600; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
-  button, select, input[type=text] { font: inherit; color: var(--ink); background: var(--bar-bg);
-             border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
-  button { cursor: pointer; } button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-  button.on { background: var(--good); color: #fff; border-color: var(--good); }
-  button.rec { background: var(--bad); color: #fff; border-color: var(--bad); animation: pulse 1s infinite; }
-  @keyframes pulse { 50% { opacity: .6; } }
-  label.switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; }
-  canvas { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; border-radius: 8px; }
-  .hint { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
-  .bar { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 8px; font-size: 13px; margin: 5px 0; }
-  .bar .track { position: relative; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
-  .bar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 5px; transition: all .12s; }
-  .bar .mark { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--bad); }
-  .bar .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .feed { height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
-  .item { font-size: 14px; padding: 6px 10px; border-radius: 8px; background: var(--bar-bg); }
-  .item .t { color: var(--muted); font-size: 12px; margin-right: 6px; font-variant-numeric: tabular-nums; }
-  .item.you { background: var(--accent); color: #fff; align-self: flex-end; max-width: 85%; }
-  .item.you .t { color: #dfe6ff; }
-  .item.reply { border-left: 3px solid var(--accent); }
-  .item.narration { border-left: 3px solid var(--good); }
-  .item.event { border-left: 3px solid var(--warm); }
-  form.chat { display: flex; gap: 8px; margin-top: 10px; }
-  form.chat input { flex: 1; min-width: 0; }
-  .err { color: var(--bad); font-size: 13px; min-height: 18px; }
+:root {
+  --bg: #f4f5f7; --card: #fff; --ink: #1d2433; --mute: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --accent-ink: #fff; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; --chip: #eef2ff;
+  --you: #e0ecff; --bot: #f1f5f9; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --card: #171b23; --ink: #e6e9ef; --mute: #9aa3b2; --line: #2a303b;
+  --accent: #4f8cff; --chip: #1e2533; --you: #1d2b45; --bot: #1d222c; --shadow: none; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.danger { color: var(--bad); }
+button.on { background: var(--chip); border-color: var(--accent); }
+input, select, textarea { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); }
+.top { display: flex; align-items: center; gap: 10px; padding: 8px 16px; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 17px; margin-right: 4px; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 3px 9px; border-radius: 99px; background: var(--chip); color: var(--ink); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mute); }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+nav { display: flex; gap: 2px; padding: 0 12px; overflow-x: auto; }
+nav button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 9px 12px; color: var(--mute); }
+nav button.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+.tab { display: none; } .tab.active { display: block; }
+.grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+.card + .card { margin-top: 16px; }
+.card h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.card h2 .sp { flex: 1; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.hint { color: var(--mute); font-size: 13px; }
+.err { color: var(--bad); font-size: 13px; min-height: 1em; }
+.cam { position: relative; background: #000; border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3; display: grid; place-items: center; }
+.cam img { width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
+.cam .over { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; }
+.cam .over .pill { background: rgba(0,0,0,.55); color: #fff; }
+.cam .idle { color: #cbd5e1; text-align: center; padding: 20px; }
+.pad { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; }
+.pad button { padding: 8px 0; }
+.feed { height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px; }
+.msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; }
+.msg.you { align-self: flex-end; background: var(--you); border-bottom-right-radius: 4px; }
+.msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; }
+.msg.ev { align-self: center; background: none; color: var(--mute); font-size: 13px; padding: 2px; }
+.msg .t { display: block; font-size: 11px; color: var(--mute); margin-bottom: 2px; }
+.compose { display: flex; gap: 8px; margin-top: 8px; }
+.compose input { flex: 1; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--mute); font-weight: 500; font-size: 12.5px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 14px; }
+.kv dt { color: var(--mute); } .kv dd { margin: 0; }
+.tag { font-size: 12px; padding: 1px 7px; border-radius: 99px; background: var(--chip); }
+.tag.ok { color: var(--ok); } .tag.bad { color: var(--bad); } .tag.warn { color: var(--warn); }
+.boxes { position: absolute; inset: 0; pointer-events: none; }
+video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #000; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🧠 FlyBot</h1>
-  <span id="conn" class="pill">กำลังเชื่อมต่อ…</span>
-  <span id="llm" class="pill">LLM</span>
-  <span class="spacer"></span>
-  <button id="speak" title="อ่านคำตอบออกเสียง (เสียงไทยในเครื่อง ไม่ส่งข้อความออกไปไหน)">🔇 เสียงปิด</button>
-  <select id="voice" title="เสียงพูด"></select>
-  <label class="switch"><input type="checkbox" id="simOn"> หุ่นจำลอง</label>
+  <div class="top">
+    <span class="brand">🪰 น้องหวี่</span>
+    <div class="pills" id="pills"><span class="pill"><span class="dot"></span>กำลังโหลด…</span></div>
+  </div>
+  <nav id="tabs">
+    <button data-tab="home" class="active">หน้าหลัก</button>
+    <button data-tab="people">คนที่รู้จัก</button>
+    <button data-tab="memory">ความจำ</button>
+    <button data-tab="status">สถานะ &amp; แก้ปัญหา</button>
+    <button data-tab="settings">ตั้งค่า</button>
+  </nav>
 </header>
+
 <main>
-  <section class="col">
-    <div class="card">
-      <h2>หุ่น</h2>
-      <div class="robot">
-        <div id="balloon" class="balloon hide"></div>
-        <svg id="face" viewBox="0 0 220 160" width="220" height="160" aria-label="robot face">
-          <rect x="10" y="10" width="200" height="140" rx="26" fill="var(--face)" stroke="var(--ink)" stroke-width="3"/>
-          <g id="eyes"></g>
-          <path id="mouth" fill="none" stroke="var(--ink)" stroke-width="4" stroke-linecap="round"/>
-        </svg>
+<!-- ============ HOME: camera + control | conversation ============ -->
+<section class="tab active" id="tab-home">
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>กล้องหุ่น <span class="sp"></span><button id="camBtn" class="primary">เปิดกล้อง</button></h2>
+        <div class="cam" id="camBox">
+          <div class="idle" id="camIdle">กด "เปิดกล้อง" เพื่อดูภาพสด<br><span class="hint">แตะที่ภาพเพื่อหันไปทางนั้น</span></div>
+          <img id="cam" alt="" style="display:none">
+          <div class="over" id="camOver" style="display:none"><span class="pill" id="camFps">–</span><span class="pill" id="camWho" style="display:none"></span></div>
+        </div>
+        <div class="row" style="justify-content:space-between">
+          <div class="pad">
+            <span></span><button data-nudge="0,8" title="เงย">▲</button><span></span>
+            <button data-nudge="-15,0" title="หันซ้าย">◀</button><button data-home title="กลับท่ากลาง">●</button><button data-nudge="15,0" title="หันขวา">▶</button>
+            <span></span><button data-nudge="0,-8" title="ก้ม">▼</button><span></span>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <div class="row"><button data-gesture="nod">พยักหน้า</button><button data-gesture="shake">ส่ายหน้า</button><button data-gesture="spin">มองรอบๆ</button></div>
+            <div class="hint">หัวอยู่ที่ pan <b id="pan">0</b>° tilt <b id="tilt">0</b>° · หน้า <b id="expr">-</b></div>
+          </div>
+        </div>
+        <div class="err" id="errCam"></div>
       </div>
-      <div class="readout"><span>อารมณ์ <b id="expr">-</b></span><span>pan <b id="pan">0</b>°</span><span>tilt <b id="tilt">0</b>°</span></div>
+      <div class="card">
+        <h2>พูดผ่านหุ่น</h2>
+        <div class="compose"><input id="sayText" placeholder="พิมพ์ข้อความให้หุ่นพูดออกลำโพงทันที" maxlength="300"><button id="sayBtn">พูด</button></div>
+        <div class="err" id="errSay"></div>
+      </div>
     </div>
     <div class="card">
-      <h2>กล้องหุ่น</h2>
-      <div class="row"><button id="camBtn">เปิดกล้อง</button><span id="camInfo" class="hint"></span></div>
-      <img id="cam" alt="" title="แตะที่ภาพเพื่อหันไปทางนั้น"
-           style="display:none;width:100%;border-radius:10px;cursor:crosshair;background:#000">
-      <div class="row">
-        <button data-nudge="-15,0">◀</button><button data-nudge="0,8">▲</button>
-        <button data-nudge="0,-8">▼</button><button data-nudge="15,0">▶</button>
+      <h2>คุยกับน้องหวี่ <span class="sp"></span>
+        <button id="speak" title="อ่านคำตอบออกเสียงที่เครื่องนี้">🔇</button></h2>
+      <div class="feed" id="feed"></div>
+      <div class="compose">
+        <button id="mic" title="กดแล้วพูด">🎤</button>
+        <input id="msg" placeholder="พิมพ์สั่งงานหรือถาม แล้วกด Enter" autocomplete="off">
+        <button id="send" class="primary">ส่ง</button>
       </div>
-      <div class="err" id="errCam"></div>
+      <div class="err" id="errChat"></div>
     </div>
-    <div class="card" id="peopleCard" style="display:none">
-      <h2>คนที่รู้จัก</h2>
-      <div id="people" class="hint"></div>
-      <div class="row"><input id="staffQ" placeholder="ค้นชื่อพนักงาน" style="flex:1"><button id="staffFind">ค้น</button></div>
-      <div id="staffList"></div>
-      <div class="row"><input id="enCode" placeholder="รหัสพนักงาน" style="width:7em">
-        <input id="enName" placeholder="ชื่อ-สกุล (ถ้าไม่มีรหัส)" style="flex:1"><input id="enNick" placeholder="ชื่อเล่น" style="width:6em"></div>
+  </div>
+</section>
+
+<!-- ============ PEOPLE ============ -->
+<section class="tab" id="tab-people">
+  <div class="grid">
+    <div class="card">
+      <h2>ลงทะเบียน / ทดสอบจดจำ</h2>
+      <div class="row" id="staffRow"><input id="staffQ" placeholder="ค้นชื่อพนักงาน" style="flex:1"><button id="staffFind">ค้น</button></div>
+      <div id="staffList" class="row"></div>
+      <div class="row"><input id="enCode" placeholder="รหัสพนักงาน" style="width:8em">
+        <input id="enName" placeholder="ชื่อ-สกุล" style="flex:1"><input id="enNick" placeholder="ชื่อเล่น" style="width:7em"></div>
+      <div class="row">กล้อง <select id="camSource"><option value="webcam">webcam เครื่องนี้</option><option value="robot">กล้องหุ่น</option></select>
+        <select id="camDevice" style="display:none"></select></div>
       <label class="hint"><input type="checkbox" id="enConsent"> เจ้าของใบหน้ายินยอมให้เก็บข้อมูลใบหน้า (เวกเตอร์ ไม่เก็บรูป) เพื่อให้หุ่นทักทาย และลบได้ทุกเมื่อ</label>
-      <div style="position:relative"><video id="webcam" autoplay playsinline muted style="display:none;width:100%;border-radius:10px;transform:scaleX(-1)"></video>
-        <div id="faceBoxes" style="position:absolute;inset:0;pointer-events:none"></div></div>
-      <div class="row">กล้อง <select id="camSource"><option value="webcam">webcam เครื่องนี้</option>
-        <option value="robot">กล้องหุ่น</option></select><select id="camDevice" style="display:none"></select></div>
-      <div class="row"><button id="enroll">ลงทะเบียน (5 ภาพ)</button>
-        <button id="identify">ทดสอบจดจำ</button><span id="whoIs" class="hint"></span></div>
+      <div style="position:relative;margin-top:8px"><video id="webcam" autoplay playsinline muted style="display:none"></video><div class="boxes" id="faceBoxes"></div></div>
+      <div class="row"><button id="enroll" class="primary">ลงทะเบียน (5 ภาพ)</button><button id="identify">ทดสอบจดจำ</button><span id="whoIs" class="hint"></span></div>
       <div class="err" id="errPeople"></div>
     </div>
     <div class="card">
-      <h2>สั่งหุ่น</h2>
+      <h2>คนที่รู้จัก <span class="sp"></span><span class="hint" id="peopleCount"></span></h2>
+      <table><thead><tr><th>ชื่อ</th><th>ภาพ</th><th>ยินยอมเมื่อ</th><th></th></tr></thead><tbody id="people"></tbody></table>
+      <p class="hint">ข้อมูลใบหน้าเป็นข้อมูลอ่อนไหวตาม PDPA มาตรา 26: เก็บเฉพาะคนที่ยินยอม เก็บแค่เวกเตอร์ และลบได้ทันที</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MEMORY ============ -->
+<section class="tab" id="tab-memory">
+  <div class="grid">
+    <div class="card"><h2>โน้ตที่ให้จำไว้ <span class="sp"></span><span class="hint" id="noteCount"></span></h2>
+      <table><tbody id="notes"></tbody></table>
+      <p class="hint">สั่งเพิ่มได้ด้วยเสียงหรือแชท เช่น "จำไว้ว่า…"</p></div>
+    <div class="card"><h2>การเตือน <span class="sp"></span><span class="hint" id="remCount"></span></h2>
+      <table><tbody id="reminders"></tbody></table>
+      <p class="hint">เช่น "อีก 20 นาทีเตือนให้โทรหาฝ่ายจัดซื้อ" หรือ "พรุ่งนี้ 9 โมงเตือนประชุม"</p></div>
+  </div>
+</section>
+
+<!-- ============ STATUS ============ -->
+<section class="tab" id="tab-status">
+  <div class="grid">
+    <div>
+      <div class="card"><h2>ระบบ</h2><dl class="kv" id="sysKv"></dl></div>
+      <div class="card"><h2>Self-test ของหุ่น (ตอนเปิดเครื่อง)</h2><div id="selftest" class="hint">ยังไม่มีข้อมูล</div></div>
+    </div>
+    <div class="card"><h2>เสียงล่าสุดที่หุ่นได้ยิน <span class="sp"></span><button id="voiceReload">รีเฟรช</button></h2>
+      <p class="hint">ใช้ไล่ว่าทำไมหุ่นไม่ตอบ: กดเล่นเพื่อฟังเสียงที่หุ่นอัดได้จริง</p>
+      <table><thead><tr><th>เวลา</th><th>ได้ยินว่า</th><th>ผล</th><th></th></tr></thead><tbody id="voiceLog"></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section class="tab" id="tab-settings">
+  <div class="grid">
+    <div class="card"><h2>นิสัยและการทำงาน</h2>
       <div class="row">นิสัย <select id="personality"></select></div>
-      <div class="row">
-        <button id="game">เกมดึงความสนใจ</button>
-        <span id="gameScore" class="hint"></span>
-      </div>
-      <div class="row">
-        <button data-look="-60,10">หันซ้าย</button>
-        <button data-look="0,10">ตรงกลาง</button>
-        <button data-look="60,10">หันขวา</button>
-        <button data-look="0,28">เงยหน้า</button>
-      </div>
-      <div class="err" id="err1"></div>
+      <div class="row">เสียงอ่านที่เครื่องนี้ <select id="voice"></select></div>
+      <dl class="kv" id="cfgKv"></dl>
+      <div class="err" id="errSet"></div>
     </div>
-  </section>
-
-  <section class="col">
-    <div class="card">
-      <h2>โลกจำลอง (มองจากด้านบน)</h2>
-      <canvas id="world" width="640" height="380"></canvas>
-      <div class="row">
-        ความสูงวัตถุ <input type="range" id="el" min="-10" max="35" value="10">
-        <button data-act="auto">ให้วัตถุขยับเอง</button>
-      </div>
-      <div class="row">
-        <button data-act="rotate">หมุนตัวหุ่น 45°</button>
-        <button data-act="pet">ลูบหัว</button>
-        <button data-act="loom">ของพุ่งเข้าหา!</button>
-      </div>
-      <p class="hint">ลากจุดสีส้มเพื่อขยับวัตถุ — กล้อง (frame differencing) เห็นเฉพาะของที่ขยับ ถ้าวัตถุหยุดนิ่งหุ่นจะใช้ความจำ (PFL3) หันกลับไปทางเดิม · เส้นน้ำเงิน = ทิศที่หัวมอง, พื้นที่จาง = มุมกล้อง, เส้นเทา = ทิศตัวหุ่น · คำสั่งหัน (ปุ่ม/แชท) ตั้งเป้าในความจำ หุ่นจะหันไปเมื่อไม่เห็นวัตถุที่ขยับ (กด "ให้วัตถุขยับเอง" ปิดด้วยการลากวัตถุแล้วปล่อยนิ่ง)</p>
-      <div class="err" id="err2"></div>
+    <div class="card"><h2>ความเป็นส่วนตัว</h2>
+      <ul class="hint" style="margin:0;padding-left:18px">
+        <li>เสียงที่หุ่นอัดเก็บไว้ล่าสุด 30 คลิป ใช้ไล่ปัญหาเท่านั้น</li>
+        <li>ภาพจากกล้องส่งไปตรวจหน้าที่ DGX ในโรงพยาบาล ไม่ส่งออกนอก ยกเว้นตอนถาม "เห็นอะไร" (ส่งให้ LLM)</li>
+        <li>ข้อความสนทนาส่งไปที่ LLM ที่ตั้งไว้</li>
+      </ul>
     </div>
-    <div class="card">
-      <h2>สมองแมลงหวี่ (สด)</h2>
-      <div id="bars"></div>
-    </div>
-  </section>
-
-  <section class="col col3">
-    <div class="card">
-      <h2>เหตุการณ์ & แชท</h2>
-      <div id="feed" class="feed"></div>
-      <form class="chat" id="chat">
-        <button type="button" id="mic" title="กดแล้วพูดภาษาไทย (ใช้ระบบรู้จำเสียงของ Chrome: เสียงถูกส่งไปประมวลผลที่ Google)">🎤</button>
-        <input type="text" id="msg" placeholder="พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย" autocomplete="off">
-        <button class="primary" type="submit">ส่ง</button>
-      </form>
-      <div class="err" id="err3"></div>
-    </div>
-  </section>
+  </div>
+</section>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const BARS = [
-  ["HS", "HS ซ้าย/ขวา", -1, 1], ["VS", "VS ขึ้น/ลง", -1, 1],
-  ["LC10x", "LC10 ตำแหน่ง x", -1, 1], ["LC10y", "LC10 ตำแหน่ง y", -1, 1],
-  ["dopamine", "โดปามีน", 0, 1], ["octopamine", "ออกโทพามีน", 0, 1],
-  ["novelty", "ความแปลกใหม่", 0, 1], ["sleep_pressure", "ความง่วง", 0, 1],
-  ["LPLC2", "LPLC2 (ขยาย)", 0, 1.5], ["LC4", "LC4 (ความเร็วขอบ)", 0, 1.5], ["GF", "Giant Fiber", 0, 1.5, 1.0],
-];
-const EVENT_TEXT = { presence: "👀 มีอะไรใหม่เข้ามา", escape: "⚡ สะดุ้งหลบ", record: "🏆 สถิติใหม่ในเกม",
-                     meeting: "📅 เตือนประชุม", seen: "📷 เห็น" };
-let since = 0, state = null, lastTarget = 0, firstPoll = true;
-
-// ---- brain bars ---------------------------------------------------------------
-$("bars").innerHTML = BARS.map(([k, label, , , mark]) =>
-  `<div class="bar"><span>${label}</span><span class="track"><span class="fill" id="b_${k}"></span>${
-    mark ? `<span class="mark" style="left:${mark / 1.5 * 100}%"></span>` : ""}</span><span class="val" id="v_${k}">0</span></div>`).join("");
-function setBar(k, v, lo, hi) {
-  const el = $("b_" + k); if (!el) return;
-  v = Math.max(lo, Math.min(hi, v || 0));
-  if (lo < 0) { const mid = 50, w = Math.abs(v) / hi * 50;
-    el.style.left = (v < 0 ? mid - w : mid) + "%"; el.style.width = w + "%"; }
-  else { el.style.left = "0"; el.style.width = (v - lo) / (hi - lo) * 100 + "%"; }
-  $("v_" + k).textContent = (v || 0).toFixed(2);
-}
-
-// ---- face ---------------------------------------------------------------------
-function drawFace(expr, pan, tilt) {
-  const dx = Math.max(-1, Math.min(1, pan / 60)) * 18, dy = -Math.max(-1, Math.min(1, tilt / 30)) * 10;
-  const ex = [75 + dx, 145 + dx], ey = 70 + dy, ink = "var(--ink)";
-  let eyes = "", mouth = "";
-  if (expr === "happy") {
-    eyes = ex.map(x => `<path d="M${x - 14} ${ey + 4} Q${x} ${ey - 14} ${x + 14} ${ey + 4}" fill="none" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
-    mouth = `M${88 + dx} ${112 + dy} Q${110 + dx} ${132 + dy} ${132 + dx} ${112 + dy}`;
-  } else if (expr === "sleepy") {
-    eyes = ex.map(x => `<line x1="${x - 13}" y1="${ey + 2}" x2="${x + 13}" y2="${ey + 2}" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
-    mouth = `M${100 + dx} ${118 + dy} Q${110 + dx} ${122 + dy} ${120 + dx} ${118 + dy}`;
-  } else if (expr === "alert") {
-    eyes = ex.map((x, i) => `<circle cx="${x}" cy="${ey + 4}" r="13" fill="${ink}"/>` +
-      `<line x1="${x - 16}" y1="${ey - 20 + (i ? -6 : 0)}" x2="${x + 16}" y2="${ey - 20 + (i ? 0 : -6)}" stroke="${ink}" stroke-width="5" stroke-linecap="round"/>`).join("");
-    mouth = `M${92 + dx} ${120 + dy} L${128 + dx} ${120 + dy}`;
-  } else { // curious
-    eyes = ex.map(x => `<circle cx="${x}" cy="${ey}" r="10" fill="${ink}"/>`).join("");
-    mouth = `M${96 + dx} ${116 + dy} Q${110 + dx} ${124 + dy} ${124 + dx} ${116 + dy}`;
-  }
-  if (talking && Math.floor(performance.now() / 140) % 2) {  // mouth opens and closes while speaking
-    mouth = `M${96 + dx} ${114 + dy} Q${110 + dx} ${134 + dy} ${124 + dx} ${114 + dy} Q${110 + dx} ${118 + dy} ${96 + dx} ${114 + dy}`;
-  }
-  $("eyes").innerHTML = eyes; $("mouth").setAttribute("d", mouth);
-}
-
-// ---- world view ---------------------------------------------------------------
-const cv = $("world"), ctx = cv.getContext("2d");
-const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const origin = () => ({ x: cv.width / 2, y: cv.height - 34, r: Math.min(cv.width / 2, cv.height) - 52 });
-const toXY = (az, r) => { const o = origin(), a = (az - 90) * Math.PI / 180;
-  return { x: o.x + Math.cos(a) * r, y: o.y + Math.sin(a) * r }; };
-function drawWorld() {
-  if (!state) return;
-  const s = state.sim, o = origin(), line = css("--line"), muted = css("--muted");
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.strokeStyle = line; ctx.lineWidth = 1;
-  for (const f of [0.33, 0.66, 1]) { ctx.beginPath(); ctx.arc(o.x, o.y, o.r * f, Math.PI, 2 * Math.PI); ctx.stroke(); }
-  ctx.fillStyle = muted; ctx.font = "13px sans-serif"; ctx.textAlign = "center";
-  for (const az of [-90, -45, 0, 45, 90]) { const p = toXY(az, o.r + 16); ctx.fillText(az + "°", p.x, p.y + 4); }
-  const gaze = s.body_yaw + s.pan;
-  // camera field of view (62 deg)
-  ctx.fillStyle = css("--accent") + "22"; ctx.beginPath(); ctx.moveTo(o.x, o.y);
-  ctx.arc(o.x, o.y, o.r, (gaze - 31 - 90) * Math.PI / 180, (gaze + 31 - 90) * Math.PI / 180); ctx.closePath(); ctx.fill();
-  const ray = (az, color, w, len) => { const p = toXY(az, len); ctx.strokeStyle = color; ctx.lineWidth = w;
-    ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(p.x, p.y); ctx.stroke(); };
-  ray(s.body_yaw, muted, 3, o.r * 0.45);
-  ray(gaze, css("--accent"), 4, o.r);
-  // target
-  const t = toXY(s.target.az, o.r * 0.78), size = s.looming ? 26 : 12;
-  ctx.fillStyle = css("--warm"); ctx.beginPath(); ctx.arc(t.x, t.y, size, 0, 2 * Math.PI); ctx.fill();
-  ctx.fillStyle = muted; ctx.fillText(`วัตถุ ${s.target.az.toFixed(0)}° / สูง ${s.target.el.toFixed(0)}°`, t.x, t.y - size - 8);
-  // robot
-  ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(o.x, o.y, 14, 0, 2 * Math.PI); ctx.fill();
-  if (s.petting) { ctx.fillText("✋", o.x + 28, o.y + 4); }
-  if (!s.enabled) { ctx.fillStyle = muted; ctx.fillText("หุ่นจำลองปิดอยู่ (เปิดที่มุมขวาบน)", o.x, 24); }
-}
-function pointerAz(ev) {
-  const r = cv.getBoundingClientRect(), o = origin();
-  const x = (ev.clientX - r.left) * cv.width / r.width - o.x, y = (ev.clientY - r.top) * cv.height / r.height - o.y;
-  return Math.max(-120, Math.min(120, Math.atan2(x, -y) * 180 / Math.PI));
-}
-let dragging = false;
-cv.addEventListener("pointerdown", (e) => { dragging = true; cv.setPointerCapture(e.pointerId); moveTarget(e); });
-cv.addEventListener("pointermove", (e) => { if (dragging) moveTarget(e); });
-cv.addEventListener("pointerup", () => { dragging = false; });
-function moveTarget(e) {
-  const now = performance.now(); if (now - lastTarget < 80) return; lastTarget = now;
-  post("/api/sim", { target: { az: pointerAz(e), el: +$("el").value } }, "err2");
-}
-$("el").addEventListener("input", () => state && post("/api/sim", { target: { az: state.sim.target.az, el: +$("el").value } }, "err2"));
-
-// ---- Thai speech: Wayu voices on the server (/api/tts) or this browser's voices --------
-let speakOn = false, talking = false, thaiVoices = [], serverVoices = [], serverDefault = null, audioEl = null;
-const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const local = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
                 set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
-function fillVoices() {
-  const sel = $("voice"), previous = sel.value;
-  sel.innerHTML = "";
-  if (serverVoices.length) {
-    const g = document.createElement("optgroup"); g.label = "Wayu (เซิร์ฟเวอร์ในโรงพยาบาล)";
-    serverVoices.forEach(v => g.append(new Option(v.name, "wayu:" + v.id))); sel.append(g);
-  }
-  if (thaiVoices.length) {
-    const g = document.createElement("optgroup"); g.label = "เครื่องนี้";
-    thaiVoices.forEach(v => g.append(new Option(v.name.replace(/\s*\(.*\)/, "") +
-      (/Enhanced|Premium/.test(v.name) ? " ★" : ""), "local:" + v.name))); sel.append(g);
-  }
-  // the user's saved choice, else the server's default voice, else whatever was showing
-  const values = [...sel.options].map(o => o.value);
-  const pick = [store.get("flybot-voice"), serverDefault && "wayu:" + serverDefault, previous].find(v => values.includes(v));
-  if (pick) sel.value = pick;
-  sel.style.display = values.length ? "" : "none";
-  $("speak").title = values.length ? "อ่านคำตอบออกเสียงภาษาไทย (ไม่ส่งข้อความออกนอกเครือข่าย)"
-    : "ไม่มีเสียงพูดภาษาไทย: ตั้ง --tts-url (Wayu) หรือติดตั้งเสียงไทยในเครื่อง";
-}
-function loadVoices() {
-  if (!("speechSynthesis" in window)) return;
-  thaiVoices = speechSynthesis.getVoices().filter(v => v.lang.replace("_", "-").startsWith("th"))
-    .sort((a, b) => (b.localService - a.localService) || (/Enhanced|Premium/.test(b.name) - /Enhanced|Premium/.test(a.name)));
-  fillVoices();  // voices often arrive after the first call (voiceschanged)
-}
-if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-fetch("/api/tts/voices").then(r => r.json()).then(d => {
-  serverVoices = d.voices || [];
-  serverDefault = d.default || null;
-  fillVoices();
-}).catch(() => {});
-function stopSpeaking() {
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
-  if (audioEl) { audioEl.pause(); audioEl = null; }
-  talking = false;
-}
-function setSpeak(on) {
-  speakOn = on; $("speak").textContent = on ? "🔊 เสียงเปิด" : "🔇 เสียงปิด"; $("speak").className = on ? "on" : "";
-  if (!on) stopSpeaking();
-}
-$("speak").onclick = () => { setSpeak(!speakOn); if (speakOn) say("เปิดเสียงแล้วครับ"); };  // the click unlocks audio
-$("voice").onchange = (e) => { store.set("flybot-voice", e.target.value); if (speakOn) { stopSpeaking(); say("สวัสดีครับ"); } };
-const clean = (t) => t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "").trim();
-async function say(text) {
-  if (!speakOn || !text || talking) return;  // never pile up a backlog of old lines
-  const choice = $("voice").value || "";
-  if (choice.startsWith("wayu:")) {
-    talking = true;
-    try {
-      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ text: clean(text), voice: choice.slice(5) }) });
-      if (!r.ok) throw new Error((await r.json()).error || r.statusText);
-      const url = URL.createObjectURL(await r.blob());
-      audioEl = new Audio(url);
-      audioEl.onended = audioEl.onerror = () => { talking = false; URL.revokeObjectURL(url); audioEl = null; };
-      await audioEl.play();
-    } catch (e) { talking = false; $("err3").textContent = "เสียงพูด: " + e.message; }
-    return;
-  }
-  const u = new SpeechSynthesisUtterance(clean(text));
-  u.lang = "th-TH"; u.rate = 1.0; u.pitch = 1.15;
-  const v = thaiVoices.find(v => "local:" + v.name === choice) || thaiVoices[0]; if (v) u.voice = v;
-  u.onstart = () => { talking = true; }; u.onend = u.onerror = () => { talking = false; };
-  speechSynthesis.speak(u);
-}
-
-// ---- feed ---------------------------------------------------------------------
-function addFeed(f) {
-  const div = document.createElement("div"); let cls = "item", text = "";
-  if (f.kind === "you") { cls += " you"; text = f.data.text; }
-  else if (f.kind === "chat") { cls += " " + (f.data.type || "reply"); text = (f.data.type === "narration" ? "🧠 " : "🤖 ") + f.data.text; }
-  else if (f.kind === "event") { cls += " event"; const d = f.data;
-    text = d.type === "meeting" ? d.message.replace(/^StackChan:\s*/, "📅 ") :
-           d.type === "seen" ? "📷 เห็น: " + (d.description || d.screen) : (EVENT_TEXT[d.type] || d.type); }
-  div.className = cls; div.innerHTML = `<span class="t">${f.at}</span>`; div.append(document.createTextNode(text));
-  if (!firstPoll) {  // speak new replies, narrations and meeting reminders (not the backlog on page load)
-    if (f.kind === "chat" && !f.data.voice) say(f.data.text);  // the robot speaks voice replies itself
-    else if (f.kind === "event" && f.data.type === "meeting") say(f.data.message.replace(/^StackChan:\s*/, ""));
-  }
-  const feed = $("feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
-  feed.append(div); if (atBottom) feed.scrollTop = feed.scrollHeight;
-}
-
-// ---- API ----------------------------------------------------------------------
 async function post(path, body, errId) {
   try {
     const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const j = await r.json(); $(errId).textContent = r.ok ? "" : (j.error || r.statusText);
-  } catch (e) { $(errId).textContent = "ส่งไม่สำเร็จ: " + e.message; }
+    const j = await r.json().catch(() => ({}));
+    if (errId) $(errId).textContent = r.ok ? "" : (j.error || r.statusText);
+    return r.ok ? j : null;
+  } catch (e) { if (errId) $(errId).textContent = "ส่งไม่สำเร็จ: " + e.message; return null; }
 }
-document.querySelectorAll("[data-look]").forEach(b => b.onclick = () => {
-  const [pan, tilt] = b.dataset.look.split(",").map(Number); post("/api/look", { pan, tilt }, "err1"); });
-// ---- camera: one frame after another while the card is on; tap or nudge to turn the head ----
+const ago = (s) => s == null ? "–" : s < 60 ? `${Math.round(s)} วิ` : s < 3600 ? `${Math.round(s / 60)} นาที` : `${Math.round(s / 3600)} ชม.`;
+
+// ---- tabs (remembered) --------------------------------------------------------
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
+  local.set("flybot-tab", name);
+  if (name === "people") loadPeople();
+  if (name === "memory") loadNotes();
+  if (name === "status") loadVoiceLog();
+}
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+showTab(local.get("flybot-tab") || "home");
+
+// ---- status bar + status page (every 3 s) -------------------------------------
+let ov = null;
+function pill(dot, text, title) { return `<span class="pill" title="${esc(title || "")}"><span class="dot ${dot}"></span>${esc(text)}</span>`; }
+async function loadOverview() {
+  try { ov = await (await fetch("/api/overview")).json(); } catch { return; }
+  const r = ov.robot, p = r.power || {};
+  const bat = p.battery >= 0 ? ` · แบต ${p.battery}%${p.charging ? "⚡" : ""}` : "";
+  $("pills").innerHTML = [
+    pill(r.online ? "ok" : "bad", r.online ? "หุ่นออนไลน์" + bat : "หุ่นออฟไลน์" + (r.seen_ago != null ? ` (${ago(r.seen_ago)})` : ""), "ข้อความล่าสุดจากหุ่น"),
+    pill(ov.presence.on ? (ov.presence.present ? "ok" : "") : "", ov.presence.present ? "มีคนอยู่" : "ไม่มีคน"),
+    ov.faces.who ? pill("ok", "เห็น: " + (ov.faces.who.nick || ov.faces.who.name)) : "",
+    pill(ov.llm.on ? "ok" : "bad", ov.llm.on ? (ov.llm.model || "LLM") : "LLM ปิด"),
+    ov.voice.recording ? pill("warn", "กำลังอัดคำปลุก") : "",
+  ].join("");
+  $("pan").textContent = r.pan; $("tilt").textContent = r.tilt; $("expr").textContent = r.expression;
+  if (ov.faces.who) { $("camWho").style.display = ""; $("camWho").textContent = "👤 " + (ov.faces.who.nick || ov.faces.who.name); }
+  else $("camWho").style.display = "none";
+  const kv = [
+    ["หุ่น", r.online ? `ออนไลน์ (ล่าสุด ${ago(r.seen_ago)} ที่แล้ว)` : `ออฟไลน์ (ล่าสุด ${ago(r.seen_ago)} ที่แล้ว)`],
+    ["แบตเตอรี่", p.battery >= 0 ? `${p.battery}% ${p.charging ? "(กำลังชาร์จ)" : ""}` : "ไม่ทราบ"],
+    ["MQTT broker", ov.broker ? "เชื่อมต่อ" : "หลุด"],
+    ["LLM", ov.llm.on ? `${ov.llm.model} (${ov.llm.kind})` : "ปิด"],
+    ["ถอดเสียง / เสียงพูด", `${ov.voice.stt ? "มี" : "ไม่มี"} / ${ov.voice.tts ? "มี" : "ไม่มี"}`],
+    ["จดจำใบหน้า", ov.faces.on ? `เปิด · ลงทะเบียน ${ov.faces.people} คน${ov.faces.tracking ? " · กำลังตามหน้า" : ""}` : "ปิด"],
+    ["ตรวจว่ามีคนอยู่", ov.presence.on ? (ov.presence.present ? "มีคนอยู่" : "ไม่มีคน") : "ปิด"],
+    ["ปฏิทิน / GitHub", `${ov.calendar ? "ต่อแล้ว" : "–"} / ${ov.github ? "ต่อแล้ว" : "–"}`],
+    ["ความจำ", `โน้ต ${ov.assistant.notes} · เตือน ${ov.assistant.reminders}`],
+  ];
+  $("sysKv").innerHTML = kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  const st = r.selftest || {};
+  if (st.items) $("selftest").innerHTML = `<div class="row">${st.items.map((i) =>
+      `<span class="tag ${i.ok ? "ok" : "bad"}" title="${esc(i.detail)}">${i.ok ? "✓" : "✗"} ${esc(i.name)}</span>`).join("")}</div>
+      <div class="hint">${st.at ? new Date(st.at * 1000).toLocaleString("th-TH") : ""}</div>`;
+  $("cfgKv").innerHTML = [["คำปลุก (regex)", ov.voice.wake], ["คุยต่อได้โดยไม่เรียกชื่อ", ov.voice.follow_up_s + " วินาทีหลังตอบ"]]
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd><code>${esc(v)}</code></dd>`).join("");
+  const sel = $("personality");
+  if (!sel.options.length) for (const n of ov.personalities) sel.add(new Option(n, n));
+  if (document.activeElement !== sel) sel.value = ov.personality;
+}
+$("personality").onchange = (e) => post("/api/personality", { name: e.target.value }, "errSet");
+loadOverview(); setInterval(loadOverview, 3000);
+
+// ---- camera: frames streamed while open; tap or the pad to turn the head --------
 let camOn = false, camFrames = 0, camSince = 0, camUrl = null;
-const HFOV = 62, VFOV = 49;  // ControllerConfig.hfov_deg / vfov_deg
+const HFOV = 62, VFOV = 49;
 async function camLoop() {
   while (camOn) {
     try {
       const r = await fetch("/api/camera.jpg?t=" + Date.now());
-      if (!r.ok) { $("errCam").textContent = r.status === 504 ? "หุ่นไม่ส่งภาพมา (ออฟไลน์?)" : r.statusText;
-                   await new Promise(ok => setTimeout(ok, 2000)); continue; }
+      if (!r.ok) { $("errCam").textContent = r.status === 504 ? "หุ่นไม่ส่งภาพมา (ออฟไลน์?)" : r.statusText; await sleep(2000); continue; }
       const url = URL.createObjectURL(await r.blob());
       $("cam").src = url; if (camUrl) URL.revokeObjectURL(camUrl); camUrl = url;
       $("errCam").textContent = ""; camFrames++;
-      $("camInfo").textContent = (camFrames / ((Date.now() - camSince) / 1000)).toFixed(1) + " ภาพ/วินาที";
-    } catch (e) { $("errCam").textContent = e.message; await new Promise(ok => setTimeout(ok, 2000)); }
+      $("camFps").textContent = (camFrames / ((Date.now() - camSince) / 1000)).toFixed(1) + " ภาพ/วิ";
+    } catch (e) { $("errCam").textContent = e.message; await sleep(2000); }
   }
 }
 $("camBtn").onclick = () => {
-  camOn = !camOn; $("cam").style.display = camOn ? "block" : "none";
+  camOn = !camOn;
+  $("cam").style.display = $("camOver").style.display = camOn ? "" : "none";
+  $("camIdle").style.display = camOn ? "none" : "";
   $("camBtn").textContent = camOn ? "ปิดกล้อง" : "เปิดกล้อง";
   if (camOn) { camFrames = 0; camSince = Date.now(); camLoop(); }
 };
-const headNow = () => [Number($("pan").textContent) || 0, Number($("tilt").textContent) || 0];
-document.querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => {
-  const [dp, dt] = b.dataset.nudge.split(",").map(Number), [p, t] = headNow();
+const head = () => [ov ? ov.robot.pan : 0, ov ? ov.robot.tilt : 0];
+document.querySelectorAll("[data-nudge]").forEach((b) => b.onclick = () => {
+  const [dp, dt] = b.dataset.nudge.split(",").map(Number), [p, t] = head();
   post("/api/face", { pan: p + dp, tilt: t + dt }, "errCam"); });
+document.querySelector("[data-home]").onclick = () => post("/api/face", { pan: 0, tilt: 10 }, "errCam");
+document.querySelectorAll("[data-gesture]").forEach((b) => b.onclick = () =>
+  post("/api/chat", { text: { nod: "พยักหน้าหน่อย", shake: "ส่ายหน้าหน่อย", spin: "มองรอบๆ หน่อย" }[b.dataset.gesture] }, "errCam"));
 $("cam").onclick = (e) => {
-  const r = e.target.getBoundingClientRect(), [p, t] = headNow();
-  const dx = (e.clientX - r.left) / r.width - 0.5, dy = (e.clientY - r.top) / r.height - 0.5;
-  post("/api/face", { pan: p + dx * HFOV, tilt: t - dy * VFOV }, "errCam");
+  const r = e.target.getBoundingClientRect(), [p, t] = head();
+  post("/api/face", { pan: p + ((e.clientX - r.left) / r.width - 0.5) * HFOV, tilt: t - ((e.clientY - r.top) / r.height - 0.5) * VFOV }, "errCam");
 };
-// ---- people the robot knows (faces) ----
-async function loadPeople() {
-  const j = await (await fetch("/api/people")).json();
-  $("peopleCard").style.display = j.on ? "block" : "none";
-  $("staffQ").parentElement.style.display = j.staff ? "flex" : "none";
-  $("people").innerHTML = j.people.length ? "" : "ยังไม่มีใครลงทะเบียน";
-  for (const p of j.people) {
-    const d = document.createElement("div"); d.className = "row";
-    d.textContent = `${p.name} (${p.nick || "-"}) ${p.position || ""} · ${p.samples} ภาพ · ยินยอม ${p.consent_at} `;
-    const b = document.createElement("button"); b.textContent = "ลบ";
-    b.onclick = async () => {  // two clicks: no modal dialog
-      if (b.textContent !== "ยืนยันลบ") { b.textContent = "ยืนยันลบ"; return; }
-      await post("/api/people/forget", { id: p.id }, "errPeople"); loadPeople(); };
-    d.append(b); $("people").append(d);
-  }
-}
-$("staffFind").onclick = async () => {
-  const j = await (await fetch("/api/staff?q=" + encodeURIComponent($("staffQ").value))).json();
-  $("staffList").innerHTML = "";
-  for (const s of j.staff) {
-    const b = document.createElement("button");
-    b.textContent = `${s.code} ${s.name} ${s.surname} (${s.nicname || "-"}) ${s.office_name || ""}`;
-    b.onclick = () => { $("enCode").value = s.code; $("enName").value = s.name + " " + s.surname; $("enNick").value = s.nicname || ""; };
-    $("staffList").append(b);
-  }
+$("sayBtn").onclick = async () => {
+  const t = $("sayText").value.trim(); if (!t) return;
+  if (await post("/api/speak", { text: t }, "errSay")) { $("sayText").value = ""; $("errSay").textContent = "ส่งให้หุ่นพูดแล้ว"; }
 };
-// The browser's camera: enroll and test without the robot (needs https or localhost).
-let stream = null, identifying = false;
-async function openWebcam() {  // asked for on the first enroll / test, so the permission prompt has a reason
-  if (stream) return true;
-  const id = $("camDevice").value;
-  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, ...(id ? { deviceId: { exact: id } } : {}) } }); }
-  catch (err) { $("errPeople").textContent = "เปิดกล้องไม่ได้: " + err.message; return false; }
-  $("webcam").srcObject = stream; $("webcam").style.display = "block";
-  await new Promise(ok => $("webcam").readyState >= 2 ? ok() : ($("webcam").onloadeddata = ok));
-  const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
-  if (cams.length > 1 && !$("camDevice").options.length) {  // labels are known only after permission
-    for (const c of cams) $("camDevice").add(new Option(c.label || c.deviceId.slice(0, 8), c.deviceId));
-    $("camDevice").value = stream.getVideoTracks()[0].getSettings().deviceId || cams[0].deviceId;
-    $("camDevice").style.display = "inline-block";
-  }
-  return true;
-}
-function closeWebcam() {
-  identifying = false; if (stream) stream.getTracks().forEach(t => t.stop());
-  stream = null; $("webcam").style.display = "none"; $("faceBoxes").innerHTML = "";
-}
-$("camDevice").onchange = async () => { closeWebcam(); await openWebcam(); };
-$("camSource").onchange = () => { if ($("camSource").value === "robot") closeWebcam(); };
-function grab() {
-  const v = $("webcam"), c = document.createElement("canvas");
-  c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0);
-  return c.toDataURL("image/jpeg", 0.85);
-}
-const sleep = ms => new Promise(ok => setTimeout(ok, ms));
-$("enroll").onclick = async () => {
-  if (!$("enConsent").checked) { $("errPeople").textContent = "ต้องติ๊กยืนยันความยินยอมก่อน"; return; }
-  const body = { code: $("enCode").value, name: $("enName").value, nick: $("enNick").value, consent: true, images: [] };
-  if ($("camSource").value === "robot") {
-    body.source = "robot"; $("errPeople").textContent = "หันหน้าเข้ากล้องหุ่น ... กำลังถ่าย 5 ภาพ";
-  } else {
-    if (!await openWebcam()) return;
-    for (let i = 3; i > 0; i--) { $("errPeople").textContent = `มองกล้อง ... ${i}`; await sleep(700); }
-    for (let i = 0; i < 5; i++) { $("errPeople").textContent = `ถ่ายภาพ ${i + 1}/5 ... ขยับหน้าเล็กน้อย`; body.images.push(grab()); await sleep(700); }
-    $("errPeople").textContent = "กำลังส่งไปจดจำ ...";
-  }
-  await post("/api/people/enroll", body, "errPeople");
-  if (!$("errPeople").textContent) $("errPeople").textContent = "ลงทะเบียนแล้ว";
-  $("enConsent").checked = false; loadPeople();
-};
-$("identify").onclick = async () => {
-  if (!identifying && !await openWebcam()) return;
-  identifying = !identifying; $("identify").textContent = identifying ? "หยุดทดสอบ" : "ทดสอบจดจำ";
-  while (identifying) {
-    try {
-      const r = await fetch("/api/people/identify", { method: "POST", headers: { "Content-Type": "application/json" },
-                                                       body: JSON.stringify({ image: grab() }) });
-      const j = await r.json(); $("faceBoxes").innerHTML = "";
-      if (!r.ok) { $("errPeople").textContent = j.error || r.statusText; break; }
-      $("whoIs").textContent = j.faces.length ? j.faces.map(f => (f.name ? `${f.nick || f.name}` : "ไม่รู้จัก") + ` (${f.score})`).join(", ") : "ไม่เห็นหน้า";
-      for (const f of j.faces) {  // the preview is mirrored, so mirror the boxes too
-        const d = document.createElement("div"), [x, y, w, h] = f.box;
-        d.style.cssText = `position:absolute;left:${(1 - x - w) * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%;` +
-          `border:3px solid ${f.name ? "#2c2" : "#e33"};border-radius:6px;color:#fff;font:bold 14px sans-serif;text-shadow:0 0 3px #000`;
-        d.textContent = f.name ? (f.nick || f.name) : "?"; $("faceBoxes").append(d);
-      }
-    } catch (e) { $("errPeople").textContent = e.message; break; }
-    await sleep(800);
-  }
-  identifying = false; $("identify").textContent = "ทดสอบจดจำ";
-};
-loadPeople();
-document.querySelectorAll("[data-act]").forEach(b => b.onclick = () => post("/api/sim", { action: b.dataset.act }, "err2"));
-$("simOn").onchange = (e) => post("/api/sim", { enabled: e.target.checked }, "err2");
-$("game").onclick = () => post("/api/game", { on: !(state && state.game_on) }, "err1");
-$("personality").onchange = (e) => post("/api/personality", { name: e.target.value }, "err1");
-$("chat").onsubmit = (e) => { e.preventDefault(); const m = $("msg").value.trim(); if (!m) return;
-  $("msg").value = ""; post("/api/chat", { text: m }, "err3"); };
+$("sayText").onkeydown = (e) => { if (e.key === "Enter") $("sayBtn").click(); };
 
-// ---- Thai speech input -----------------------------------------------------------
-// With an ASR server (--stt-url, the hospital's asr-typhoon) the page records 16 kHz PCM and
-// /api/stt transcribes it inside the network. Without one it falls back to Chrome's
-// recognizer, whose audio goes to Google.
-const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recorder = null;
-const MIC_HINT = "พิมพ์หรือกด 🎤 แล้วพูด เช่น หันขวาหน่อย";
-function micTitle() {
-  $("mic").title = state && state.stt ? "กดเพื่อพูด กดอีกครั้งเพื่อส่ง (ถอดเสียงด้วย ASR ในโรงพยาบาล)"
-    : Recognition ? "กดแล้วพูด (ใช้ตัวรู้จำเสียงของ Chrome: เสียงถูกส่งไปประมวลผลที่ Google)"
-    : "ไม่มีบริการถอดเสียง: ตั้ง --stt-url หรือใช้ Chrome";
+// ---- conversation feed --------------------------------------------------------
+const EVENT_TEXT = { presence: "👀 มีคนเข้ามา", escape: "⚡ สะดุ้งหลบ", record: "🏆 สถิติใหม่", meeting: "📅 เตือนประชุม",
+                     seen: "📷 เห็น", enrolled: "👤 ลงทะเบียนหน้าใหม่", body: "🤲 มีคนจับตัวหุ่น" };
+let since = 0, firstPoll = true;
+function addFeed(f) {
+  const d = f.data || {}; let cls = "msg ", text = "";
+  if (f.kind === "you") { cls += "you"; text = (d.voice ? "🎙 " : "") + d.text; }
+  else if (f.kind === "chat") { cls += d.type === "narration" ? "ev" : "bot"; text = d.text; }
+  else if (f.kind === "event") { cls += "ev";
+    text = d.type === "meeting" ? (d.message || "").replace(/^StackChan:\s*/, "📅 ") : d.type === "body" ? "🤲 " + (d.kind || "")
+         : d.type === "enrolled" ? "👤 ลงทะเบียน " + (d.name || "") : (EVENT_TEXT[d.type] || d.type); }
+  else return;
+  const el = document.createElement("div"); el.className = cls;
+  el.innerHTML = `<span class="t">${esc(f.at)}</span>`; el.append(document.createTextNode(text || ""));
+  const feed = $("feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  feed.append(el); if (atBottom || firstPoll) feed.scrollTop = feed.scrollHeight;
+  if (!firstPoll && f.kind === "chat" && !d.voice) say(d.text);
 }
-function sendHeard(text) {
-  if (text && text.trim()) { $("msg").value = ""; post("/api/chat", { text: text.trim() }, "err3"); }
-  else $("err3").textContent = "ไม่ได้ยินเสียงพูด ลองใหม่อีกครั้ง";
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state?since=" + since)).json();
+    for (const f of s.feed) { addFeed(f); since = Math.max(since, f.id); }
+    firstPoll = false;
+  } catch {}
+  setTimeout(poll, 700);
 }
-function toPcm16k(chunks, rate) {  // Float32 at the context rate -> Int16 at 16 kHz (linear interpolation)
+poll();
+function send(text) {
+  text = (text ?? $("msg").value).trim(); if (!text) return;
+  $("msg").value = ""; post("/api/chat", { text }, "errChat");
+}
+$("send").onclick = () => send();
+$("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) send(); };
+
+// ---- speak replies at this computer (Wayu on the server, or the browser's Thai voice) ----
+let speakOn = false, talking = false, thaiVoices = [], serverVoices = [], serverDefault = null;
+function fillVoices() {
+  const sel = $("voice"); sel.innerHTML = "";
+  for (const v of serverVoices) sel.add(new Option("Wayu · " + v.name, "wayu:" + v.id));
+  for (const v of thaiVoices) sel.add(new Option("เครื่องนี้ · " + v.name, "local:" + v.name));
+  const values = [...sel.options].map((o) => o.value);
+  const pick = [local.get("flybot-voice"), serverDefault && "wayu:" + serverDefault].find((v) => values.includes(v));
+  if (pick) sel.value = pick;
+}
+if ("speechSynthesis" in window) {
+  const load = () => { thaiVoices = speechSynthesis.getVoices().filter((v) => v.lang.replace("_", "-").startsWith("th")); fillVoices(); };
+  load(); speechSynthesis.onvoiceschanged = load;
+}
+fetch("/api/tts/voices").then((r) => r.json()).then((d) => { serverVoices = d.voices || []; serverDefault = d.default; fillVoices(); }).catch(() => {});
+$("voice").onchange = (e) => local.set("flybot-voice", e.target.value);
+$("speak").onclick = () => { speakOn = !speakOn; $("speak").textContent = speakOn ? "🔊" : "🔇"; $("speak").classList.toggle("on", speakOn); };
+async function say(text) {
+  if (!speakOn || !text || talking) return;
+  const choice = $("voice").value || "";
+  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, "").trim();
+  if (choice.startsWith("wayu:")) {
+    talking = true;
+    try {
+      const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, voice: choice.slice(5) }) });
+      const url = URL.createObjectURL(await r.blob()), a = new Audio(url);
+      a.onended = a.onerror = () => { talking = false; URL.revokeObjectURL(url); };
+      await a.play();
+    } catch { talking = false; }
+  } else if ("speechSynthesis" in window) {
+    const u = new SpeechSynthesisUtterance(text); u.lang = "th-TH";
+    const v = thaiVoices.find((v) => "local:" + v.name === choice); if (v) u.voice = v;
+    u.onend = u.onerror = () => { talking = false; }; talking = true; speechSynthesis.speak(u);
+  }
+}
+
+// ---- talk from this computer: record, the hospital ASR transcribes, sent as chat ----
+let recorder = null;
+function toPcm16k(chunks, rate) {
   const n = chunks.reduce((a, c) => a + c.length, 0), src = new Float32Array(n);
   let o = 0; for (const c of chunks) { src.set(c, o); o += c.length; }
   const ratio = rate / 16000, out = new Int16Array(Math.floor(n / ratio));
@@ -520,92 +392,146 @@ function toPcm16k(chunks, rate) {  // Float32 at the context rate -> Int16 at 16
   }
   return out;
 }
-async function recordToAsr() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-  const ctx = new AudioContext(), src = ctx.createMediaStreamSource(stream);
-  const proc = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
-  proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  src.connect(proc); proc.connect(ctx.destination);
-  $("mic").className = "rec"; $("msg").placeholder = "กำลังฟัง… กด 🎤 อีกครั้งเมื่อพูดจบ"; $("err3").textContent = "";
-  const timer = setTimeout(() => recorder && recorder.stop(), 15000);  // the ASR takes at most 60 s
-  recorder = { stop: async () => {
-    clearTimeout(timer); recorder = null;
-    proc.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
-    const rate = ctx.sampleRate; await ctx.close();
-    $("mic").className = ""; $("msg").placeholder = "กำลังถอดเสียง…";
-    try {
-      const r = await fetch("/api/stt", { method: "POST", headers: { "Content-Type": "application/octet-stream" },
-                                          body: toPcm16k(chunks, rate).buffer });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || r.statusText);
-      sendHeard(j.text);
-    } catch (e) { $("err3").textContent = "ถอดเสียงไม่สำเร็จ: " + e.message; }
-    $("msg").placeholder = MIC_HINT;
-  } };
-}
-function recognizeInBrowser() {
-  rec = new Recognition(); rec.lang = "th-TH"; rec.interimResults = true; rec.continuous = false;
-  let finalText = "";
-  rec.onstart = () => { $("mic").className = "rec"; $("err3").textContent = ""; $("msg").placeholder = "กำลังฟัง… พูดได้เลย"; };
-  rec.onresult = (e) => {
-    let interim = "";
-    for (const r of e.results) (r.isFinal ? (finalText = r[0].transcript) : (interim += r[0].transcript));
-    $("msg").value = finalText || interim;
-  };
-  rec.onerror = (e) => {
-    $("err3").textContent = { "not-allowed": "ไม่ได้รับอนุญาตให้ใช้ไมค์ (อนุญาตที่ไอคอนแถบที่อยู่ของ browser)",
-      "no-speech": "ไม่ได้ยินเสียง ลองใหม่อีกครั้ง", "network": "รู้จำเสียงไม่ได้: ต้องต่ออินเทอร์เน็ต (ใช้บริการของ Google)",
-      "audio-capture": "ไม่พบไมค์" }[e.error] || ("รู้จำเสียงผิดพลาด: " + e.error);
-  };
-  rec.onend = () => { rec = null; $("mic").className = ""; $("msg").placeholder = MIC_HINT; if (finalText.trim()) sendHeard(finalText); };
-  rec.start();
-}
 $("mic").onclick = async () => {
   if (recorder) return recorder.stop();
-  if (rec) return rec.stop();
-  if (!window.isSecureContext) {  // browsers only open the microphone on https:// or localhost
-    $("err3").textContent = "ไมค์ใช้ได้เฉพาะ https หรือ localhost: รัน kubectl -n flybot port-forward svc/flybot-dashboard 8080 แล้วเปิด http://localhost:8080";
-    return;
-  }
-  if (speakOn) stopSpeaking();  // don't let the robot hear itself
-  try {
-    if (state && state.stt) await recordToAsr();
-    else if (Recognition) recognizeInBrowser();
-    else $("err3").textContent = "ไม่มีบริการถอดเสียง: ตั้ง --stt-url หรือใช้ Chrome";
-  } catch (e) {
-    $("mic").className = "";
-    $("err3").textContent = e.name === "NotAllowedError" ? "ไม่ได้รับอนุญาตให้ใช้ไมค์ (อนุญาตที่ไอคอนแถบที่อยู่ของ browser)"
-      : "เปิดไมค์ไม่ได้: " + e.message;
-  }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch (e) { $("errChat").textContent = "ใช้ไมค์ไม่ได้: " + e.message; return; }
+  const ctx = new AudioContext(), src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
+  proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(proc); proc.connect(ctx.destination);
+  $("mic").classList.add("on"); $("msg").placeholder = "กำลังฟัง… กด 🎤 อีกครั้งเมื่อพูดจบ";
+  const timer = setTimeout(() => recorder && recorder.stop(), 15000);
+  recorder = { stop: async () => {
+    clearTimeout(timer); recorder = null; proc.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop());
+    const rate = ctx.sampleRate; await ctx.close();
+    $("mic").classList.remove("on"); $("msg").placeholder = "กำลังถอดเสียง…";
+    try {
+      const r = await fetch("/api/stt", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: toPcm16k(chunks, rate).buffer });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
+      j.text && j.text.trim() ? send(j.text) : ($("errChat").textContent = "ไม่ได้ยินเสียงพูด ลองใหม่");
+    } catch (e) { $("errChat").textContent = "ถอดเสียงไม่สำเร็จ: " + e.message; }
+    $("msg").placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
+  } };
 };
 
-async function poll() {
-  try {
-    const r = await fetch("/api/state?since=" + since); state = await r.json();
-    state.feed.forEach(addFeed); if (state.feed.length) since = state.feed[state.feed.length - 1].id;
-    firstPoll = false;
-    micTitle();
-    $("conn").textContent = state.connected ? "MQTT เชื่อมต่อแล้ว" : "MQTT ไม่ได้เชื่อมต่อ";
-    $("conn").className = "pill " + (state.connected ? "ok" : "off");
-    $("llm").textContent = state.llm ? "LLM เปิด" : "LLM ปิด"; $("llm").className = "pill " + (state.llm ? "ok" : "");
-    $("simOn").checked = state.sim.enabled;
-    const expr = (state.face && state.face.expression) || "curious", sv = state.servo || {};
-    drawFace(expr, sv.pan_angle || 0, sv.tilt_angle || 0);
-    $("expr").textContent = { curious: "อยากรู้", alert: "ตื่นตัว", happy: "มีความสุข", sleepy: "ง่วง" }[expr] || expr;
-    $("pan").textContent = (sv.pan_angle || 0).toFixed(0); $("tilt").textContent = (sv.tilt_angle || 0).toFixed(0);
-    $("balloon").textContent = state.text || ""; $("balloon").className = "balloon" + (state.text ? "" : " hide");
-    const b = state.brain || {};
-    BARS.forEach(([k, , lo, hi]) => setBar(k, k === "LC10x" ? (b.LC10 || [0])[0] : k === "LC10y" ? (b.LC10 || [0, 0])[1] : b[k], lo, hi));
-    const sel = $("personality");
-    if (!sel.options.length) state.personalities.forEach(p => sel.add(new Option(p, p)));
-    if (document.activeElement !== sel) sel.value = state.personality;
-    $("game").className = state.game_on ? "on" : "";
-    $("gameScore").textContent = state.game ? `ต่อเนื่อง ${state.game.streak}s · ดีที่สุด ${state.game.best}s` : "";
-    drawWorld();
-  } catch (e) { $("conn").textContent = "เชื่อมต่อ dashboard ไม่ได้"; $("conn").className = "pill off"; }
-  setTimeout(poll, 150);
+// ---- memory -------------------------------------------------------------------
+async function loadNotes() {
+  const j = await (await fetch("/api/notes")).json();
+  $("noteCount").textContent = j.notes.length + " รายการ"; $("remCount").textContent = j.reminders.length + " รายการ";
+  $("notes").innerHTML = j.notes.length ? "" : `<tr><td class="hint">ยังไม่มีโน้ต</td></tr>`;
+  for (const n of [...j.notes].reverse()) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(n.text)}<div class="hint">${esc(n.at || "")}</div></td><td style="width:1%"></td>`;
+    tr.lastChild.append(confirmButton("ลบ", () => post("/api/notes/forget", { id: n.id }).then(loadNotes))); $("notes").append(tr);
+  }
+  $("reminders").innerHTML = j.reminders.length ? "" : `<tr><td class="hint">ไม่มีการเตือนที่รออยู่</td></tr>`;
+  for (const r of j.reminders) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(r.text)}<div class="hint">${esc((r.due || "").replace("T", " ").slice(0, 16))}</div></td><td style="width:1%"></td>`;
+    tr.lastChild.append(confirmButton("ยกเลิก", () => post("/api/reminders/cancel", { id: r.id }).then(loadNotes))); $("reminders").append(tr);
+  }
 }
-poll();
+function confirmButton(label, action) {  // two clicks, no modal dialog
+  const b = document.createElement("button"); b.className = "danger"; b.textContent = label;
+  b.onclick = () => { if (b.dataset.armed) action(); else { b.dataset.armed = 1; b.textContent = "ยืนยัน" + label; setTimeout(() => { delete b.dataset.armed; b.textContent = label; }, 3000); } };
+  return b;
+}
+
+// ---- voice log (why didn't it answer?) -----------------------------------------
+const OUTCOME = { answered: ["ok", "ตอบแล้ว"], call: ["ok", "เรียกชื่อ"], "no-name": ["warn", "ไม่ได้เรียกชื่อ"], empty: ["bad", "ไม่มีเสียงพูด"] };
+async function loadVoiceLog() {
+  const j = await (await fetch("/api/voice/log")).json();
+  $("voiceLog").innerHTML = j.turns.length ? "" : `<tr><td colspan="4" class="hint">ยังไม่มี</td></tr>`;
+  for (const t of j.turns) {
+    const [cls, label] = OUTCOME[t.outcome] || ["", t.outcome];
+    const when = (t.clip || "").replace(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d).*/, "$3/$2 $4:$5:$6");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="hint">${esc(when)}</td><td>${esc(t.text || "–")}${t.reply ? `<div class="hint">→ ${esc(t.reply)}</div>` : ""}</td>
+      <td><span class="tag ${cls}">${esc(label)}</span></td><td></td>`;
+    if (t.playable) { const b = document.createElement("button"); b.textContent = "▶"; b.onclick = () => new Audio("/api/voice/clip/" + t.clip).play(); tr.lastChild.append(b); }
+    $("voiceLog").append(tr);
+  }
+}
+$("voiceReload").onclick = loadVoiceLog;
+
+// ---- people: enroll with the webcam (or the robot camera), test, forget ------------
+let stream = null, identifying = false;
+async function loadPeople() {
+  const j = await (await fetch("/api/people")).json();
+  $("staffRow").style.display = j.staff ? "" : "none";
+  $("peopleCount").textContent = j.on ? j.people.length + " คน" : "ระบบจดจำหน้าปิดอยู่";
+  $("people").innerHTML = j.people.length ? "" : `<tr><td colspan="4" class="hint">ยังไม่มีใครลงทะเบียน</td></tr>`;
+  for (const p of j.people) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(p.name)}${p.nick ? ` <span class="tag">${esc(p.nick)}</span>` : ""}<div class="hint">${esc(p.position || "")}</div></td>
+      <td>${p.samples}</td><td class="hint">${esc(p.consent_at || "")}</td><td style="width:1%"></td>`;
+    tr.lastChild.append(confirmButton("ลบ", () => post("/api/people/forget", { id: p.id }, "errPeople").then(loadPeople)));
+    $("people").append(tr);
+  }
+}
+$("staffFind").onclick = async () => {
+  const j = await (await fetch("/api/staff?q=" + encodeURIComponent($("staffQ").value))).json();
+  $("staffList").innerHTML = "";
+  for (const s of j.staff) {
+    const b = document.createElement("button");
+    b.textContent = `${s.name} ${s.surname} (${s.nicname || "-"}) · ${s.office_name || ""}`;
+    b.onclick = () => { $("enCode").value = s.code; $("enName").value = s.name + " " + s.surname; $("enNick").value = s.nicname || ""; };
+    $("staffList").append(b);
+  }
+};
+async function openWebcam() {
+  if (stream) return true;
+  const id = $("camDevice").value;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, ...(id ? { deviceId: { exact: id } } : {}) } }); }
+  catch (e) { $("errPeople").textContent = "เปิดกล้องไม่ได้: " + e.message; return false; }
+  $("webcam").srcObject = stream; $("webcam").style.display = "block";
+  await new Promise((ok) => $("webcam").readyState >= 2 ? ok() : ($("webcam").onloadeddata = ok));
+  const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+  if (cams.length > 1 && !$("camDevice").options.length) {
+    for (const c of cams) $("camDevice").add(new Option(c.label || c.deviceId.slice(0, 8), c.deviceId));
+    $("camDevice").value = stream.getVideoTracks()[0].getSettings().deviceId || cams[0].deviceId;
+    $("camDevice").style.display = "";
+  }
+  return true;
+}
+function closeWebcam() { identifying = false; if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; $("webcam").style.display = "none"; $("faceBoxes").innerHTML = ""; }
+$("camDevice").onchange = async () => { closeWebcam(); await openWebcam(); };
+$("camSource").onchange = () => { if ($("camSource").value === "robot") closeWebcam(); };
+function grab() { const v = $("webcam"), c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight; c.getContext("2d").drawImage(v, 0, 0); return c.toDataURL("image/jpeg", 0.85); }
+$("enroll").onclick = async () => {
+  if (!$("enConsent").checked) { $("errPeople").textContent = "ต้องติ๊กยืนยันความยินยอมก่อน"; return; }
+  const body = { code: $("enCode").value, name: $("enName").value, nick: $("enNick").value, consent: true, images: [] };
+  if ($("camSource").value === "robot") { body.source = "robot"; $("errPeople").textContent = "หันหน้าเข้ากล้องหุ่น… กำลังถ่าย 5 ภาพ"; }
+  else {
+    if (!await openWebcam()) return;
+    for (let i = 3; i > 0; i--) { $("errPeople").textContent = `มองกล้อง… ${i}`; await sleep(700); }
+    for (let i = 0; i < 5; i++) { $("errPeople").textContent = `ถ่ายภาพ ${i + 1}/5 ขยับหน้าเล็กน้อย`; body.images.push(grab()); await sleep(700); }
+    $("errPeople").textContent = "กำลังส่งไปจดจำ…";
+  }
+  if (await post("/api/people/enroll", body, "errPeople")) $("errPeople").textContent = "ลงทะเบียนแล้ว";
+  $("enConsent").checked = false; loadPeople();
+};
+$("identify").onclick = async () => {
+  if (!identifying && !await openWebcam()) return;
+  identifying = !identifying; $("identify").textContent = identifying ? "หยุดทดสอบ" : "ทดสอบจดจำ";
+  while (identifying) {
+    try {
+      const r = await fetch("/api/people/identify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: grab() }) });
+      const j = await r.json(); $("faceBoxes").innerHTML = "";
+      if (!r.ok) { $("errPeople").textContent = j.error || r.statusText; break; }
+      $("whoIs").textContent = j.faces.length ? j.faces.map((f) => (f.name ? f.nick || f.name : "ไม่รู้จัก") + ` (${f.score})`).join(", ") : "ไม่เห็นหน้า";
+      for (const f of j.faces) {
+        const d = document.createElement("div"), [x, y, w, h] = f.box;
+        d.style.cssText = `position:absolute;left:${(1 - x - w) * 100}%;top:${y * 100}%;width:${w * 100}%;height:${h * 100}%;` +
+          `border:3px solid ${f.name ? "#16a34a" : "#dc2626"};border-radius:6px;color:#fff;font:600 14px sans-serif;text-shadow:0 0 3px #000;padding:2px`;
+        d.textContent = f.name ? (f.nick || f.name) : "?"; $("faceBoxes").append(d);
+      }
+    } catch (e) { $("errPeople").textContent = e.message; break; }
+    await sleep(800);
+  }
+  identifying = false; $("identify").textContent = "ทดสอบจดจำ";
+};
 </script>
 </body>
 </html>

@@ -274,6 +274,14 @@ class Dashboard:
                     raise ValueError("kind must be positive or negative, and the bridge needs --state-dir")
                 self.collect = {"kind": kind, "left": max(1, min(int(body.get("count", 50)), 500)), "saved": 0}
             log.info("wake word recording: %s", self.collect)
+        elif path == "/api/speak":  # say this through the robot's speaker now, even if nobody is there
+            text = str(body.get("text", "")).strip()[:300]
+            if not text or not self.announce(text, force=True):
+                raise ValueError("nothing to say, or no TTS")
+        elif path == "/api/notes/forget":
+            return {"ok": self._store().forget(int(body.get("id", 0)))}
+        elif path == "/api/reminders/cancel":
+            return {"ok": self._store().cancel(int(body.get("id", 0)))}
         elif path == "/api/people/enroll":
             return self.enroll(body)
         elif path == "/api/people/identify":  # a frame from the browser's camera: who is in it?
@@ -362,6 +370,55 @@ class Dashboard:
             yield say
         finally:
             stop.set()
+
+    def _store(self):
+        store = getattr(self.bridge.cortex, "store", None) if self.bridge.cortex else None
+        if not store:
+            raise ValueError("assistant memory is off (--state-dir)")
+        return store
+
+    def overview(self) -> dict:
+        """Everything the status bar and the status page show, in one call."""
+        b, c = self.bridge, self.bridge.controller
+        cortex, presence, greeter = b.cortex, getattr(b, "presence", None), getattr(b, "greeter", None)
+        seen = getattr(b, "robot_seen", 0.0)
+        who = greeter.who() if greeter else None
+        llm = getattr(cortex, "llm", None)
+        store = getattr(cortex, "store", None) if cortex else None
+        return {
+            "now": time.time(),
+            "robot": {"online": bool(seen) and time.time() - seen < 15, "seen_ago": round(time.time() - seen) if seen else None,
+                      "power": getattr(b, "power", {}), "selftest": getattr(b, "selftest", {}),
+                      "pan": round(c.pan, 1), "tilt": round(c.tilt, 1), "expression": c.mb.expression},
+            "broker": b.client.is_connected(),
+            "presence": {"on": presence is not None, "present": bool(presence and presence.present),
+                         "last_seen": presence.last_seen if presence and presence.last_seen > 0 else None},
+            "faces": {"on": bool(self.faces), "people": len(self.faces[1].people) if self.faces else 0,
+                      "who": who and {k: who.get(k) for k in ("name", "nick", "position")},
+                      "tracking": bool(self.tracker and time.monotonic() - self.tracker.last_face < 5)},
+            "llm": {"on": cortex is not None, "model": getattr(llm, "model", None),
+                    "kind": type(llm).__name__ if llm else None},
+            "voice": {"stt": self.stt is not None, "tts": self.tts is not None, "wake": self.wake.pattern,
+                      "follow_up_s": self.follow_up_s, "recording": self.collect},
+            "assistant": {"notes": len(store.notes) if store else 0, "reminders": len(store.reminders) if store else 0},
+            "calendar": bool(cortex and getattr(cortex, "calendar", None)),
+            "github": bool(cortex and getattr(cortex, "github", None)),
+            "personality": c.personality, "personalities": sorted(PERSONALITIES),
+        }
+
+    def voice_log(self, n: int = 40) -> list[dict]:
+        """The latest voice turns with what happened to each (newest first); clips that still exist
+        can be played from /api/voice/clip/<name>."""
+        if not self.archive_dir:
+            return []
+        try:
+            with open(os.path.join(self.archive_dir, "log.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(line) for line in f.readlines()[-n:]]
+        except (OSError, ValueError):
+            return []
+        for r in rows:
+            r["playable"] = os.path.exists(os.path.join(self.archive_dir, r.get("clip", "")))
+        return rows[::-1]
 
     def enroll(self, body: dict, gap_s: float = 0.8) -> dict:
         """Enroll a person from webcam pictures (JPEG, base64) taken on the dashboard, or with
@@ -550,6 +607,21 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path == "/api/overview":
+                    return self._json(200, dash.overview())
+                if self.path.startswith("/api/voice/log"):
+                    return self._json(200, {"turns": dash.voice_log()})
+                if self.path.startswith("/api/voice/clip/"):
+                    name = os.path.basename(self.path.rsplit("/", 1)[-1])  # no path tricks
+                    path = os.path.join(dash.archive_dir or "", name)
+                    if not (name.endswith(".wav") and dash.archive_dir and os.path.isfile(path)):
+                        return self._json(404, {"error": "gone"})
+                    with open(path, "rb") as f:
+                        return self._send(200, f.read(), "audio/wav")
+                if self.path == "/api/notes":
+                    store = getattr(dash.bridge.cortex, "store", None) if dash.bridge.cortex else None
+                    return self._json(200, {"notes": store.notes if store else [],
+                                            "reminders": store.reminders if store else []})
                 if self.path == "/api/people":
                     return self._json(200, {"people": dash.faces[1].list() if dash.faces else [],
                                             "on": bool(dash.faces), "staff": bool(dash.faces and dash.faces[2])})

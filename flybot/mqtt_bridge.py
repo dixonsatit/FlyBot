@@ -63,6 +63,8 @@ class StackChanBridge:
         self._last_motion = -float("inf")
         self._last_face_turn = 0.0
         self.power: dict = {}  # last <base>/sensor/power
+        self.robot_seen = 0.0  # wall clock of the robot's last message
+        self.selftest: dict = {}  # its last boot self-test
         self._battery_warned = False
         self._jpeg_at = 0.0  # monotonic time the last frame arrived
         self._jpeg_cond = threading.Condition()
@@ -119,8 +121,14 @@ class StackChanBridge:
             client.subscribe(f"{self.base}/snapshot", qos=0)
 
     def _on_message(self, client, userdata, msg):
+        if not msg.topic.endswith("/chat/in"):  # everything else subscribed comes from the robot
+            self.robot_seen = time.time()
         if msg.topic == f"{self.base}/selftest":
             self._log_selftest(msg.payload)
+            try:
+                self.selftest = {**json.loads(msg.payload), "at": time.time()}
+            except ValueError:
+                pass
             return
         if msg.topic == f"{self.base}/sensor/face":
             self._on_face(msg.payload)
