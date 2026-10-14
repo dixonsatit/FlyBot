@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.36.0 (2026-10-14)
+
+### Features
+
+- **memory**: Long-term memory on any PostgreSQL, recall by meaning, a chat page
+  ([`609caa0`](https://github.com/dixonsatit/FlyBot/commit/609caa0cf3baf7747da59b4cd6df327849eba7d7))
+
+
 ## v0.35.0 (2026-10-14)
 
 ### Features
