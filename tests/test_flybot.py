@@ -433,8 +433,9 @@ def test_cortex_narrates_chats_and_describes(gains):
         brain.step(s, 0.05, now=0.05 * (i + 1))
     assert brain.pan > 20 and brain.tilt > 5  # PFL3 steered to the requested goal
     assert brain.cfg.gf_threshold == 0.6 and cortex.personality == "skittish"
-    assert published[-1] == ("stackchan/chat/out", {"type": "reply", "to": "หันขวาหน่อย",
-                                                     "text": "หันขวาแล้ว และตอนนี้ขี้ตกใจนะ"})
+    assert published[-1] == ("stackchan/chat/out", {
+        "type": "reply", "to": "หันขวาหน่อย", "text": "หันขวาแล้ว และตอนนี้ขี้ตกใจนะ",
+        "actions": ['look_at({"pan_deg": 40, "tilt_deg": 10})', 'set_personality({"name": "skittish"})']})
 
     cortex.on_event({"type": "presence"})
     _drain(cortex)
@@ -1335,6 +1336,79 @@ def test_dashboard_overview_voice_log_and_clips(gains, tmp_path):
         assert _http(dash.port, "POST", "/api/speak", {"text": "ทดสอบ"})[0] == 400  # no TTS here
     finally:
         dash.stop()
+
+
+def test_memory_json_backend_keeps_the_old_file_and_recalls(tmp_path):
+    import json as _json
+    from flybot.assistant import AssistantStore
+    from flybot.memory import Audit, Episodes, JsonBackend
+    path = tmp_path / "assistant.json"
+    path.write_text(_json.dumps({"notes": [{"id": 3, "text": "รหัสห้องประชุมคือ 4321", "at": "2026-10-01 09:00"}],
+                                 "reminders": []}, ensure_ascii=False))
+    store = AssistantStore(str(path))
+    assert store.notes[0]["text"].startswith("รหัสห้องประชุม")  # the old file loads as is
+    note = store.remember("พี่ต๊ะชอบกาแฟดำ")
+    assert note["id"] > 3 and store.forget(3)
+    again = AssistantStore(str(path))
+    assert [n["text"] for n in again.notes] == ["พี่ต๊ะชอบกาแฟดำ"]
+    ep = Episodes(again.backend)
+    ep.add("คุยเรื่องย้ายเซิร์ฟเวอร์ HIS ไป k8s สัปดาห์หน้า")
+    ep.add("พี่ต๊ะให้เตือนต่อประกัน รถ")
+    assert ep.recall("เซิร์ฟเวอร์ HIS")[0]["text"].startswith("คุยเรื่องย้ายเซิร์ฟเวอร์")  # by words, no embedder
+    assert ep.add("-") is None  # nothing worth remembering
+    Audit(again.backend).log("remember", args={"text": "x"})
+    assert JsonBackend(str(path)).load("audit")[0]["action"] == "remember"  # kept on disk
+
+
+def test_memory_recall_by_embeddings_and_postgres_import(tmp_path):
+    from flybot.assistant import AssistantStore
+    from flybot.memory import Episodes, JsonBackend
+
+    class Fake:  # meaning, not words: "car" texts point one way, everything else another
+        def embed(self, texts):
+            return [[1.0, 0.0] if ("รถ" in t or "car" in t) else [0.0, 1.0] for t in texts]
+
+    ep = Episodes(JsonBackend(None), Fake())
+    ep.add("ต่อประกันรถเดือนหน้า")
+    ep.add("ประชุมงบประมาณ IT")
+    assert ep.recall("car insurance")[0]["text"] == "ต่อประกันรถเดือนหน้า"
+    old = tmp_path / "old.json"
+    old.write_text('{"notes": [{"id": 1, "text": "a", "at": "x"}], "reminders": [{"id": 2, "text": "b", "due": "2030-01-01T09:00+07:00"}]}')
+    new = AssistantStore(None, backend=JsonBackend(str(tmp_path / "new.json")))
+    assert new.import_json(str(old)) == 2 and new.import_json(str(old)) == 0  # once only
+    assert [n["text"] for n in new.notes] == ["a"] and new.reminders[0]["text"] == "b"
+
+
+def test_cortex_brings_up_memories_summarises_and_audits(gains, tmp_path):
+    from flybot.assistant import AssistantStore
+    from flybot.cortex import Cortex
+    from flybot.memory import Audit, Episodes, JsonBackend
+    seen = []
+
+    def script(text, tools, img):
+        if text.startswith("ผู้ใช้:"):  # the summariser
+            return "คุยเรื่องย้ายเซิร์ฟเวอร์ HIS ไป k8s"
+        seen.append(text)
+        if "จำไว้" in text:
+            tools["remember"].fn(text="นัดซ่อมแอร์")
+        return "ได้ครับ"
+
+    llm = _ScriptedLLM(script)
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    cortex = Cortex(llm, brain, lambda t, b: None, "stackchan")
+    backend = JsonBackend(str(tmp_path / "m.json"))
+    cortex.store, cortex.episodes, cortex.audit = AssistantStore(None, backend=backend), Episodes(backend), Audit(backend)
+    cortex.ask("ช่วยวางแผนย้ายเซิร์ฟเวอร์ HIS")
+    cortex.ask("จำไว้ว่านัดซ่อมแอร์")
+    cortex._last_turn -= 700
+    cortex.maybe_consolidate()
+    _drain(cortex)
+    assert cortex.episodes.rows[0]["text"] == "คุยเรื่องย้ายเซิร์ฟเวอร์ HIS ไป k8s" and not cortex._transcript
+    assert [a["action"] for a in cortex.audit.recent()] == ["remember"]  # actions only, not look-ups
+    persona = cortex._memories_for("เซิร์ฟเวอร์ HIS เป็นยังไงบ้าง", min_score=0.1)
+    assert "ย้ายเซิร์ฟเวอร์ HIS" in persona
+    recalled = {t.name: t for t in cortex.tools()}["recall"].call({"query": "เซิร์ฟเวอร์ HIS"})
+    assert "ย้ายเซิร์ฟเวอร์" in recalled
 
 
 def test_to_16k_resamples_wayu_wav():

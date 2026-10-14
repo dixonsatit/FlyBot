@@ -66,6 +66,10 @@ th { color: var(--mute); font-weight: 500; font-size: 12.5px; }
 .kv dt { color: var(--mute); } .kv dd { margin: 0; }
 .tag { font-size: 12px; padding: 1px 7px; border-radius: 99px; background: var(--chip); }
 .tag.ok { color: var(--ok); } .tag.bad { color: var(--bad); } .tag.warn { color: var(--warn); }
+.feed.full { height: calc(100vh - 250px); min-height: 320px; }
+.badge { display: inline-block; font-size: 11px; color: var(--mute); margin-top: 4px; }
+.acts { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.acts span { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--chip); color: var(--mute); }
 .boxes { position: absolute; inset: 0; pointer-events: none; }
 video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #000; }
 </style>
@@ -78,6 +82,7 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
   </div>
   <nav id="tabs">
     <button data-tab="home" class="active">หน้าหลัก</button>
+    <button data-tab="chat">แชทสั่งงาน</button>
     <button data-tab="people">คนที่รู้จัก</button>
     <button data-tab="memory">ความจำ</button>
     <button data-tab="status">สถานะ &amp; แก้ปัญหา</button>
@@ -130,6 +135,22 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
   </div>
 </section>
 
+<!-- ============ CHAT: full page ============ -->
+<section class="tab" id="tab-chat">
+  <div class="card">
+    <h2>แชทสั่งงานน้องหวี่ <span class="sp"></span>
+      <label class="hint"><input type="checkbox" id="speakRobot"> ให้หุ่นพูดคำตอบออกเสียงด้วย</label></h2>
+    <div class="feed full" id="feedFull"></div>
+    <div class="compose">
+      <button id="mic2" title="กดแล้วพูด">🎤</button>
+      <input id="msg2" placeholder="สั่งงานหรือถาม เช่น จำไว้ว่า…, อีก 30 นาทีเตือน…, วันนี้มีประชุมอะไร, CI พังไหม" autocomplete="off">
+      <button id="send2" class="primary">ส่ง</button>
+    </div>
+    <div class="hint" style="margin-top:6px">🔊 = หุ่นพูดออกเสียงแล้ว · 💬 = ตอบเป็นข้อความเท่านั้น · 📢 = หุ่นพูดเอง (เตือน/ทักทาย) · ป้ายเล็ก = สิ่งที่ลงมือทำในรอบนั้น</div>
+    <div class="err" id="errChat2"></div>
+  </div>
+</section>
+
 <!-- ============ PEOPLE ============ -->
 <section class="tab" id="tab-people">
   <div class="grid">
@@ -163,6 +184,14 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
     <div class="card"><h2>การเตือน <span class="sp"></span><span class="hint" id="remCount"></span></h2>
       <table><tbody id="reminders"></tbody></table>
       <p class="hint">เช่น "อีก 20 นาทีเตือนให้โทรหาฝ่ายจัดซื้อ" หรือ "พรุ่งนี้ 9 โมงเตือนประชุม"</p></div>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card"><h2>ความจำจากการคุย <span class="sp"></span><span class="hint" id="epCount"></span></h2>
+      <p class="hint">สรุปบทสนทนาที่จบไปแล้ว (เงียบไป 10 นาทีหรือคุยยาว) น้องหวี่ใช้ค้นเมื่อถามถึงเรื่องเก่า ลบเรื่องที่ไม่อยากให้จำได้</p>
+      <table><tbody id="episodes"></tbody></table></div>
+    <div class="card"><h2>สิ่งที่น้องหวี่ทำไป</h2>
+      <p class="hint">บันทึกการกระทำทุกครั้ง (จด/เตือน/หัน/ตั้งค่า…) ลบไม่ได้ ใช้ตรวจย้อนหลัง</p>
+      <table><thead><tr><th>เวลา</th><th>ทำอะไร</th><th>รายละเอียด</th></tr></thead><tbody id="audit"></tbody></table></div>
   </div>
 </section>
 
@@ -314,17 +343,24 @@ const EVENT_TEXT = { presence: "👀 มีคนเข้ามา", escape: "�
                      seen: "📷 เห็น", enrolled: "👤 ลงทะเบียนหน้าใหม่", body: "🤲 มีคนจับตัวหุ่น" };
 let since = 0, firstPoll = true;
 function addFeed(f) {
-  const d = f.data || {}; let cls = "msg ", text = "";
+  const d = f.data || {}; let cls = "msg ", text = "", badge = "";
   if (f.kind === "you") { cls += "you"; text = (d.voice ? "🎙 " : "") + d.text; }
-  else if (f.kind === "chat") { cls += d.type === "narration" ? "ev" : "bot"; text = d.text; }
+  else if (f.kind === "chat") { cls += d.type === "narration" ? "ev" : "bot"; text = d.text;
+    badge = d.type === "announce" ? "📢 หุ่นพูดเอง" : d.voice ? "🔊 พูดออกเสียงแล้ว" : d.type === "narration" ? "" : "💬 ข้อความ"; }
   else if (f.kind === "event") { cls += "ev";
     text = d.type === "meeting" ? (d.message || "").replace(/^StackChan:\s*/, "📅 ") : d.type === "body" ? "🤲 " + (d.kind || "")
          : d.type === "enrolled" ? "👤 ลงทะเบียน " + (d.name || "") : (EVENT_TEXT[d.type] || d.type); }
   else return;
-  const el = document.createElement("div"); el.className = cls;
-  el.innerHTML = `<span class="t">${esc(f.at)}</span>`; el.append(document.createTextNode(text || ""));
-  const feed = $("feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
-  feed.append(el); if (atBottom || firstPoll) feed.scrollTop = feed.scrollHeight;
+  for (const feed of [$("feed"), $("feedFull")]) {
+    const el = document.createElement("div"); el.className = cls;
+    el.innerHTML = `<span class="t">${esc(f.at)}</span>`; el.append(document.createTextNode(text || ""));
+    if (badge) { const b = document.createElement("div"); b.className = "badge"; b.textContent = badge; el.append(b); }
+    if (d.actions && d.actions.length) { const a = document.createElement("div"); a.className = "acts";
+      for (const x of d.actions) { const s = document.createElement("span"); s.textContent = x.replace(/\(.*$/, ""); s.title = x; a.append(s); }
+      el.append(a); }
+    const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+    feed.append(el); if (atBottom || firstPoll) feed.scrollTop = feed.scrollHeight;
+  }
   if (!firstPoll && f.kind === "chat" && !d.voice) say(d.text);
 }
 async function poll() {
@@ -336,10 +372,15 @@ async function poll() {
   setTimeout(poll, 700);
 }
 poll();
-function send(text) {
-  text = (text ?? $("msg").value).trim(); if (!text) return;
-  $("msg").value = ""; post("/api/chat", { text }, "errChat");
+function send(text, from = "") {
+  const box = $("msg" + from);
+  text = (text ?? box.value).trim(); if (!text) return;
+  box.value = ""; post("/api/chat", { text, speak: from === "2" && $("speakRobot").checked }, "errChat" + from);
 }
+$("send2").onclick = () => send(undefined, "2");
+$("msg2").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) send(undefined, "2"); };
+$("speakRobot").checked = local.get("flybot-speak-robot") === "1";
+$("speakRobot").onchange = (e) => local.set("flybot-speak-robot", e.target.checked ? "1" : "0");
 $("send").onclick = () => send();
 $("msg").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) send(); };
 
@@ -392,31 +433,52 @@ function toPcm16k(chunks, rate) {
   }
   return out;
 }
-$("mic").onclick = async () => {
+let micFrom = "";
+$("mic2").onclick = () => { if (!recorder) micFrom = "2"; return startMic($("mic2")); };
+$("mic").onclick = () => { if (!recorder) micFrom = ""; return startMic($("mic")); };
+async function startMic(button) {
   if (recorder) return recorder.stop();
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
-  catch (e) { $("errChat").textContent = "ใช้ไมค์ไม่ได้: " + e.message; return; }
+  catch (e) { $("errChat" + micFrom).textContent = "ใช้ไมค์ไม่ได้: " + e.message; return; }
   const ctx = new AudioContext(), src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1), chunks = [];
   proc.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
   src.connect(proc); proc.connect(ctx.destination);
-  $("mic").classList.add("on"); $("msg").placeholder = "กำลังฟัง… กด 🎤 อีกครั้งเมื่อพูดจบ";
+  button.classList.add("on"); $("msg" + micFrom).placeholder = "กำลังฟัง… กด 🎤 อีกครั้งเมื่อพูดจบ";
   const timer = setTimeout(() => recorder && recorder.stop(), 15000);
   recorder = { stop: async () => {
     clearTimeout(timer); recorder = null; proc.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop());
     const rate = ctx.sampleRate; await ctx.close();
-    $("mic").classList.remove("on"); $("msg").placeholder = "กำลังถอดเสียง…";
+    button.classList.remove("on"); $("msg" + micFrom).placeholder = "กำลังถอดเสียง…";
     try {
       const r = await fetch("/api/stt", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: toPcm16k(chunks, rate).buffer });
       const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText);
-      j.text && j.text.trim() ? send(j.text) : ($("errChat").textContent = "ไม่ได้ยินเสียงพูด ลองใหม่");
-    } catch (e) { $("errChat").textContent = "ถอดเสียงไม่สำเร็จ: " + e.message; }
-    $("msg").placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
+      j.text && j.text.trim() ? send(j.text, micFrom) : ($("errChat" + micFrom).textContent = "ไม่ได้ยินเสียงพูด ลองใหม่");
+    } catch (e) { $("errChat" + micFrom).textContent = "ถอดเสียงไม่สำเร็จ: " + e.message; }
+    $("msg" + micFrom).placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
   } };
-};
+}
 
 // ---- memory -------------------------------------------------------------------
+async function loadMemory() {
+  const ep = await (await fetch("/api/episodes")).json();
+  $("epCount").textContent = ep.episodes.length + " เรื่อง";
+  $("episodes").innerHTML = ep.episodes.length ? "" : `<tr><td class="hint">ยังไม่มี: จะเริ่มสะสมหลังคุยกันแล้วเงียบไป 10 นาที</td></tr>`;
+  for (const e of ep.episodes) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(e.text)}<div class="hint">${esc(e.at)} · ${esc(e.kind)}${e.embedding === undefined ? "" : ""}</div></td><td style="width:1%"></td>`;
+    tr.lastChild.append(confirmButton("ลบ", () => post("/api/episodes/forget", { id: e.id }).then(loadMemory))); $("episodes").append(tr);
+  }
+  const au = await (await fetch("/api/audit")).json();
+  $("audit").innerHTML = au.audit.length ? "" : `<tr><td colspan="3" class="hint">ยังไม่มี</td></tr>`;
+  for (const a of au.audit.slice(0, 60)) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="hint">${esc(a.at)}</td><td>${esc(a.action)}</td><td class="hint">${esc(JSON.stringify(a.args || {}))}${a.by ? " · " + esc(a.by) : ""}</td>`;
+    $("audit").append(tr);
+  }
+}
 async function loadNotes() {
+  loadMemory();
   const j = await (await fetch("/api/notes")).json();
   $("noteCount").textContent = j.notes.length + " รายการ"; $("remCount").textContent = j.reminders.length + " รายการ";
   $("notes").innerHTML = j.notes.length ? "" : `<tr><td class="hint">ยังไม่มีโน้ต</td></tr>`;

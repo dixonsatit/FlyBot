@@ -1,0 +1,64 @@
+# PostgreSQL for the assistant's long-term memory (notes, reminders, conversation episodes, audit
+# log): the bridge reaches it as postgres:5432 with the memory-dsn secret. Only inside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector: {app: postgres}
+  ports:
+    - {name: pg, port: 5432, targetPort: pg}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {app: postgres}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {app: postgres}
+  template:
+    metadata:
+      labels: {app: postgres}
+    spec:
+      securityContext: {runAsUser: 70, runAsGroup: 70, fsGroup: 70, runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      affinity:  # sith-k9s: tyranus pulls images from the internet at a few KB/s (see bridge.yaml)
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - {key: kubernetes.io/hostname, operator: NotIn, values: [tyranus]}
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - {name: pg, containerPort: 5432}
+          env:
+            - {name: POSTGRES_DB, value: flybot}
+            - {name: POSTGRES_USER, value: flybot}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: memory-db-password}}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "flybot", "-d", "flybot"]}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+            - {name: run, mountPath: /var/run/postgresql}
+      volumes:
+        - name: run
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: longhorn
+        resources:
+          requests: {storage: 5Gi}

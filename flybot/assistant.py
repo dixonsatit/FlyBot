@@ -15,42 +15,32 @@ log = logging.getLogger(__name__)
 
 
 class AssistantStore:
+    """Notes and reminders, kept by a flybot.memory backend: the JSON file at ``path`` (the
+    original format, so an existing file loads as is) or PostgreSQL when ``backend`` is given."""
+
     def __init__(self, path: str | None, on_due: Callable[[str], None] | None = None, tz: str | None = None,
-                 now: Callable[[], datetime] | None = None):
+                 now: Callable[[], datetime] | None = None, backend=None):
+        from .memory import JsonBackend
         self.path, self.on_due = path, on_due
         self.tz = ZoneInfo(tz or os.environ.get("FLYBOT_TZ") or "Asia/Bangkok")
         self.now = now or (lambda: datetime.now(self.tz))
-        self.notes: list[dict] = []  # {"id", "text", "at"}
-        self.reminders: list[dict] = []  # {"id", "text", "due"} (ISO, local time)
-        self._next_id = 1
+        self.backend = backend or JsonBackend(path)
+        self.notes: list[dict] = self.backend.load("notes")  # {"id", "text", "at"}
+        self.reminders: list[dict] = sorted(self.backend.load("reminders"), key=lambda r: r["due"])  # due: ISO local
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._load()
 
-    # -- persistence -------------------------------------------------------------
-    def _load(self) -> None:
-        if not self.path or not os.path.exists(self.path):
-            return
-        try:
-            with open(self.path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError) as e:
-            log.warning("assistant store %s unreadable: %s", self.path, e)
-            return
-        self.notes, self.reminders = data.get("notes", []), data.get("reminders", [])
-        self._next_id = 1 + max([x["id"] for x in self.notes + self.reminders] or [0])
-
-    def _save(self) -> None:
-        if not self.path:
-            return
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"notes": self.notes, "reminders": self.reminders}, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, self.path)
-
-    def _id(self) -> int:
-        self._next_id += 1
-        return self._next_id - 1
+    def import_json(self, path: str) -> int:
+        """Copy notes and reminders from an old assistant.json into this (empty) store, once."""
+        if self.notes or self.reminders or not os.path.exists(path):
+            return 0
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        for table, rows in (("notes", data.get("notes", [])), ("reminders", data.get("reminders", []))):
+            for r in rows:
+                getattr(self, table).append(self.backend.insert(table, {k: v for k, v in r.items() if k != "id"}))
+        self.reminders.sort(key=lambda r: r["due"])
+        return len(self.notes) + len(self.reminders)
 
     # -- notes ----------------------------------------------------------------------
     def remember(self, text: str) -> dict:
@@ -58,17 +48,14 @@ class AssistantStore:
         if not text:
             raise ValueError("empty note")
         with self._lock:
-            note = {"id": self._id(), "text": text, "at": self.now().strftime("%Y-%m-%d %H:%M")}
+            note = self.backend.insert("notes", {"text": text, "at": self.now().strftime("%Y-%m-%d %H:%M")})
             self.notes.append(note)
-            self._save()
         return note
 
     def forget(self, note_id: int) -> bool:
         with self._lock:
-            before = len(self.notes)
             self.notes = [n for n in self.notes if n["id"] != note_id]
-            self._save()
-            return len(self.notes) < before
+            return self.backend.delete("notes", note_id)
 
     # -- reminders ------------------------------------------------------------------
     def remind(self, text: str, in_minutes: float | None = None, at: str | None = None) -> dict:
@@ -89,18 +76,15 @@ class AssistantStore:
         if due <= now:
             raise ValueError(f"{due:%Y-%m-%d %H:%M} is already past")
         with self._lock:
-            reminder = {"id": self._id(), "text": text.strip(), "due": due.isoformat(timespec="minutes")}
+            reminder = self.backend.insert("reminders", {"text": text.strip(), "due": due.isoformat(timespec="minutes")})
             self.reminders.append(reminder)
             self.reminders.sort(key=lambda r: r["due"])
-            self._save()
         return {**reminder, "due": due.strftime("%Y-%m-%d %H:%M")}
 
     def cancel(self, reminder_id: int) -> bool:
         with self._lock:
-            before = len(self.reminders)
             self.reminders = [r for r in self.reminders if r["id"] != reminder_id]
-            self._save()
-            return len(self.reminders) < before
+            return self.backend.delete("reminders", reminder_id)
 
     def due(self) -> list[dict]:
         """Reminders that fell due (removed once returned)."""
@@ -109,7 +93,8 @@ class AssistantStore:
             fired = [r for r in self.reminders if datetime.fromisoformat(r["due"]) <= now]
             if fired:
                 self.reminders = [r for r in self.reminders if r not in fired]
-                self._save()
+                for r in fired:
+                    self.backend.delete("reminders", r["id"])
         return fired
 
     def summary(self) -> dict:

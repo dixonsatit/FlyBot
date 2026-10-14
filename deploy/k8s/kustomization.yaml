@@ -10,6 +10,7 @@ resources:
   - config.yaml
   - mosquitto.yaml
   - bridge.yaml
+  - postgres.yaml
   - ingress.yaml
 images:
   - name: flybot

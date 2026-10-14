@@ -193,6 +193,7 @@ class Dashboard:
         self.collect: dict | None = None
         self.faces = None  # (FaceClient, FaceRegistry, StaffDirectory | None) when --face-url is set
         self.tracker = None  # flybot.faces.FaceTracker: paused while a person steers the head
+        self.memory = None  # (flybot.memory.Episodes, flybot.memory.Audit) when the assistant keeps memory
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -257,7 +258,10 @@ class Dashboard:
             if not self.bridge.cortex:
                 raise ValueError("LLM is not enabled (--llm)")
             self.add("you", {"text": text})
-            self.bridge.cortex.on_chat(text)
+            if body.get("speak"):  # the robot says the reply aloud too
+                self.bridge.cortex.on_chat(text, then=lambda reply: reply and self.announce(reply, force=True))
+            else:
+                self.bridge.cortex.on_chat(text)
         elif path == "/api/personality":
             name = body.get("name")
             if name not in PERSONALITIES:
@@ -278,6 +282,10 @@ class Dashboard:
             text = str(body.get("text", "")).strip()[:300]
             if not text or not self.announce(text, force=True):
                 raise ValueError("nothing to say, or no TTS")
+        elif path == "/api/episodes/forget":
+            if not self.memory:
+                raise ValueError("long-term memory is off")
+            return {"ok": self.memory[0].forget(int(body.get("id", 0)))}
         elif path == "/api/notes/forget":
             return {"ok": self._store().forget(int(body.get("id", 0)))}
         elif path == "/api/reminders/cancel":
@@ -618,6 +626,10 @@ class Dashboard:
                         return self._json(404, {"error": "gone"})
                     with open(path, "rb") as f:
                         return self._send(200, f.read(), "audio/wav")
+                if self.path == "/api/episodes":
+                    return self._json(200, {"episodes": dash.memory[0].list() if dash.memory else []})
+                if self.path == "/api/audit":
+                    return self._json(200, {"audit": dash.memory[1].recent() if dash.memory else []})
                 if self.path == "/api/notes":
                     store = getattr(dash.bridge.cortex, "store", None) if dash.bridge.cortex else None
                     return self._json(200, {"notes": store.notes if store else [],

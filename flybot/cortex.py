@@ -23,11 +23,14 @@ from typing import Callable
 
 from .controller import PERSONALITIES, BrainController
 from .llm import LLM, Tool
+from .memory import SUMMARIZE
 
 log = logging.getLogger(__name__)
 
 # Tools that fetch something over the network: the robot says it is searching while they run.
 LOOKUPS = {"places", "weather", "github_status", "upcoming_meetings", "look"}
+# Tools that only read: everything else is an action and goes into the audit log.
+READ_ONLY = LOOKUPS | {"recall", "notes_and_reminders", "brain_state"}
 
 PERSONA = """You are น้องหวี่ (Nong Wee), a desk assistant robot (an M5Stack StackChan) for a hospital IT
 manager and full-stack developer (TypeScript, Vue/Nuxt, Hono, Drizzle, PostgreSQL, Kubernetes). You are a
@@ -124,6 +127,10 @@ class Cortex:
         self.presence = None  # flybot.presence.Presence: whether the camera sees the user
         self.greeter = None  # flybot.faces.Greeter: who the camera recognised
         self.tracker = None  # flybot.faces.FaceTracker: paused when the head is moved on request
+        self.episodes = None  # flybot.memory.Episodes: summaries of past conversations (recall)
+        self.audit = None  # flybot.memory.Audit: what was done, append-only
+        self._transcript: list[str] = []  # this conversation, summarised into an episode when it ends
+        self._last_turn = 0.0
         self.history: list[dict] = []
         self.history_turns = history_turns
         self.event_counts: dict[str, int] = {}
@@ -143,8 +150,12 @@ class Cortex:
         if self.snapshot and self.narrate and kind == "presence":
             self._submit(self._describe)
 
-    def on_chat(self, text: str) -> None:
-        self._submit(self._chat, text)
+    def on_chat(self, text: str, then: Callable[[str], None] | None = None) -> None:
+        """A typed message (dashboard, MQTT); ``then(reply)`` runs after, e.g. to say it aloud."""
+        if then:
+            self._submit(lambda: then(self._chat(text)))
+        else:
+            self._submit(self._chat, text)
 
     def ask(self, text: str, timeout: float = 60.0, on_lookup: Callable[[str], None] | None = None) -> str:
         """Chat and wait for the reply (the robot's voice turn); runs on the cortex thread
@@ -247,18 +258,23 @@ class Cortex:
 
     def _chat(self, text: str, voice: bool = False, on_lookup: Callable[[str], None] | None = None) -> str:
         # spoken replies: TTS time grows with length, so keep them to one sentence
-        persona = self.persona + (VOICE_RULE if voice else "")
+        persona = self.persona + self._memories_for(text) + (VOICE_RULE if voice else "")
         notes_before = len(self.store.notes) if self.store else 0
         done: list[str] = []
-        reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done, on_lookup))
+        reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done, on_lookup, self.audit))
         self._ensure_saved(text, notes_before)
         # History keeps only text, so note the actions taken: without them the next turn sees
         # "จดแล้ว" with no tool call behind it and the model redoes it (duplicate notes/reminders).
         said = (reply or "...") + (f"\n[ทำแล้วในรอบนี้: {', '.join(done)}]" if done else "")
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": said}]
         self.history = self.history[-2 * self.history_turns:]
+        self._transcript += [f"ผู้ใช้: {text}", f"น้องหวี่: {said}"]
+        self._last_turn = time.time()
+        if len(self._transcript) >= 24:  # a long conversation: keep what it held so far
+            self._consolidate()
         # voice: the robot speaks it, so the dashboard page must not say it again
-        self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {})})
+        self._out({"type": "reply", "to": text, "text": reply, **({"voice": True} if voice else {}),
+                   **({"actions": done} if done else {})})
         return reply
 
     def _move_head(self, pan_by: float = 0.0, tilt_by: float = 0.0, pan: float | None = None,
@@ -275,11 +291,14 @@ class Cortex:
                 "tilt_limits": [lo_t, hi_t], "was": {"pan": round(c.pan), "tilt": round(c.tilt)}}
 
     @staticmethod
-    def _recording(tools: list[Tool], done: list[str], on_lookup: Callable[[str], None] | None = None) -> list[Tool]:
+    def _recording(tools: list[Tool], done: list[str], on_lookup: Callable[[str], None] | None = None,
+                   audit=None) -> list[Tool]:
         """The same tools, appending "name(args)" to ``done`` when one runs."""
         def wrap(t: Tool) -> Tool:
             def fn(**args):
                 done.append(f"{t.name}({json.dumps(args, ensure_ascii=False)})" if args else t.name)
+                if audit and t.name not in READ_ONLY:  # actions, not look-ups
+                    audit.log(t.name, args=args, by="conversation")
                 if on_lookup and t.name in LOOKUPS:
                     try:
                         on_lookup(t.name)
@@ -288,6 +307,45 @@ class Cortex:
                 return t.fn(**args)
             return Tool(t.name, t.description, t.parameters, fn)
         return [wrap(t) for t in tools]
+
+    # -- long-term memory ----------------------------------------------------------
+    def _memories_for(self, text: str, k: int = 3, min_score: float = 0.52) -> str:
+        """Past episodes that look related to what was just said, so "เรื่องเมื่อวาน" needs no tool.
+        With BGE-M3, related Thai sentences scored 0.57-0.74 and unrelated ones up to 0.50."""
+        if not self.episodes:
+            return ""
+        try:
+            hits = [h for h in self.episodes.recall(text, k) if h["score"] >= min_score]
+        except Exception as e:
+            log.warning("recall failed: %s", e)
+            return ""
+        if not hits:
+            return ""
+        return " Possibly relevant memories of earlier conversations: " + "; ".join(f"({h['at']}) {h['text']}" for h in hits)
+
+    def _recall(self, query: str) -> dict:
+        found = self.episodes.recall(query, 6) if self.episodes else []
+        notes = [n for n in (self.store.notes if self.store else []) if any(w in n["text"] for w in query.split() if len(w) > 1)]
+        return {"memories": found, "notes": notes[-10:]} if found or notes else {"memories": [], "note": "nothing found"}
+
+    def maybe_consolidate(self, idle_s: float = 600.0) -> None:
+        """Called now and then (any thread): a conversation idle for ``idle_s`` becomes an episode."""
+        if self._transcript and time.time() - self._last_turn > idle_s:
+            self._submit(self._consolidate)
+
+    def _consolidate(self) -> None:
+        if not (self.episodes and self._transcript):
+            self._transcript = []
+            return
+        lines, self._transcript = self._transcript, []
+        try:
+            summary = self.llm.ask(SUMMARIZE, [], "\n".join(lines)[-6000:])
+        except Exception as e:
+            log.warning("could not summarise the conversation: %s", e)
+            return
+        row = self.episodes.add(summary)
+        if row:
+            log.info("memory: %s", row["text"])
 
     def _ensure_saved(self, text: str, notes_before: int) -> None:
         """A sentence starting with จำ/จด is a note even when the LLM only said it saved it (qwen
@@ -343,6 +401,11 @@ class Cortex:
                                                    "pan": {"type": "number"}, "tilt": {"type": "number"}},
                   "additionalProperties": False},
                  self._move_head),
+            Tool("recall", "Look up what you remember from earlier conversations and notes (เมื่อวานคุยเรื่อง"
+                 "อะไร, เคยบอกว่าอะไร, งานที่ค้าง). Give the topic in a few words.",
+                 {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"],
+                  "additionalProperties": False},
+                 self._recall),
             Tool("upcoming_meetings", "The user's meetings in the next 7 days from their calendar (start is local time).",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  self._meetings),

@@ -49,6 +49,10 @@ spec:
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: face-token, optional: true}}
             - name: FLYBOT_STAFF_DSN           # read-only, a narrow staff view only (v_stackchan_staff)
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: staff-dsn, optional: true}}
+            - name: FLYBOT_MEMORY_DSN          # postgres.yaml: notes, reminders, episodes, audit log
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: memory-dsn, optional: true}}
+            - name: FLYBOT_EMBED_KEY           # tools/embed_server.py on the DGX (FLYBOT_EMBED_URL in flybot-config)
+              valueFrom: {secretKeyRef: {name: flybot-secrets, key: embed-token, optional: true}}
             - name: LLM_API_KEY
               valueFrom: {secretKeyRef: {name: flybot-secrets, key: llm-api-key, optional: true}}
             - name: FLYBOT_LLM_API_KEY_ENV

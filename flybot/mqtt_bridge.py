@@ -316,6 +316,13 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
+    mem = ap.add_argument_group("long-term memory (every part swappable)")
+    mem.add_argument("--memory-dsn", help="postgresql://... for notes, reminders, episodes and the audit log "
+                                         "(default: a JSON file in --state-dir)")
+    mem.add_argument("--embed-url", help="OpenAI-compatible embeddings server for recall (e.g. BGE-M3 on the DGX); "
+                                         "without it recall matches words")
+    mem.add_argument("--embed-model", default="BAAI/bge-m3")
+    mem.add_argument("--embed-key", help="API key for --embed-url, if it needs one")
     ap.add_argument("--location", default="16.43,102.83,ขอนแก่น",
                     help="lat,lon,name for the weather tool (Open-Meteo); empty to turn it off")
     ap.add_argument("--presence", action="store_true",
@@ -482,13 +489,33 @@ def main(argv: list[str] | None = None) -> None:
             bridge.cortex.places = Places(args.google_maps_key, float(lat), float(lon))
     if args.state_dir and bridge.dashboard:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
-    if args.state_dir and bridge.cortex:
+    if (args.state_dir or args.memory_dsn) and bridge.cortex:
         from .assistant import AssistantStore
-        store = AssistantStore(os.path.join(args.state_dir, "assistant.json"),
-                               lambda line: bridge.dashboard and bridge.dashboard.announce(line), args.tz)
+        from .memory import Audit, Embedder, Episodes, open_backend
+        json_path = os.path.join(args.state_dir, "assistant.json") if args.state_dir else None
+        backend = open_backend(args.memory_dsn, json_path)
+        store = AssistantStore(json_path, lambda line: bridge.dashboard and bridge.dashboard.announce(line), args.tz,
+                               backend=backend)
+        if args.memory_dsn and json_path:
+            moved = store.import_json(json_path)
+            if moved:
+                log.info("Assistant memory: copied %d notes/reminders from %s", moved, json_path)
         store.start()
+        embedder = Embedder(args.embed_url, args.embed_model, args.embed_key or "") if args.embed_url else None
         bridge.cortex.store = store
-        log.info("Assistant memory: %s (%d notes, %d reminders)", store.path, len(store.notes), len(store.reminders))
+        bridge.cortex.episodes = Episodes(backend, embedder)
+        bridge.cortex.audit = Audit(backend)
+        if bridge.dashboard:
+            bridge.dashboard.memory = (bridge.cortex.episodes, bridge.cortex.audit)
+
+        def consolidate() -> None:  # a conversation idle for 10 minutes becomes an episode
+            while True:
+                time.sleep(60)
+                bridge.cortex.maybe_consolidate()
+        threading.Thread(target=consolidate, name="memory", daemon=True).start()
+        log.info("Assistant memory: %s, %d notes, %d reminders, %d episodes, recall by %s",
+                 type(backend).__name__, len(store.notes), len(store.reminders), len(bridge.cortex.episodes.rows),
+                 f"embeddings ({args.embed_url})" if embedder else "words")
     if args.github_token:
         from .github import GitHubWatcher
         def github_news(line: str) -> None:
