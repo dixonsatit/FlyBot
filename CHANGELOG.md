@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.35.0 (2026-10-14)
+
+### Features
+
+- **dashboard**: A control panel for everyday use
+  ([`bada901`](https://github.com/dixonsatit/FlyBot/commit/bada90108596b59625cca70d545dbe8cc00ebb5f))
+
+
 ## v0.34.1 (2026-10-13)
 
 ### Bug Fixes
