@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.36.1 (2026-10-15)
+
+### Bug Fixes
+
+- **memory**: The note saved for the LLM goes into the audit log too
+  ([`9f79f14`](https://github.com/dixonsatit/FlyBot/commit/9f79f1498b2777499078d4bb471ff465afce698a))
+
+
 ## v0.36.0 (2026-10-14)
 
 ### Features
