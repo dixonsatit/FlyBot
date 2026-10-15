@@ -357,6 +357,8 @@ class Cortex:
         if len(fact) >= 4:
             log.info("remember (forced, the LLM didn't save it): %s", fact)
             self.store.remember(fact)
+            if self.audit:
+                self.audit.log("remember", args={"text": fact}, by="conversation (saved for the LLM)")
 
     def _look(self, question: str) -> str:
         jpeg = self.snapshot(10.0) if self.snapshot else None
