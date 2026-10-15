@@ -194,6 +194,9 @@ class Dashboard:
         self.faces = None  # (FaceClient, FaceRegistry, StaffDirectory | None) when --face-url is set
         self.tracker = None  # flybot.faces.FaceTracker: paused while a person steers the head
         self.memory = None  # (flybot.memory.Episodes, flybot.memory.Audit) when the assistant keeps memory
+        self.intake_url: str | None = None  # the interview server's /ws (stackchan-interview), --intake-url
+        self.intake = None  # flybot.intake.IntakeSession while history taking runs
+        self.intake_view: dict = {}  # what the page shows of it (memory only, gone with the session)
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -278,6 +281,12 @@ class Dashboard:
                     raise ValueError("kind must be positive or negative, and the bridge needs --state-dir")
                 self.collect = {"kind": kind, "left": max(1, min(int(body.get("count", 50)), 500)), "saved": 0}
             log.info("wake word recording: %s", self.collect)
+        elif path == "/api/intake":
+            if body.get("stop"):
+                if self.intake_active():
+                    self.intake.cancel()
+                return {"ok": True}
+            return self.start_intake(str(body.get("dialect", "th")))
         elif path == "/api/speak":  # say this through the robot's speaker now, even if nobody is there
             text = str(body.get("text", "")).strip()[:300]
             if not text or not self.announce(text, force=True):
@@ -344,6 +353,56 @@ class Dashboard:
         self.add("chat", {"type": "announce", "text": text, "voice": True})
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return True
+
+    def play_wav(self, wav: bytes, text: str = "") -> float:
+        """Have the robot play this clip now (as an announcement); returns its length in seconds."""
+        from .intake import wav_seconds
+        wav = to_16k(wav)
+        with self._lock:
+            self._announce_seq += 1
+            key = str(self._announce_seq)
+            self._announcements[key] = wav
+            while len(self._announcements) > 8:
+                self._announcements.popitem(last=False)
+        self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
+        return wav_seconds(wav)
+
+    def intake_active(self) -> bool:
+        return bool(self.intake and not self.intake.closed)
+
+    def start_intake(self, dialect: str = "th") -> dict:
+        """History taking with the patient in front of the robot, through the interview server."""
+        from .intake import IntakeSession
+        if not self.intake_url:
+            raise ValueError("history taking is off (--intake-url)")
+        if self.intake_active():
+            raise ValueError("an interview is already running")
+        self.intake_view = {"dialect": dialect, "phase": "starting", "lines": [], "slots": [], "state": "idle"}
+
+        def on_event(ev: dict) -> None:
+            v, phase = self.intake_view, ev.get("phase")
+            if phase in ("say", "heard"):
+                v["lines"] = (v.get("lines", []) + [{"who": "robot" if phase == "say" else "patient", "text": ev.get("text", "")}])[-40:]
+            elif phase == "slots":
+                v["slots"], v["current"] = ev.get("slots", []), ev.get("current")
+            elif phase == "state":
+                v["state"] = ev.get("state")
+            elif phase == "alert":
+                v["alert"] = {k: ev.get(k) for k in ("level", "labels", "detail")}
+                if hasattr(self.bridge, "leds"):
+                    self.bridge.leds((255, 0, 0), "blink", 60)  # red: get a nurse
+            elif phase == "done":
+                v["done"] = {k: ev.get(k) for k in ("status", "conflicts", "red_flag")}
+                if hasattr(self.bridge, "leds"):
+                    self.bridge.leds((0, 200, 60), "solid", 8)
+            if phase in ("started", "done", "cancelled", "error", "alert"):
+                v["phase"] = phase
+                self.add("event", {"type": "intake", "phase": phase})  # no patient words in the feed
+                log.info("intake: %s", phase)
+        session = IntakeSession(self.intake_url, self.play_wav, self.tts.speak if self.tts else None, on_event, dialect)
+        session.start()
+        self.intake = session
+        return {"ok": True}
 
     def filler(self, name: str) -> bytes | None:
         """A short line the robot keeps and plays while it waits for a reply (FILLERS)."""
@@ -615,6 +674,9 @@ class Dashboard:
                     return
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
+                if self.path == "/api/intake":
+                    return self._json(200, {"on": bool(dash.intake_url), "active": dash.intake_active(),
+                                            **dash.intake_view})
                 if self.path == "/api/overview":
                     return self._json(200, dash.overview())
                 if self.path.startswith("/api/voice/log"):
@@ -727,6 +789,9 @@ class Dashboard:
                     return self._json(502, {"error": f"TTS: {e}"})
 
             def _voice(self, pcm: bytes, wake: bool = False):
+                if dash.intake_active():  # history taking: the patient's words go to the interview server only
+                    dash.intake.heard(pcm)
+                    return self._send(204, b"", "audio/wav")
                 if dash.collect and dash.tts:
                     return self._send(200, to_16k(dash.tts.speak(dash.keep_wake_sample(pcm))), "audio/wav")
                 if not (dash.stt and dash.tts and dash.bridge.cortex):

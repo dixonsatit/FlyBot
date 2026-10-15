@@ -1411,6 +1411,69 @@ def test_cortex_brings_up_memories_summarises_and_audits(gains, tmp_path):
     assert "ย้ายเซิร์ฟเวอร์" in recalled
 
 
+def test_intake_relays_half_duplex_and_keeps_nothing():
+    import json as _json
+    import time as _time
+    from flybot.intake import FRAME, IntakeSession
+
+    import threading as _th
+
+    class FakeWS:  # the interview server's side of /ws: blocks like a real socket until closed
+        def __init__(self):
+            self.sent, self.gone = [], _th.Event()
+        def send(self, m):
+            self.sent.append(m)
+        def __iter__(self):
+            self.gone.wait(5)
+            return iter(())
+        def close(self):
+            self.gone.set()
+
+    ws, played, events = FakeWS(), [], []
+    s = IntakeSession("ws://interview/ws", lambda wav, text: played.append(text) or 0.0,
+                      lambda text: b"RIFF" + b"\0" * 60, events.append, connect=lambda url, **k: ws)
+    s.start()
+    assert [_json.loads(m)["t"] for m in ws.sent] == ["hello", "start"]
+    assert not s.heard(b"\1\0" * 3200)  # the server is not listening yet: nothing sent
+    s.handle({"t": "say", "id": "x-1", "text": "วันนี้มีอาการอะไรมาหาหมอคะ", "audio": "client"})
+    assert played == ["วันนี้มีอาการอะไรมาหาหมอคะ"]
+    _time.sleep(1.4)
+    assert _json.loads(ws.sent[-1]) == {"t": "played", "id": "x-1"}  # after the clip had time to play
+    s.handle({"t": "state", "v": "listening", "mic": True})
+    n = len(ws.sent)
+    assert s.heard(b"\1\0" * 1600)  # 0.1 s
+    frames = ws.sent[n:-1]
+    assert all(isinstance(f, bytes) and len(f) == FRAME for f in frames) and len(frames) == 5
+    assert _json.loads(ws.sent[-1]) == {"t": "mic_close", "reason": "endpoint"}
+    s.handle({"t": "alert", "level": "emergency", "labels": ["chest_pain"], "detail": "เจ็บหน้าอก"})
+    s.handle({"t": "done", "summary": {"status": "stopped_red_flag", "conflicts": [], "red_flag": {"x": 1}}})
+    assert s.closed and [e["phase"] for e in events][-2:] == ["alert", "done"]
+
+
+def test_dashboard_intake_is_off_without_a_server_and_voice_goes_to_it_when_on(gains):
+    import json as _json
+    from flybot.dashboard import Dashboard
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    dash = Dashboard(bridge, port=0)
+    with pytest.raises(ValueError):
+        dash.start_intake()  # no --intake-url
+
+    class Session:  # stands in for a running interview
+        closed, got = False, []
+        def heard(self, pcm):
+            self.got.append(len(pcm))
+            return True
+    dash.intake = Session()
+    dash.archive_dir = None
+    dash.start()
+    try:
+        status, _ = _http_raw(dash.port, "/api/voice?wake=1", b"\0\0" * 1600)
+        assert status == 204 and dash.intake.got == [3200]  # the patient's words went to the interview, nowhere else
+        assert _json.loads(_http(dash.port, "GET", "/api/intake")[1])["active"] is True
+    finally:
+        dash.stop()
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

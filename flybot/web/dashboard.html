@@ -83,6 +83,7 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
   <nav id="tabs">
     <button data-tab="home" class="active">หน้าหลัก</button>
     <button data-tab="chat">แชทสั่งงาน</button>
+    <button data-tab="intake">ซักประวัติ</button>
     <button data-tab="people">คนที่รู้จัก</button>
     <button data-tab="memory">ความจำ</button>
     <button data-tab="status">สถานะ &amp; แก้ปัญหา</button>
@@ -148,6 +149,34 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
     </div>
     <div class="hint" style="margin-top:6px">🔊 = หุ่นพูดออกเสียงแล้ว · 💬 = ตอบเป็นข้อความเท่านั้น · 📢 = หุ่นพูดเอง (เตือน/ทักทาย) · ป้ายเล็ก = สิ่งที่ลงมือทำในรอบนั้น</div>
     <div class="err" id="errChat2"></div>
+  </div>
+</section>
+
+<!-- ============ INTAKE: history taking through the interview server ============ -->
+<section class="tab" id="tab-intake">
+  <div class="grid">
+    <div class="card">
+      <h2>ซักประวัติผู้ป่วย <span class="sp"></span><span class="tag" id="ikState">ปิดอยู่</span></h2>
+      <div class="row">
+        <button id="ikStartTh" class="primary">เริ่ม (ภาษากลาง)</button>
+        <button id="ikStartIsan">เริ่ม (อีสาน)</button>
+        <button id="ikStop" class="danger">ยกเลิก (ไม่บันทึก)</button>
+      </div>
+      <div id="ikAlert" class="err" style="font-size:15px"></div>
+      <div id="ikDone" class="hint"></div>
+      <div class="feed" id="ikLines" style="height:360px"></div>
+      <div class="err" id="errIntake"></div>
+    </div>
+    <div class="card">
+      <h2>ข้อมูลที่เก็บได้</h2>
+      <table><tbody id="ikSlots"><tr><td class="hint">ยังไม่ได้เริ่ม</td></tr></tbody></table>
+      <ul class="hint" style="padding-left:18px">
+        <li>บทสนทนาเป็นของระบบซักประวัติ (stackchan-interview): คำถามคงที่ ตัวดักอาการฉุกเฉิน และ draft ให้พยาบาลตรวจ</li>
+        <li>เสียงผู้ป่วยถอดด้วย ASR ในโรงพยาบาล และไม่เข้าความจำ บันทึก หรือ LLM ของน้องหวี่</li>
+        <li>ข้อมูลบนหน้านี้อยู่ในหน่วยความจำชั่วคราว หายเมื่อเริ่มคนถัดไป ผลจริงอยู่ที่ระบบซักประวัติ</li>
+        <li>ใช้กับผู้ป่วยจริงเฉพาะตอนหุ่นอยู่ในโรงพยาบาล (เสียงต้องไม่ออกนอกเครือข่าย)</li>
+      </ul>
+    </div>
   </div>
 </section>
 
@@ -251,6 +280,7 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === "tab-" + name));
   local.set("flybot-tab", name);
   if (name === "people") loadPeople();
+  if (name === "intake") loadIntake();
   if (name === "memory") loadNotes();
   if (name === "status") loadVoiceLog();
 }
@@ -458,6 +488,34 @@ async function startMic(button) {
     $("msg" + micFrom).placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
   } };
 }
+
+// ---- history taking ---------------------------------------------------------------
+const IK_STATE = { idle: "รอ", listening: "กำลังฟัง", thinking: "กำลังคิด", speaking: "กำลังพูด", done: "จบแล้ว" };
+let ikTimer = null;
+async function loadIntake() {
+  let j; try { j = await (await fetch("/api/intake")).json(); } catch { return; }
+  ["ikStartTh", "ikStartIsan"].forEach((id) => $(id).disabled = !j.on || j.active);
+  $("ikStop").disabled = !j.active;
+  $("ikState").textContent = !j.on ? "ยังไม่ได้ตั้ง --intake-url" : j.active ? (IK_STATE[j.state] || j.state || "เริ่มแล้ว") : (j.phase ? "ไม่ได้ซัก" : "ปิดอยู่");
+  $("ikAlert").textContent = j.alert ? "⚠️ อาการที่ต้องพบเจ้าหน้าที่ทันที: " + (j.alert.detail || (j.alert.labels || []).join(", ")) : "";
+  $("ikDone").textContent = j.done ? `จบ: ${j.done.status}${j.done.conflicts ? ` · คำตอบขัดกัน ${j.done.conflicts} จุด` : ""}` : "";
+  const box = $("ikLines"), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  box.innerHTML = "";
+  for (const l of j.lines || []) { const d = document.createElement("div"); d.className = "msg " + (l.who === "robot" ? "bot" : "you"); d.textContent = l.text; box.append(d); }
+  if (atBottom) box.scrollTop = box.scrollHeight;
+  const slots = (j.slots || []).filter((x) => x && typeof x === "object");
+  $("ikSlots").innerHTML = slots.length ? "" : `<tr><td class="hint">${j.active ? "ยังไม่มีข้อมูล" : "ยังไม่ได้เริ่ม"}</td></tr>`;
+  for (const x of slots) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="hint">${esc(x.label || x.key)}</td><td>${esc(x.value ?? "–")}</td>`;
+    $("ikSlots").append(tr);
+  }
+  clearTimeout(ikTimer);
+  if (j.active || document.querySelector("#tab-intake.active")) ikTimer = setTimeout(loadIntake, j.active ? 1000 : 4000);
+}
+$("ikStartTh").onclick = () => post("/api/intake", { dialect: "th" }, "errIntake").then(loadIntake);
+$("ikStartIsan").onclick = () => post("/api/intake", { dialect: "isan" }, "errIntake").then(loadIntake);
+$("ikStop").onclick = () => post("/api/intake", { stop: true }, "errIntake").then(loadIntake);
 
 // ---- memory -------------------------------------------------------------------
 async function loadMemory() {

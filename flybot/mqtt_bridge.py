@@ -316,6 +316,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
+    ap.add_argument("--intake-url", help="history taking: the interview server's WebSocket, e.g. "
+                                         "ws://stackchan-interview.stackchan-interview.svc/ws")
     mem = ap.add_argument_group("long-term memory (every part swappable)")
     mem.add_argument("--memory-dsn", help="postgresql://... for notes, reminders, episodes and the audit log "
                                          "(default: a JSON file in --state-dir)")
@@ -441,6 +443,7 @@ def main(argv: list[str] | None = None) -> None:
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)
         bridge.dashboard.robot_user, bridge.dashboard.robot_password = args.robot_user, args.robot_password
+        bridge.dashboard.intake_url = args.intake_url
         bridge.dashboard.start()
     if args.presence and bridge.dashboard:
         from .presence import Presence
@@ -534,6 +537,8 @@ def main(argv: list[str] | None = None) -> None:
         client = FaceClient(args.face_url, args.face_token or "")
 
         def greet(person: dict) -> None:
+            if bridge.dashboard.intake_active():  # a patient interview is on: not the time to greet staff
+                return
             hour = time.localtime().tm_hour
             hello = "อรุณสวัสดิ์" if hour < 11 else "สวัสดีตอนบ่าย" if 12 <= hour < 17 else "สวัสดี"
             bridge.dashboard.announce(f"{hello}ครับพี่{person.get('nick') or person.get('name', '')}", force=True)
