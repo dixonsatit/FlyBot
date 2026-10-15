@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.37.0 (2026-10-15)
+
+### Features
+
+- **intake**: History taking through the hospital's interview server
+  ([`9272508`](https://github.com/dixonsatit/FlyBot/commit/92725085a1bceb311e29780206d13e63170fdd91))
+
+
 ## v0.36.1 (2026-10-15)
 
 ### Bug Fixes
