@@ -888,6 +888,11 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 7
+        heard["text"] = "น้องหวี่ หันซ้าย"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        assert len(published) == 7  # a head command: no LLM turn
+        bridge.controller.step(SensorState(), 0.05)
+        assert bridge.controller._gesture and bridge.controller._gesture[0][0] < 0  # turning left
         bridge.power = {"battery": 73, "charging": 0}
         heard["text"] = "น้องหวี่ แบตเหลือกี่เปอร์เซ็นต์"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200

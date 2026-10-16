@@ -52,6 +52,28 @@ CALL_REPLY = "ว่าไงครับ"
 # "ไปพักได้ เดี๋ยวเรียก": rest until called by name (no greetings, no small talk, sleepy face)
 REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|หลับ)\s*(ก่อน|ได้แล้ว|ได้|เถอะ)|โหมดพัก")
 REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
+# Short head commands go straight to a gesture, without the LLM (it took seconds, and sometimes
+# answered without moving). Longer sentences ("หันซ้ายแล้วถ่ายรูป") still go to the LLM.
+HEAD_COMMANDS = [
+    (re.compile(r"หมุน"), "spin"),
+    (re.compile(r"พยัก"), "nod"),
+    (re.compile(r"ส่าย"), "shake"),
+    (re.compile(r"หัน\s*(ไป\s*)?(ทาง\s*)?(ด้าน\s*)?ซ้าย|มอง\s*(ไป\s*)?(ทาง\s*)?ซ้าย"), "left"),
+    (re.compile(r"หัน\s*(ไป\s*)?(ทาง\s*)?(ด้าน\s*)?ขวา|มอง\s*(ไป\s*)?(ทาง\s*)?ขวา"), "right"),
+    (re.compile(r"เงย|มอง\s*(ข้าง\s*)?บน"), "up"),
+    (re.compile(r"ก้ม|มอง\s*(ข้าง\s*)?ล่าง"), "down"),
+    (re.compile(r"หัน\s*(หน้า\s*)?(กลับ|ตรง|มา\s*ตรง)|มอง\s*ตรง|หัน\s*(หน้า\s*)?มา\s*(ทาง\s*)?(นี้|นี่|ผม|หนู|ฉัน)"), "center"),
+]
+HEAD_MAX_CHARS = 28  # without spaces, name included: longer is more than a head command
+HEAD_REPLY = "ได้ครับ"
+
+
+def head_command(text: str) -> str | None:
+    if len(text.replace(" ", "")) > HEAD_MAX_CHARS:
+        return None
+    return next((name for rx, name in HEAD_COMMANDS if rx.search(text)), None)
+
+
 # "แบตเหลือกี่เปอร์เซ็นต์": answered from the robot's last power report, without the LLM
 BATTERY_RE = re.compile(r"(แบต|พลังงาน|battery).*(เหลือ|กี่|เท่าไ|ยัง|หมด|พอ)|(เหลือ|กี่).*(แบต|เปอร์เซ็นต์)", re.I)
 
@@ -1086,6 +1108,18 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                move = head_command(text)
+                if move:
+                    tracker = getattr(dash.bridge, "tracker", None)
+                    if tracker:
+                        tracker.pause(15.0)  # or it pulls the head back to the face it follows
+                    dash.bridge.controller.gesture(move)
+                    dash._last_reply = time.monotonic()
+                    log.info("voice: %r -> gesture %s", text, move)
+                    dash.add("chat", {"type": "reply", "to": text, "text": HEAD_REPLY, "voice": True})
+                    if not getattr(dash, "_head_wav", None):
+                        dash._head_wav = to_16k(dash.tts.speak(HEAD_REPLY))
+                    return self._send(200, dash._head_wav, "audio/wav")
                 line = battery_line(getattr(dash.bridge, "power", None) or {}) if BATTERY_RE.search(text) else None
                 if line:
                     dash._last_reply = time.monotonic()
