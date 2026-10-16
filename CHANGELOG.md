@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.46.0 (2026-10-16)
+
+### Features
+
+- **voice**: Rest until called by name, and ask to be charged at 20% and every 5 min below 10%
+  ([`1df1d13`](https://github.com/dixonsatit/FlyBot/commit/1df1d135d12cca5fb8f8c13a989247bb3dd512b8))
+
+
 ## v0.45.0 (2026-10-16)
 
 ### Features
