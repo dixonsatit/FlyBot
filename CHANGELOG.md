@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.40.0 (2026-10-16)
+
+### Features
+
+- **photos**: Take photos on request and open them on a phone by QR
+  ([`08a3461`](https://github.com/dixonsatit/FlyBot/commit/08a346178f58980f8fac3ddf94bf79011e0ef5cf))
+
+
 ## v0.39.0 (2026-10-16)
 
 ### Features
