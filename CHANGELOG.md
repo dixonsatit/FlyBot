@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.2 (2026-10-16)
+
+### Bug Fixes
+
+- **firmware**: Heap checks around the speaker-to-mic switch stop the panics
+  ([`b1b6c16`](https://github.com/dixonsatit/FlyBot/commit/b1b6c167865c9a400b2ac054687fb62563b23a01))
+
+
 ## v0.41.1 (2026-10-16)
 
 ### Bug Fixes
