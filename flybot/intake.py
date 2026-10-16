@@ -55,7 +55,10 @@ class IntakeSession:
         if self._connect is None:
             from websockets.sync.client import connect
             self._connect = connect
-        self._ws = self._connect(self.url, open_timeout=10, max_size=2 ** 22)
+        try:  # websockets >= 15 wants a context manager unless legacy=True (this connection outlives any block)
+            self._ws = self._connect(self.url, open_timeout=10, max_size=2 ** 22, legacy=True)
+        except TypeError:
+            self._ws = self._connect(self.url, open_timeout=10, max_size=2 ** 22)
         self._send({"t": "hello", "fw": "flybot-bridge", "caps": ["server_asr"]})
         self._send({"t": "start"})
         threading.Thread(target=self._read, name="intake", daemon=True).start()

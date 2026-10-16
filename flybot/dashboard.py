@@ -49,6 +49,10 @@ ADDRESSED_RE = re.compile(r"เห็น(ผม|ฉัน|หนู|ไหม)|�
                           r"ส่ายหน้า|หนู(ช่วย|ทำ|รู้|จำ|จด|เตือน)|ช่วย(บอก|ดู|เตือน|จำ|จด|เปิด|หา)|ตอบ(ผม|หน่อย)")
 CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot being called
 CALL_REPLY = "ว่าไงครับ"
+# "ซักประวัติ" said to the robot starts history taking (no name needed, no LLM in the way), and
+# "หยุด/ยกเลิกการซักประวัติ" heard during it cancels without a draft.
+INTAKE_START_RE = re.compile(r"(เริ่ม|ช่วย|ขอ|อยาก)?\s*ซัก\s*ประวัติ")
+INTAKE_STOP_RE = re.compile(r"(หยุด|ยกเลิก|เลิก|พอ)(การ)?\s*ซัก\s*ประวัติ|ไม่\s*ซัก(แล้ว|ต่อ)")
 
 # What the robot says when its head is stroked (it calls itself หนู).
 # Lines the robot keeps and plays itself: while a voice reply is being made (Dashboard.progress),
@@ -381,6 +385,8 @@ class Dashboard:
 
         def on_event(ev: dict) -> None:
             v, phase = self.intake_view, ev.get("phase")
+            if phase == "heard" and INTAKE_STOP_RE.search(ev.get("text", "")):
+                threading.Thread(target=lambda: self.intake and self.intake.cancel(), daemon=True).start()
             if phase in ("say", "heard"):
                 v["lines"] = (v.get("lines", []) + [{"who": "robot" if phase == "say" else "patient", "text": ev.get("text", "")}])[-40:]
             elif phase == "slots":
@@ -805,6 +811,13 @@ class Dashboard:
                     log.warning("voice: ASR failed (%.1fs, wake=%d): %s", len(pcm) / 32000, wake, e)
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
+                if dash.intake_url and text and INTAKE_START_RE.search(text) and not INTAKE_STOP_RE.search(text):
+                    try:
+                        dash.start_intake("th")
+                        log.info("voice: %r -> history taking", text)
+                        return self._send(204, b"", "audio/wav")  # the interview's greeting follows as an announcement
+                    except Exception as e:
+                        log.warning("voice: could not start history taking: %s", e)
                 presence = getattr(dash.bridge, "presence", None)
                 if presence and text:
                     presence.note_voice()  # someone is talking next to the robot: they are here
