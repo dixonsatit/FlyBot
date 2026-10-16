@@ -57,6 +57,9 @@ INTAKE_STOP_RE = re.compile(r"(หยุด|ยกเลิก|เลิก|พ�
 INTAKE_SKIP_RE = re.compile(r"ซัก\s*เลย|ไม่\s*(ต้อง\s*)?(login|ล[็๊]?อ[็๊]?ก\s*อิน|ยืนยัน\s*ตัว\s*ตน)|ข้าม")
 # "ถ่ายรูปให้หน่อย": taken straight away, no LLM round trip (it was 13 s on qwen)
 PHOTO_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)")
+# A photo asked of the robot ("ถ่ายรูปให้หน่อย"): taken without the wake name, which the ASR
+# often loses in a noisy room; the spoken countdown tells everyone in front before it is taken.
+PHOTO_ASK_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)\s*(ให้|หน่อย|เลย|กัน|กับ)")
 PHOTO_LINE = "แชะ! ถ่ายแล้วครับ สแกนคิวอาร์บนจอดูรูปได้เลยครับ"
 COUNTDOWN_LINE = "เตรียมตัวนะครับ ยิ้มหน่อย สาม สอง หนึ่ง"
 PHOTO_QR_TEXT = "สแกนดูรูป"
@@ -1017,6 +1020,8 @@ class Dashboard:
                     log.info("voice: call %r (%.1fs) -> %r", text, seconds, CALL_REPLY)
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "call"})
                     return self._send(200, to_16k(dash.tts.speak(CALL_REPLY)), "audio/wav")
+                if dash.album and text and PHOTO_ASK_RE.search(text):
+                    follow_up = True
                 if not text or (wake and not follow_up and not dash.wake.search(text)):  # not for the robot
                     log.info("voice: %s (%.1fs) -> 204", f"heard {text!r} without the wake name" if text
                              else "nothing understood", seconds)

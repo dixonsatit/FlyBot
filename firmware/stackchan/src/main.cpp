@@ -563,6 +563,7 @@ static const Network NETWORKS[] = {
 };
 static constexpr int N_NETWORKS = sizeof NETWORKS / sizeof *NETWORKS;
 static int network = 0;
+static bool usingWss = false;  // MQTT over wss (set by joinNetwork)
 static uint32_t lastJoin = 0;  // give each join 10 s before starting over
 
 // The strongest known network in a scan (logged, so a weak or missing AP shows on serial), and
@@ -611,8 +612,10 @@ static void joinNetwork() {
     wssClient.setClientCert(ROBOT_CLIENT_CERT, ROBOT_CLIENT_KEY);  // the public endpoint asks for it (mTLS)
 #endif
     mqtt.setClient(wssClient);
+    usingWss = true;
   } else {
     mqtt.setClient(wifiClient);
+    usingWss = false;
   }
   mqttHost = host;
   mqtt.setServer(mqttHost.c_str(), n.mqttPort);
@@ -736,6 +739,10 @@ void setup() {
   streamBegin();
 }
 
+static bool wifiAvailable() {  // bytes waiting on the MQTT connection, whichever client carries it
+  return mqtt.connected() && (usingWss ? wssClient.available() : wifiClient.available()) > 0;
+}
+
 static void hideQr() {
   if (!qrShown) return;
   qrShown = false;
@@ -783,7 +790,10 @@ void loop() {
   voiceUpdate();
   publishStatus();
   ensureConnected();
+  // PubSubClient handles one message per loop(): at ~20 loops/s and 20 commands/s plus the rest,
+  // the backlog grew until announcements played minutes late. Drain what has arrived.
   mqtt.loop();
+  for (int i = 0; i < 16 && wifiAvailable(); ++i) mqtt.loop();
   serviceTones();
   servoUpdate();
   serviceBody();
