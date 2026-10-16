@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.44.0 (2026-10-16)
+
+### Features
+
+- **voice**: Transcribe with Whisper first, fall back to Typhoon, and wake on what Whisper hears for
+  น้องหวี่
+  ([`0d55ff9`](https://github.com/dixonsatit/FlyBot/commit/0d55ff943300edd15e3b504bc27bef08b6cfc326))
+
+
 ## v0.43.0 (2026-10-16)
 
 ### Features
