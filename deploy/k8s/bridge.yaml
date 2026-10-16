@@ -77,7 +77,7 @@ spec:
             - {name: state, mountPath: /state}
       volumes:
         - name: state                  # notes and reminders (FLYBOT_STATE_DIR)
-          persistentVolumeClaim: {claimName: flybot-assistant}
+          persistentVolumeClaim: {claimName: flybot-state}
         - name: gains
           configMap: {name: flybot-gains}
         - name: tmp
@@ -97,9 +97,11 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: flybot-assistant
+  name: flybot-state
   namespace: flybot
 spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: longhorn
+  # CephFS, not Longhorn: a Longhorn iSCSI target left stuck on one node kept the bridge from
+  # starting there (2026-10-16). Small JSON, photos and clips need no block device.
+  accessModes: [ReadWriteMany]
+  storageClassName: k9s-cephfs
   resources: {requests: {storage: 1Gi}}
