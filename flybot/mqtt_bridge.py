@@ -373,7 +373,7 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--tts-speed", type=float, default=1.0, help="Wayu speaking rate (1.0 is quick; 0.8 calmer)")
     dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
     dash.add_argument("--stt-fallback-url", help="second ASR server, used only when --stt-url fails")
-    dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|^\s*น้อง\s*(อี้|อี(?!ก)|หมี|มี|หลี|หนี)|หวี",
+    dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|^\s*น้อง\s*(อี้|อี(?!ก)|หมี|มี|หลี|หนี|อุ๋ย|อุ้ย|อุ่ย|อุย|วุ้ย|หวุ่ย)|หวี",
                       help="regex the robot's hands-free speech must contain (as asr-typhoon spells the name)")
     dash.add_argument("--follow-up", type=float, default=20.0,
                       help="seconds after a spoken reply during which the next sentence needs no wake name")

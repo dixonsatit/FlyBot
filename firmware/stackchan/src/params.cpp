@@ -29,12 +29,15 @@
 #ifndef LED_BRIGHTNESS
 #define LED_BRIGHTNESS 40
 #endif
+#ifndef MIC_GAIN  // at x1 a voice across the desk measured ~25 against a 300 threshold (2026-10-16)
+#define MIC_GAIN 3.0f
+#endif
 #ifndef VAD_SPEECH_FRAC
 #define VAD_SPEECH_FRAC 0.4f
 #endif
 
 static const Params DEFAULTS = {DIFF_THRESHOLD, MIN_MOTION_PIXELS, MAX_MOTION_FRACTION, EGO_MOTION_DEG_S,
-                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO, VAD_SPEECH_FRAC, 0.25f, 25.0f, 0.15f, LED_BRIGHTNESS, 0, 0.3f, 0};
+                                SPEAKER_VOLUME_PCT, VOICE_VOLUME, VOICE_GAIN, VAD_MIN_RMS, VAD_RATIO, VAD_SPEECH_FRAC, 0.25f, 25.0f, 0.15f, LED_BRIGHTNESS, 0, 0.3f, 0, MIC_GAIN};
 Params P = DEFAULTS;
 
 struct Field {
@@ -61,6 +64,7 @@ static const Field FIELDS[] = {
     {"face_swap", false, &P.faceSwap, 0, 1},
     {"face_score", true, &P.faceScore, 0.05f, 0.95f},
     {"face_two_stage", false, &P.faceTwoStage, 0, 1},
+    {"mic_gain", true, &P.micGain, 0.5f, 8},
 };
 
 static float get(const Field& f) { return f.isFloat ? *(float*)f.ptr : float(*(int*)f.ptr); }

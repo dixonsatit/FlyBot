@@ -250,7 +250,10 @@ static void micTask(void*) {
     }
     while (M5.Mic.isRecording()) delay(1);
     if (!micActive) continue;
-    for (size_t i = 0; i < BLOCK; ++i) block[i] = int16_t((int32_t(stereo[2 * i]) + stereo[2 * i + 1]) / 2);
+    for (size_t i = 0; i < BLOCK; ++i) {
+      const float v = (int32_t(stereo[2 * i]) + stereo[2 * i + 1]) * 0.5f * P.micGain;
+      block[i] = int16_t(constrain(v, -32767.0f, 32767.0f));
+    }
     float share;
     const int32_t level = voiceBand(block, BLOCK, &share);  // only voices start or hold a sentence
     const bool voice = share >= P.vadSpeechFrac;

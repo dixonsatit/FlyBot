@@ -184,7 +184,7 @@ input[type=range]{width:100%}button{font:inherit;padding:4px 10px;border-radius:
 const $=id=>document.getElementById(id);let raw=false;
 const LABEL={diff_threshold:'Pixel change threshold',min_motion_px:'Min changed pixels',max_motion_frac:'Max changed fraction (skip)',
 ego_deg_s:'Skip while head turns faster than (°/s)',tone_volume_pct:'Brain tones volume (%)',voice_volume:'Speech volume (0-255)',
-voice_gain:'Speech gain (x)',vad_min_rms:'Mic: min speech level',vad_ratio:'Mic: x room noise'};
+voice_gain:'Speech gain (x)',vad_min_rms:'Mic: min speech level',vad_ratio:'Mic: x room noise',mic_gain:'Mic gain (x)'};
 let streamPath='';
 function cam(){if(!streamPath)return;$('cam').src=location.protocol+'//'+location.hostname+streamPath+(raw?'&raw=1':'');$('mode').textContent=raw?'Show detector view':'Show plain image'}
 $('mode').onclick=()=>{raw=!raw;cam()};

@@ -22,6 +22,7 @@ struct Params {
   int faceSwap;             // 1: swap the RGB565 bytes before face detection
   float faceScore;          // detector score threshold
   int faceTwoStage;         // 1: MSR01 candidates refined by MNP01 (slower, more accurate)
+  float micGain;            // software gain on the microphone (M5Unified gives the CoreS3 only x2)
 };
 
 extern Params P;

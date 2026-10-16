@@ -858,7 +858,7 @@ static void servicePreview() {
     }
     free(jpg);
     previewCanvas->pushSprite(&d, 0, 0);
-    previewStillUntil = millis() + 1500;
+    previewStillUntil = millis() + 3000;
     return;
   }
   const bool ok = previewFrame(fb);

@@ -816,7 +816,7 @@ def test_wake_name_takes_what_whisper_hears_for_nong_wee():
     import re
     from flybot.dashboard import Dashboard
     wake = re.compile(inspect.signature(Dashboard.__init__).parameters["wake_name"].default, re.I)
-    for heard in ("น้องอี้", "น้อง มี", "น้องหนี", "น้องหมีมาหน่อย", "น้องหลี", "น้องหวี่"):
+    for heard in ("น้องอี้", "น้อง มี", "น้องหนี", "น้องหมีมาหน่อย", "น้องหลี", "น้องหวี่", "น้องอุ๋ย ถ่ายรูปหน่อย"):
         assert wake.search(heard), heard
     for talk in ("น้องอีกคนมาแล้ว", "พี่มีน้องมีกุญแจ", "มันเป็นน้องหลี"):
         assert not wake.search(talk), talk
