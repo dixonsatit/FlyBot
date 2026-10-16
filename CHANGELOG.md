@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.6 (2026-10-16)
+
+### Bug Fixes
+
+- Announcements played minutes late; photo requests without the name
+  ([`e01c1d0`](https://github.com/dixonsatit/FlyBot/commit/e01c1d04d268ae05b4a2dda0e8b2270cb5e362a2))
+
+
 ## v0.41.5 (2026-10-16)
 
 ### Bug Fixes
