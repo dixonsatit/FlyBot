@@ -357,7 +357,8 @@ def main(argv: list[str] | None = None) -> None:
     dash.add_argument("--tts-voice", help="default Wayu voice id (e.g. f_young_clear, m_young_clear)")
     dash.add_argument("--tts-speed", type=float, default=1.0, help="Wayu speaking rate (1.0 is quick; 0.8 calmer)")
     dash.add_argument("--stt-url", help="Thai ASR server (asr-typhoon), e.g. http://asr-typhoon:7871")
-    dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|หวี",
+    dash.add_argument("--stt-fallback-url", help="second ASR server, used only when --stt-url fails")
+    dash.add_argument("--wake-name", default=r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)|^\s*(หวี|วี|wee)(?!ดี|ซ่|ไอ|ร)|น้อง\s*(หวี่|หวี|วี่|วี|v)|^\s*น้อง\s*(อี้|อี(?!ก)|หมี|มี|หลี|หนี)|หวี",
                       help="regex the robot's hands-free speech must contain (as asr-typhoon spells the name)")
     dash.add_argument("--follow-up", type=float, default=20.0,
                       help="seconds after a spoken reply during which the next sentence needs no wake name")
@@ -446,8 +447,10 @@ def main(argv: list[str] | None = None) -> None:
             tts = WayuTTS(args.tts_url, args.tts_voice, speed=args.tts_speed)
         stt = None
         if args.stt_url:
-            from .stt import AsrClient
-            stt = AsrClient(args.stt_url)
+            from .stt import AsrClient, FallbackAsr
+            stt = AsrClient(args.stt_url, timeout=15.0 if args.stt_fallback_url else 30.0)
+            if args.stt_fallback_url:
+                stt = FallbackAsr(stt, AsrClient(args.stt_fallback_url))
         bridge.dashboard = Dashboard(bridge, args.dashboard_port, args.dashboard_user, args.dashboard_password,
                                      sim=args.dashboard_sim, tts=tts, stt=stt, wake_name=args.wake_name,
                                      follow_up_s=args.follow_up)

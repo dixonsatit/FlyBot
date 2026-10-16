@@ -163,6 +163,10 @@ python -m flybot.mqtt_bridge --host 127.0.0.1 --gains data/gains.json --dashboar
     แล้วเปิด http://localhost:8080)
 - **ใช้บริการเสียงร่วมกับ kiosk บน cluster เดียวกัน**: `FLYBOT_TTS_URL=http://wayu-tts.stackchan-interview.svc:7860`,
   `FLYBOT_STT_URL=http://asr-typhoon.stackchan-interview.svc:7871` — ไม่ต้องติดตั้งหรือดึง image private ซ้ำ
+- **ถอดเสียงด้วย Whisper บน DGX เป็นหลัก**: `FLYBOT_STT_URL=http://192.168.3.57:7870` +
+  `FLYBOT_STT_FALLBACK_URL=http://asr-typhoon.stackchan-interview.svc:7871` (ใช้ Typhoon เมื่อ Whisper ล่ม/ช้าเกิน 15 วิ)
+  เทียบกับเสียงที่หุ่นอัดจริง 30 คลิป Whisper ถอดได้ครบกว่าและไม่ทิ้งประโยคยาว แต่ช้ากว่า (~1–3 วิ) และบางทีวนคำเดิม
+  ซ้ำจนจบ — `stt.unloop` ยุบวลีที่ซ้ำ 4 ครั้งขึ้นไปเหลือครั้งเดียว
 
 ## สมองทั้งก้อน + Hospital Twin
 

@@ -788,6 +788,40 @@ def test_asr_via_dashboard(gains):
         server.server_close()
 
 
+def test_asr_falls_back_when_whisper_fails_and_drops_its_loops():
+    from flybot.stt import AsrClient, FallbackAsr, unloop
+    assert unloop("มันอร่อย " * 100 + "มันอ") == "มันอร่อย"
+    assert unloop("อุ๊ย อุ๊ย กางเกง") == "อุ๊ย อุ๊ย กางเกง"  # a word said twice is speech
+    assert unloop("มันอร่อย " * 5 + "จริงๆ") == "มันอร่อย จริงๆ"
+
+    class Fake(AsrClient):
+        def __init__(self, answer):
+            super().__init__("http://fake")
+            self.answer, self.calls = answer, 0
+
+        def transcribe(self, pcm):
+            self.calls += 1
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return {"text": self.answer}
+
+    whisper, typhoon = Fake(TimeoutError("timed out")), Fake("หันขวา")
+    assert FallbackAsr(whisper, typhoon).transcribe(b"\0\0")["text"] == "หันขวา"
+    whisper, typhoon = Fake(""), Fake("หันขวา")
+    assert FallbackAsr(whisper, typhoon).transcribe(b"\0\0")["text"] == "" and typhoon.calls == 0  # no speech
+
+
+def test_wake_name_takes_what_whisper_hears_for_nong_wee():
+    import inspect
+    import re
+    from flybot.dashboard import Dashboard
+    wake = re.compile(inspect.signature(Dashboard.__init__).parameters["wake_name"].default, re.I)
+    for heard in ("น้องอี้", "น้อง มี", "น้องหนี", "น้องหมีมาหน่อย", "น้องหลี", "น้องหวี่"):
+        assert wake.search(heard), heard
+    for talk in ("น้องอีกคนมาแล้ว", "พี่มีน้องมีกุญแจ", "มันเป็นน้องหลี"):
+        assert not wake.search(talk), talk
+
+
 def test_voice_turn_via_dashboard(gains):
     """Robot voice: PCM -> ASR -> cortex reply -> TTS WAV, and the page doesn't speak it again."""
     import base64 as _b64
