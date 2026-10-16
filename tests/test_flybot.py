@@ -1640,11 +1640,11 @@ def test_line_contacts_register_by_employee_code_and_send(tmp_path):
     url = f"http://127.0.0.1:{srv.server_address[1]}/push"
 
     class Directory:  # the v_stackchan_line view
-        rows = {90129: {"code": 90129, "title": "นาย", "name": "สาธิต", "surname": "สีถาพล", "nicname": "ต๊ะ",
+        data = {90129: {"code": 90129, "title": "นาย", "name": "สาธิต", "surname": "สีถาพล", "nicname": "ต๊ะ",
                         "line_id": "Uaaaa"},
                 55: {"code": 55, "title": "นาง", "name": "ไม่มี", "surname": "ไลน์", "nicname": "", "line_id": None}}
-        def get(self, code):
-            return self.rows.get(code)
+        def rows(self, code):
+            return [self.data[code]] if code in self.data else []
 
     try:
         path = str(tmp_path / "line.json")
@@ -1662,6 +1662,16 @@ def test_line_contacts_register_by_employee_code_and_send(tmp_path):
         with pytest.raises(ValueError):
             LineContacts(path, Directory(), LineMessenger("wrong", push_url=url)).send("90129", "x")  # 401 explained
         assert contacts.remove(90129) and contacts.list() == []
+        # two registrations: the newest isn't a friend of this OA (404), the older one is
+        twice = {77: [dict(Directory.data[90129], code=77, line_id="Unew"),
+                      dict(Directory.data[90129], code=77, line_id="Uold")]}
+        contacts.directory = type("D", (), {"rows": lambda self, code: twice.get(code, [])})()
+        friends = {"Uold"}
+        contacts.messenger.reachable = lambda i: i in friends
+        assert contacts.register(77)["code"] == 77 and contacts.people["77"]["line_id"] == "Uold"
+        friends.clear()
+        with pytest.raises(ValueError):
+            contacts.register(77)  # none of them reachable
         assert "line_contacts" in READ_ONLY and "send_line" not in READ_ONLY  # sending is audited
     finally:
         srv.shutdown()

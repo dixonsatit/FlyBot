@@ -7,11 +7,14 @@ in ``<--state-dir>/line_contacts.json``, and the assistant's ``send_line`` tool 
 that list. A LINE user id belongs to one channel, so the token must be that LINE OA's.
 
     CREATE VIEW hospdata.v_stackchan_line AS
-    SELECT e.code, e.title, e.name, e.surname, e.nicname,
-           (SELECT l.line_id FROM hospdata.covid_line_register l
-             WHERE l.cid = e.person_id AND l.expire IS NULL AND l.line_id <> ''
-             ORDER BY l.date DESC LIMIT 1) AS line_id
-    FROM hospdata.employee e WHERE e.expire IS NULL;
+    SELECT e.code, e.title, e.name, e.surname, e.nicname, l.line_id, l.date
+    FROM hospdata.employee e
+    JOIN hospdata.covid_line_register l ON l.cid = e.person_id AND l.expire IS NULL AND l.line_id <> ''
+    WHERE e.expire IS NULL;
+
+A person can have several rows (registered again later, through another channel); registration
+keeps the newest one this OA can reach: on 2026-10-16 the newest of the user's two ids was 404 to
+the KKH OA and the older one worked.
 """
 from __future__ import annotations
 
@@ -38,6 +41,18 @@ class LineMessenger:
     def __init__(self, token: str, push_url: str = PUSH_URL, timeout: float = 10.0):
         self.token, self.push_url, self.timeout = token, push_url, timeout
 
+    def reachable(self, line_id: str) -> bool:
+        """The person is a friend of this OA (the profile is readable)."""
+        url = self.push_url.rsplit("/message/push", 1)[0] + f"/profile/{urllib.parse.quote(line_id)}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout):
+                return True
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 429):
+                raise LineError(f"LINE {e.code} while checking the contact") from None
+            return False
+
     def push(self, line_id: str, text: str) -> None:
         body = json.dumps({"to": line_id, "messages": [{"type": "text", "text": text[:MAX_TEXT]}]}).encode()
         req = urllib.request.Request(self.push_url, data=body, method="POST", headers={
@@ -57,6 +72,14 @@ class LineDirectory:
     """Employee code -> name and LINE user id, from the narrow view in the module docstring."""
     COLUMNS = "code, title, name, surname, nicname, line_id"
 
+    def rows(self, code: int) -> list[dict]:
+        """Every LINE registration of the employee, newest first."""
+        import pymysql
+        with pymysql.connect(**self.conn_args, cursorclass=pymysql.cursors.DictCursor) as c, c.cursor() as cur:
+            cur.execute(f"SELECT {self.COLUMNS} FROM {self.view} WHERE code = %s ORDER BY date DESC LIMIT 10",
+                        (int(code),))
+            return list(cur.fetchall())
+
     def __init__(self, dsn: str, view: str = "v_stackchan_line"):
         u = urllib.parse.urlparse(dsn)
         self.conn_args = dict(host=u.hostname, port=u.port or 3306, user=urllib.parse.unquote(u.username or ""),
@@ -65,10 +88,8 @@ class LineDirectory:
         self.view = view
 
     def get(self, code: int) -> dict | None:
-        import pymysql
-        with pymysql.connect(**self.conn_args, cursorclass=pymysql.cursors.DictCursor) as c, c.cursor() as cur:
-            cur.execute(f"SELECT {self.COLUMNS} FROM {self.view} WHERE code = %s LIMIT 1", (int(code),))
-            return cur.fetchone()
+        rows = self.rows(code)
+        return rows[0] if rows else None
 
 
 class LineContacts:
@@ -96,11 +117,16 @@ class LineContacts:
             raise ValueError("employee code must be a number") from None
         if not self.directory:
             raise ValueError("no staff directory: set --line-dsn (the v_stackchan_line view)")
-        row = self.directory.get(code)
-        if not row:
+        rows = [r for r in (self.directory.rows(code) if hasattr(self.directory, "rows")
+                            else [self.directory.get(code)]) if r]
+        if not rows:
             raise ValueError(f"no active employee with code {code}")
-        if not row.get("line_id"):
-            raise ValueError(f"employee {code} has not linked LINE to the KKH LINE OA")
+        ids = [r for r in rows if r.get("line_id")]
+        if self.messenger and len(ids) > 1:
+            ids = [r for r in ids if self.messenger.reachable(r["line_id"])] or ids[:0]
+        if not ids:
+            raise ValueError(f"employee {code} has not linked LINE to this LINE OA")
+        row = ids[0]
         person = {"code": code, "name": f"{row.get('title') or ''}{row['name']} {row.get('surname') or ''}".strip(),
                   "nick": row.get("nicname") or "", "line_id": row["line_id"],
                   "registered_at": time.strftime("%Y-%m-%d %H:%M:%S")}
