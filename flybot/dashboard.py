@@ -55,6 +55,10 @@ INTAKE_START_RE = re.compile(r"(เริ่ม|ช่วย|ขอ|อยาก
 INTAKE_STOP_RE = re.compile(r"(หยุด|ยกเลิก|เลิก|พอ)(การ)?\s*ซัก\s*ประวัติ|ไม่\s*ซัก(แล้ว|ต่อ)")
 # Interview without logging in, said either with the request or while the QR is up.
 INTAKE_SKIP_RE = re.compile(r"ซัก\s*เลย|ไม่\s*(ต้อง\s*)?(login|ล[็๊]?อ[็๊]?ก\s*อิน|ยืนยัน\s*ตัว\s*ตน)|ข้าม")
+# "ถ่ายรูปให้หน่อย": taken straight away, no LLM round trip (it was 13 s on qwen)
+PHOTO_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)")
+PHOTO_LINE = "แชะ! ถ่ายแล้วครับ สแกนคิวอาร์บนจอดูรูปได้เลยครับ"
+PHOTO_QR_TEXT = "สแกนดูรูป"
 PAIR_QR_TEXT = "สแกนเพื่อยืนยันตัวตน ThaID"
 PAIR_LINE = ("ถ้าจะยืนยันตัวตน สแกนคิวอาร์บนจอด้วยมือถือ แล้วล็อกอินไทดีครับ "
              "ถ้าไม่ล็อกอิน พูดว่า ซักเลย ได้เลยครับ")
@@ -212,6 +216,8 @@ class Dashboard:
         self.intake_public_url: str | None = None
         self.pairing = None  # flybot.intake.Pairing while the QR waits for the patient's phone
         self.pair_poll_s = 1.0
+        self.album = None  # flybot.photos.PhotoAlbum, with --state-dir
+        self.public_url = "https://stackchan.kkh.go.th"  # where a phone opens a shared photo
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -305,6 +311,17 @@ class Dashboard:
             if body.get("login") == "thaid":
                 return self.start_pairing(str(body.get("dialect", "th")))
             return self.start_intake(str(body.get("dialect", "th")))
+        elif path == "/api/photos":
+            if not self.album:
+                raise ValueError("photos need --state-dir")
+            if body.get("delete"):
+                return {"ok": self.album.delete(str(body["delete"]))}
+            if body.get("share"):
+                return {"ok": True, **self.share_photo(str(body["share"]))}
+            if body.get("hide_qr"):
+                self.show_qr("")
+                return {"ok": True}
+            return self.take_photo(show_qr=bool(body.get("qr", True)))
         elif path == "/api/speak":  # say this through the robot's speaker now, even if nobody is there
             text = str(body.get("text", "")).strip()[:300]
             if not text or not self.announce(text, force=True):
@@ -398,6 +415,25 @@ class Dashboard:
         from .thai_text import shape
         self.bridge.client.publish(f"{self.bridge.base}/screen/qr", json.dumps(
             {"url": url, "text": shape(text), "seconds": round(seconds)}, ensure_ascii=False))
+
+    def take_photo(self, show_qr: bool = True) -> dict:
+        """A fresh frame from the robot's camera into the album, and a QR on the robot that opens
+        it on a phone."""
+        if not self.album:
+            raise ValueError("photos need --state-dir")
+        jpeg = self.bridge.snapshot(6.0)
+        if not jpeg:
+            raise ValueError("the robot sent no picture")
+        name = self.album.save(jpeg)
+        log.info("photo: %s (%d KB)", name, len(jpeg) // 1024)
+        self.add("event", {"type": "photo", "name": name})
+        return {"ok": True, "name": name, **(self.share_photo(name) if show_qr else {})}
+
+    def share_photo(self, name: str) -> dict:
+        token = self.album.share(name)
+        url = f"{self.public_url.rstrip('/')}/p/{token}"
+        self.show_qr(url, PHOTO_QR_TEXT, 120)
+        return {"url": url}
 
     def start_pairing(self, dialect: str = "th") -> dict:
         """Show a QR so the patient logs in with ThaID on their phone; the interview starts with that
@@ -747,8 +783,15 @@ class Dashboard:
             def do_GET(self):
                 if self.path == "/healthz":
                     return self._send(200, b"ok", "text/plain")
+                if self.path.startswith("/p/"):  # a shared photo: the token is the key, no login
+                    return self._shared_photo(self.path[3:].split("?")[0])
                 if not self._auth():
                     return
+                if self.path == "/api/photos":
+                    return self._json(200, {"on": bool(dash.album), "photos": dash.album.names()[:60] if dash.album else []})
+                if self.path.startswith("/api/photos/"):
+                    jpeg = dash.album.read(self.path.split("/")[-1]) if dash.album else None
+                    return self._send(200, jpeg, "image/jpeg") if jpeg else self._json(404, {"error": "no such photo"})
                 if self.path in ("/", "/index.html"):
                     return self._send(200, dash.page, "text/html; charset=utf-8")
                 if self.path == "/api/intake":
@@ -858,6 +901,21 @@ class Dashboard:
                 except (ValueError, TypeError, AttributeError) as e:
                     self._json(400, {"error": str(e)})
 
+            def _shared_photo(self, token: str):
+                raw = token.endswith(".jpg")
+                name = dash.album.shared(token[:-4] if raw else token) if dash.album else None
+                if not name:
+                    return self._send(404, "<!doctype html><meta charset=utf-8><p>ลิงก์รูปหมดอายุแล้ว".encode(),
+                                      "text/html; charset=utf-8")
+                if raw:
+                    return self._send(200, dash.album.read(name), "image/jpeg")
+                page = (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,"
+                        f"initial-scale=1'><title>รูปจากน้องหวี่</title><body style='margin:0;background:#111;"
+                        f"color:#eee;font:16px sans-serif;text-align:center'><img src='{token}.jpg' style='width:100%;"
+                        f"max-width:640px;image-rendering:auto'><p><a style='color:#8cf' href='{token}.jpg' "
+                        f"download='{name}'>บันทึกรูป</a></p><p style='color:#888;font-size:13px'>ลิงก์นี้ใช้ได้ 10 นาที</p>")
+                return self._send(200, page.encode(), "text/html; charset=utf-8")
+
             def _pat(self):
                 dash.bridge.controller.pet()
                 if not dash.tts:
@@ -929,6 +987,17 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                if dash.album and PHOTO_RE.search(text):
+                    try:
+                        dash.take_photo()
+                        reply = PHOTO_LINE
+                    except ValueError as e:
+                        log.warning("voice: photo failed: %s", e)
+                        reply = "ขอโทษครับ กล้องไม่ส่งรูปมา ลองใหม่อีกทีนะครับ"
+                    dash._last_reply = time.monotonic()
+                    dash.add("chat", {"type": "reply", "to": text, "text": reply, "voice": True})
+                    log.info("voice: %r -> photo", text)
+                    return self._send(200, to_16k(dash.tts.speak(reply)), "audio/wav")
                 t_asr = time.monotonic()
                 try:
                     with dash.progress() as said:

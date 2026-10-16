@@ -48,6 +48,9 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; }
 .cam img { width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
 .cam .over { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; }
 .cam .over .pill { background: rgba(0,0,0,.55); color: #fff; }
+.photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 8px; }
+.photos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; cursor: pointer; background: #000; }
+.photos img.sel { outline: 3px solid #3b82f6; }
 .cam .idle { color: #cbd5e1; text-align: center; padding: 20px; }
 .pad { display: grid; grid-template-columns: repeat(3, 44px); gap: 6px; }
 .pad button { padding: 8px 0; }
@@ -115,6 +118,18 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
           </div>
         </div>
         <div class="err" id="errCam"></div>
+      </div>
+      <div class="card">
+        <h2>รูปถ่าย <span class="sp"></span><button id="photoBtn" class="primary">📷 ถ่ายรูป</button></h2>
+        <div class="hint">หรือบอกน้องหวี่ว่า "ถ่ายรูปให้หน่อย" · หุ่นขึ้น QR ให้สแกนดูรูปบนมือถือ (ลิงก์ใช้ได้ 10 นาที)</div>
+        <div class="photos" id="photos"></div>
+        <div id="photoView" style="display:none;margin-top:8px">
+          <img id="photoBig" alt="" style="width:100%;border-radius:10px;background:#000">
+          <div class="row"><span class="hint" id="photoName"></span><span class="sp"></span>
+            <a id="photoSave" download><button>บันทึก</button></a>
+            <button id="photoQr">QR บนหุ่น</button><button id="photoDel" class="danger">ลบ</button></div>
+        </div>
+        <div class="err" id="errPhoto"></div>
       </div>
       <div class="card">
         <h2>พูดผ่านหุ่น</h2>
@@ -381,7 +396,9 @@ function addFeed(f) {
     badge = d.type === "announce" ? "📢 หุ่นพูดเอง" : d.voice ? "🔊 พูดออกเสียงแล้ว" : d.type === "narration" ? "" : "💬 ข้อความ"; }
   else if (f.kind === "event") { cls += "ev";
     text = d.type === "meeting" ? (d.message || "").replace(/^StackChan:\s*/, "📅 ") : d.type === "body" ? "🤲 " + (d.kind || "")
-         : d.type === "enrolled" ? "👤 ลงทะเบียน " + (d.name || "") : (EVENT_TEXT[d.type] || d.type); }
+         : d.type === "enrolled" ? "👤 ลงทะเบียน " + (d.name || "")
+         : d.type === "photo" ? "📷 ถ่ายรูป " + (d.name || "") : (EVENT_TEXT[d.type] || d.type);
+    if (d.type === "photo" && !firstPoll) loadPhotos(d.name); }
   else return;
   for (const feed of [$("feed"), $("feedFull")]) {
     const el = document.createElement("div"); el.className = cls;
@@ -490,6 +507,45 @@ async function startMic(button) {
     $("msg" + micFrom).placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
   } };
 }
+
+// ---- photos ------------------------------------------------------------------------
+let photoSel = null;
+async function loadPhotos(pick) {
+  let j; try { j = await (await fetch("/api/photos")).json(); } catch { return; }
+  $("photoBtn").disabled = !j.on;
+  $("photoBtn").title = j.on ? "" : "ต้องตั้ง --state-dir";
+  const box = $("photos"); box.innerHTML = "";
+  if (!j.photos.length) box.innerHTML = `<span class="hint">${j.on ? "ยังไม่มีรูป" : "ปิดอยู่"}</span>`;
+  for (const n of j.photos) {
+    const im = document.createElement("img");
+    im.src = "/api/photos/" + n; im.loading = "lazy"; im.title = n;
+    im.onclick = () => showPhoto(n);
+    if (n === photoSel) im.className = "sel";
+    box.append(im);
+  }
+  if (pick) showPhoto(pick);
+}
+function showPhoto(n) {
+  photoSel = n;
+  $("photoView").style.display = "";
+  $("photoBig").src = $("photoSave").href = "/api/photos/" + n;
+  $("photoSave").download = n;
+  $("photoName").textContent = n.replace(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d).*/, "$3/$2/$1 $4:$5:$6");
+  document.querySelectorAll("#photos img").forEach((im) => im.className = im.title === n ? "sel" : "");
+}
+$("photoBtn").onclick = async () => {
+  $("photoBtn").disabled = true;
+  const j = await post("/api/photos", { qr: true }, "errPhoto");
+  $("photoBtn").disabled = false;
+  if (j) loadPhotos(j.name);
+};
+$("photoQr").onclick = () => photoSel && post("/api/photos", { share: photoSel }, "errPhoto");
+$("photoDel").onclick = async () => {
+  if (!photoSel) return;
+  await post("/api/photos", { delete: photoSel }, "errPhoto");
+  photoSel = null; $("photoView").style.display = "none"; loadPhotos();
+};
+loadPhotos();
 
 // ---- history taking ---------------------------------------------------------------
 const IK_STATE = { idle: "รอ", listening: "กำลังฟัง", thinking: "กำลังคิด", speaking: "กำลังพูด", done: "จบแล้ว" };

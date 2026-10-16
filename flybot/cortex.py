@@ -129,6 +129,7 @@ class Cortex:
         self.tracker = None  # flybot.faces.FaceTracker: paused when the head is moved on request
         self.episodes = None  # flybot.memory.Episodes: summaries of past conversations (recall)
         self.audit = None  # flybot.memory.Audit: what was done, append-only
+        self.photo = None  # Dashboard.take_photo: a picture into the album, QR on the robot
         self._transcript: list[str] = []  # this conversation, summarised into an episode when it ends
         self._last_turn = 0.0
         self.history: list[dict] = []
@@ -403,6 +404,10 @@ class Cortex:
                                                    "pan": {"type": "number"}, "tilt": {"type": "number"}},
                   "additionalProperties": False},
                  self._move_head),
+            Tool("take_photo", "Take a photo with the robot's camera when asked (ถ่ายรูป, ถ่ายภาพ). It is saved "
+                 "in the album on the dashboard and a QR on the robot's screen opens it on a phone for 10 minutes.",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: self.photo() if self.photo else {"error": "photos are off (no --state-dir)"}),
             Tool("recall", "Look up what you remember from earlier conversations and notes (เมื่อวานคุยเรื่อง"
                  "อะไร, เคยบอกว่าอะไร, งานที่ค้าง). Give the topic in a few words.",
                  {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"],

@@ -1571,6 +1571,48 @@ def test_intake_session_carries_the_pairing():
     assert http_base("wss://interview.kkh.go.th/ws") == "https://interview.kkh.go.th"
 
 
+def test_photos_are_saved_and_shared_by_a_short_lived_link(gains, tmp_path):
+    import json as _json
+    import urllib.error
+    import urllib.request
+    from flybot.dashboard import Dashboard, PHOTO_RE
+    from flybot.photos import PhotoAlbum
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    published = []
+    bridge.base = "stackchan"
+    bridge.client.publish = lambda topic, payload, qos=0: published.append((topic, _json.loads(payload)))
+    bridge.snapshot = lambda timeout, max_age=0.0: b"\xff\xd8JPEG\xff\xd9"
+    dash = Dashboard(bridge, port=0, user="admin", password="pw")
+    dash.album = PhotoAlbum(str(tmp_path / "photos"), keep=2)
+    dash.public_url = "https://bot.example/"
+    dash.start()
+    try:
+        status, body = _http(dash.port, "POST", "/api/photos", {"qr": True}, auth="admin:pw")
+        got = _json.loads(body)
+        assert status == 200 and got["url"].startswith("https://bot.example/p/")
+        assert published[-1][0] == "stackchan/screen/qr" and published[-1][1]["url"] == got["url"]
+        token = got["url"].rsplit("/", 1)[1]
+        # the phone: no login, the token alone opens that one photo
+        with urllib.request.urlopen(f"http://127.0.0.1:{dash.port}/p/{token}", timeout=5) as r:
+            assert "รูปจากน้องหวี่" in r.read().decode()
+        with urllib.request.urlopen(f"http://127.0.0.1:{dash.port}/p/{token}.jpg", timeout=5) as r:
+            assert r.read() == b"\xff\xd8JPEG\xff\xd9"
+        assert _http(dash.port, "GET", f"/p/{'x' * 22}")[0] == 404
+        assert _http(dash.port, "GET", "/api/photos")[0] == 401  # the album stays behind the login
+        names = _json.loads(_http(dash.port, "GET", "/api/photos", auth="admin:pw")[1])["photos"]
+        assert names == [got["name"]]
+        assert _http(dash.port, "GET", "/api/photos/../../etc/passwd", auth="admin:pw")[0] == 404
+        assert _http(dash.port, "POST", "/api/photos", {"delete": got["name"]}, auth="admin:pw")[0] == 200
+        assert _http(dash.port, "GET", f"/p/{token}")[0] == 404  # deleted: the link dies with it
+    finally:
+        dash.stop()
+    album = PhotoAlbum(str(tmp_path / "keep"), keep=2)
+    for _ in range(3):
+        album.save(b"x")
+    assert len(album.names()) == 2  # oldest goes beyond keep
+    assert PHOTO_RE.search("น้องหวี่ถ่ายรูปให้หน่อย") and PHOTO_RE.search("ถ่ายภาพหน่อย")
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

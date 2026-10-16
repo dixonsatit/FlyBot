@@ -320,6 +320,8 @@ def main(argv: list[str] | None = None) -> None:
                                          "ws://stackchan-interview.stackchan-interview.svc/ws")
     ap.add_argument("--intake-pair-token", help="the interview server's PAIR_TOKEN: offer a QR for ThaID login "
                                                 "on the patient's phone before history taking")
+    ap.add_argument("--public-url", default="https://stackchan.kkh.go.th",
+                    help="the dashboard as a phone reaches it: shared photos open at <url>/p/<token>")
     ap.add_argument("--intake-public-url", default="https://interview.kkh.go.th",
                     help="the interview server as the patient's phone reaches it (the QR's host)")
     mem = ap.add_argument_group("long-term memory (every part swappable)")
@@ -498,6 +500,11 @@ def main(argv: list[str] | None = None) -> None:
             bridge.cortex.places = Places(args.google_maps_key, float(lat), float(lon))
     if args.state_dir and bridge.dashboard:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
+        from .photos import PhotoAlbum
+        bridge.dashboard.album = PhotoAlbum(os.path.join(args.state_dir, "photos"))
+        bridge.dashboard.public_url = args.public_url
+        if bridge.cortex:
+            bridge.cortex.photo = bridge.dashboard.take_photo
     if (args.state_dir or args.memory_dsn) and bridge.cortex:
         from .assistant import AssistantStore
         from .memory import Audit, Embedder, Episodes, open_backend
