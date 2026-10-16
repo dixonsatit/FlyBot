@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.43.0 (2026-10-16)
+
+### Features
+
+- **people**: Edit name, nickname, employee code, position and office on the people page
+  ([`be6d48a`](https://github.com/dixonsatit/FlyBot/commit/be6d48ab49abb221a6b0a9abd99c154275012d1a))
+
+
 ## v0.42.1 (2026-10-16)
 
 ### Bug Fixes
