@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.5 (2026-10-16)
+
+### Bug Fixes
+
+- **photos**: Ask the robot for the frame twice before giving up
+  ([`855ed1f`](https://github.com/dixonsatit/FlyBot/commit/855ed1f7c03a76e8558757653e876aebd67b6fce))
+
+
 ## v0.41.4 (2026-10-16)
 
 ### Bug Fixes
