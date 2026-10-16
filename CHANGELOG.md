@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.42.0 (2026-10-16)
+
+### Features
+
+- **line**: Message staff on LINE through the hospital's LINE OA
+  ([`97f2017`](https://github.com/dixonsatit/FlyBot/commit/97f2017855f47b9dee598a27d22ecc1cfea5b760))
+
+
 ## v0.41.6 (2026-10-16)
 
 ### Bug Fixes
