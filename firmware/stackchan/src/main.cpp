@@ -16,6 +16,10 @@
 #include <WiFi.h>
 #include <esp_sntp.h>
 #include "esp_camera.h"
+#include <esp_wifi.h>
+#ifndef WIFI_LEGACY_RATES
+#define WIFI_LEGACY_RATES 1
+#endif
 #include "img_converters.h"
 #include "selftest.h"
 #include "servo_drv.h"
@@ -695,6 +699,12 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+#if WIFI_LEGACY_RATES
+  // 802.11b/g only. At -71..-76 dBm in the hospital, frames to the robot of 1000+ bytes were lost
+  // (ping: 88-100 %) while small ones passed, so commands, snapshots and replies never arrived;
+  // without 11n the AP falls back to slower, sturdier rates.
+  esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G);
+#endif
   mqtt.setBufferSize(1024);  // command JSON with brain telemetry exceeds the 256 B default
   mqtt.setCallback(onCommand);
   voiceBegin();
