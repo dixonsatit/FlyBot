@@ -1255,6 +1255,34 @@ def test_faces_enroll_match_and_greet_once(gains, tmp_path):
     assert len(greeted) == 1  # a stranger is not greeted
 
 
+def test_greeter_says_hello_to_someone_new_without_keeping_their_face(tmp_path):
+    import numpy as _np
+    from flybot.faces import FaceRegistry, Greeter
+    rng = _np.random.default_rng(2)
+    unit = lambda: (lambda v: list(v / _np.linalg.norm(v)))(rng.normal(size=128))
+    me = unit()
+    registry = FaceRegistry(str(tmp_path / "faces.json"))
+    registry.people["me"] = {"name": "สาธิต", "embeddings": [me]}
+    hellos, now = [], [1000.0]
+    g = Greeter(None, None, registry, lambda p: None, clock=lambda: now[0], on_stranger=lambda: hellos.append(now[0]))
+    face = lambda e, w=0.3: [{"box": [0.4, 0.3, w, 0.3], "embedding": e}]
+    stranger = unit()
+    g.consider(face(stranger))
+    assert hellos == []  # one glimpse is not enough
+    now[0] += 3.5
+    g.consider(face(stranger))
+    assert hellos == [1003.5]
+    now[0] += 60
+    g.consider(face(unit())); now[0] += 4; g.consider(face(unit()))
+    assert len(hellos) == 1  # strangers can't be told apart: one hello per 5 min for everyone
+    now[0] += 600
+    g.consider(face(unit(), w=0.05)); now[0] += 4; g.consider(face(unit(), w=0.05))
+    assert len(hellos) == 1  # far away: not talking to the robot
+    g.consider(face(me)); now[0] += 4; g.consider(face(unit())); now[0] += 4; g.consider(face(unit()))
+    assert len(hellos) == 1  # with someone it knows
+    assert list(registry.people) == ["me"]  # nothing of the stranger was kept
+
+
 def test_bridge_snapshot_callers_share_frames(gains):
     import threading as _th
     from flybot.mqtt_bridge import StackChanBridge

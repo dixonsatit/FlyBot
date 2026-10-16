@@ -571,7 +571,16 @@ def main(argv: list[str] | None = None) -> None:
             bridge.controller.pet(3.0)  # a happy face
             log.info("greeted %s", person.get("name"))
 
-        bridge.greeter = Greeter(bridge.snapshot, client, registry, greet)
+        def greet_stranger() -> None:
+            if bridge.dashboard.intake_active():
+                return
+            hour = time.localtime().tm_hour
+            hello = "อรุณสวัสดิ์" if hour < 11 else "สวัสดีตอนบ่าย" if 12 <= hour < 17 else "สวัสดี"
+            if bridge.dashboard.announce(f"{hello}ครับ หนูชื่อน้องหวี่ คุยกับหนูได้นะครับ", force=True):
+                bridge.dashboard._last_reply = time.monotonic()  # they can answer without saying the name
+            bridge.controller.pet(3.0)
+
+        bridge.greeter = Greeter(bridge.snapshot, client, registry, greet, on_stranger=greet_stranger)
         from .faces import FaceTracker
 
         def someone_around() -> bool:  # tracking streams frames, so only while somebody may be there

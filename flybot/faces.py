@@ -145,12 +145,24 @@ class FaceRegistry:
 
 class Greeter:
     """While the robot sees a face, look who it is every ``every_s`` and greet each known
-    person once per ``greet_gap_s``. Unknown faces are ignored (nothing is kept)."""
+    person once per ``greet_gap_s``. Someone it doesn't know gets ``on_stranger`` (a hello and
+    the robot's name), but nothing of their face is kept, so it can't tell strangers apart:
+    one stranger greeting per ``stranger_gap_s`` for everyone."""
+
+    # A stranger is greeted only when clearly nobody known (a blurred frame of a known face scores
+    # just under MATCH_COSINE), close enough to be talking to the robot, and still there a few seconds later.
+    STRANGER_BELOW = MATCH_COSINE - 0.08
+    STRANGER_MIN_WIDTH = 0.15  # of the frame
+    STRANGER_STAY_S = 3.0
 
     def __init__(self, snapshot: Callable[[float], bytes | None], client: FaceClient, registry: FaceRegistry,
                  on_greet: Callable[[dict], None], every_s: float = 4.0, greet_gap_s: float = 6 * 3600,
-                 clock: Callable[[], float] = time.time):
+                 clock: Callable[[], float] = time.time, on_stranger: Callable[[], None] | None = None,
+                 stranger_gap_s: float = 300.0):
         self.snapshot, self.client, self.registry, self.on_greet = snapshot, client, registry, on_greet
+        self.on_stranger, self.stranger_gap_s = on_stranger, stranger_gap_s
+        self._stranger_since: float | None = None  # first look of the stranger now in front of it
+        self._stranger_greeted = -float("inf")
         self.every_s, self.greet_gap_s, self.clock = every_s, greet_gap_s, clock
         self.greeted: dict[str, float] = {}
         self.present: dict | None = None  # who was recognised last, for the assistant's context
@@ -161,7 +173,8 @@ class Greeter:
     def on_face_seen(self) -> None:
         """The robot's detector found a face (any thread): check who it is, at most every every_s."""
         now = self.clock()
-        if now - self._last < self.every_s or not self.registry.people or not self._busy.acquire(blocking=False):
+        if now - self._last < self.every_s or not (self.registry.people or self.on_stranger) \
+                or not self._busy.acquire(blocking=False):
             return
         self._last = now
         threading.Thread(target=self._check, daemon=True).start()
@@ -179,11 +192,14 @@ class Greeter:
 
     def consider(self, faces: list[dict]) -> None:
         """Faces found in a robot frame (largest first): remember and greet a known one."""
-        if not faces or not self.registry.people:
+        if not faces:
+            self._stranger_since = None
             return
-        pid, score = self.registry.match(faces[0]["embedding"])
+        pid, score = self.registry.match(faces[0]["embedding"]) if self.registry.people else (None, -1.0)
         if not pid:
+            self._consider_stranger(faces[0], score)
             return
+        self._stranger_since = None
         person = self.registry.summary(pid)
         if not self.present or self.present.get("id") != pid or self.clock() - self.present_at > 60:
             log.info("faces (robot camera): %s (cosine %.3f)", person.get("name"), score)
@@ -191,6 +207,22 @@ class Greeter:
         if self.clock() - self.greeted.get(pid, -float("inf")) >= self.greet_gap_s:
             self.greeted[pid] = self.clock()
             self.on_greet(person)
+
+    def _consider_stranger(self, face: dict, score: float) -> None:
+        box = face.get("box") or [0, 0, 0, 0]
+        if score >= self.STRANGER_BELOW or box[2] < self.STRANGER_MIN_WIDTH or not self.on_stranger:
+            self._stranger_since = None
+            return
+        now = self.clock()
+        if self._stranger_since is None:
+            self._stranger_since = now
+        # the tracker looks several times a second: "still there" means for STRANGER_STAY_S
+        if now - self._stranger_since < self.STRANGER_STAY_S or now - self._stranger_greeted < self.stranger_gap_s \
+                or (self.present and now - self.present_at < 60):  # with someone it knows: they're together
+            return
+        self._stranger_greeted = now
+        log.info("faces (robot camera): someone new (best cosine %.3f), greeting", score)
+        self.on_stranger()
 
     def who(self, within_s: float = 120.0) -> dict | None:
         return self.present if self.present and self.clock() - self.present_at <= within_s else None
