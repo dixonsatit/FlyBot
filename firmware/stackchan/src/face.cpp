@@ -6,8 +6,10 @@
 #include "flybot_config.example.h"
 #endif
 
+// Off by default: on the robot it never found a face (the DGX does that), and at 2026-10-16 the
+// chip panicked twice in the FreeRTOS tick (uxListRemove) with this task inside MSR01 infer.
 #ifndef FACE_DETECT  // needs CAMERA_COLOR (RGB565 frames)
-#define FACE_DETECT 1
+#define FACE_DETECT 0
 #endif
 #ifndef FACE_PERIOD_MS
 #define FACE_PERIOD_MS 200

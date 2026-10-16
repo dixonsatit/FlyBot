@@ -282,6 +282,14 @@ class Dashboard:
             if not self.bridge.cortex:
                 raise ValueError("LLM is not enabled (--llm)")
             self.add("you", {"text": text})
+            if self.album and PHOTO_RE.search(text):  # no LLM round trip for this one
+                try:
+                    got = self.take_photo()
+                    reply = f"ถ่ายแล้วครับ ({got['name']}) สแกนคิวอาร์บนจอหุ่นดูรูปได้เลยครับ"
+                except ValueError as e:
+                    reply = f"ถ่ายไม่ได้ครับ: {e}"
+                self.add("chat", {"type": "reply", "to": text, "text": reply})
+                return {"ok": True}
             if body.get("speak"):  # the robot says the reply aloud too
                 self.bridge.cortex.on_chat(text, then=lambda reply: reply and self.announce(reply, force=True))
             else:
@@ -421,6 +429,7 @@ class Dashboard:
         it on a phone."""
         if not self.album:
             raise ValueError("photos need --state-dir")
+        self._center_face()
         jpeg = self.bridge.snapshot(6.0)
         if not jpeg:
             raise ValueError("the robot sent no picture")
@@ -428,6 +437,18 @@ class Dashboard:
         log.info("photo: %s (%d KB)", name, len(jpeg) // 1024)
         self.add("event", {"type": "photo", "name": name})
         return {"ok": True, "name": name, **(self.share_photo(name) if show_qr else {})}
+
+    def _center_face(self, wait_s: float = 2.5) -> None:
+        """Someone is in view: give the face tracker a moment to bring them to the middle."""
+        tracker = getattr(self.bridge, "tracker", None)
+        if not tracker or tracker.clock() - tracker.last_face > 5.0:
+            return
+        end = time.monotonic() + wait_s
+        while time.monotonic() < end:
+            seen = getattr(tracker, "last_seen", None) or {}
+            if abs(seen.get("x", 0.5) - 0.5) < 0.08 and abs(seen.get("y", 0.5) - 0.5) < 0.1:
+                return
+            time.sleep(0.2)
 
     def share_photo(self, name: str) -> dict:
         token = self.album.share(name)
