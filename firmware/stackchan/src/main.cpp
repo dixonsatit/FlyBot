@@ -112,7 +112,10 @@ static bool initCamera() {
   cfg.pin_vsync = 46;
   cfg.pin_href = 38;
   cfg.pin_pclk = 45;
-  cfg.xclk_freq_hz = 20000000;
+  // 10 MHz, not 20: every panic logged on 2026-10-16 came right after a burst of "cam_hal:
+  // EV-VSYNC-OVF", which the driver prints from its interrupt when its event queue overflows
+  // (WiFi busy on core 0). Half the frame rate halves those events; motion needs ~15 fps.
+  cfg.xclk_freq_hz = 10000000;
   cfg.ledc_timer = LEDC_TIMER_0;
   cfg.ledc_channel = LEDC_CHANNEL_0;
   cfg.pixel_format = CAMERA_COLOR ? PIXFORMAT_RGB565 : PIXFORMAT_GRAYSCALE;
@@ -499,12 +502,12 @@ static void publishStatus() {
   char head[640];
   snprintf(head, sizeof head,
            "{\"uptime\":%lu,\"wifi\":{\"ssid\":\"%s\",\"rssi\":%d,\"ip\":\"%s\"},\"mqtt\":%d,"
-           "\"heap\":%u,\"psram\":%u,\"fps\":%.1f,\"cmd_hz\":%.1f,"
+           "\"heap\":%u,\"psram\":%u,\"loop_stack_free\":%u,\"fps\":%.1f,\"cmd_hz\":%.1f,"
            "\"servo\":{\"pan\":%.1f,\"tilt\":%.1f},\"face\":\"%s\","
            "\"cam\":{\"n\":%lu,\"detected\":%d,\"skipped\":%d,\"box\":[%d,%d,%d,%d]},"
            "\"imu\":{\"gyro\":[%.1f,%.1f,%.1f],\"accel\":[%.2f,%.2f,%.2f]},\"ps\":%u,\"als\":%u,",
            (unsigned long)(now / 1000), WiFi.SSID().c_str(), WiFi.RSSI(), WiFi.localIP().toString().c_str(),
-           mqtt.connected(), ESP.getFreeHeap(), ESP.getFreePsram(), (tele.frames - lastFrames) / dt,
+           mqtt.connected(), ESP.getFreeHeap(), ESP.getFreePsram(), unsigned(uxTaskGetStackHighWaterMark(nullptr)), (tele.frames - lastFrames) / dt,
            (tele.commands - lastCommands) / dt, tele.pan, tele.tilt, tele.face.c_str(), (unsigned long)tele.n,
            tele.detected, tele.ego, tele.box[0], tele.box[1], tele.box[2], tele.box[3], tele.gyro[0], tele.gyro[1],
            tele.gyro[2], tele.accel[0], tele.accel[1], tele.accel[2], tele.ps, tele.als);
@@ -632,6 +635,10 @@ static void ensureConnected() {
     M5_LOGW("MQTT connect failed, state %d", mqtt.state());
   }
 }
+
+// The default 8 KB: the loop task's select() semaphore (kept with the task) was found
+// overwritten twice right after boot, in a publish from loop(); /status shows what is left.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
 
 void setup() {
   auto cfg = M5.config();
