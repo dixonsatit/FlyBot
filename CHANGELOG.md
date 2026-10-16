@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.48.0 (2026-10-16)
+
+### Bug Fixes
+
+- **k8s**: Bridge and twin data on CephFS instead of Longhorn
+  ([`09f396d`](https://github.com/dixonsatit/FlyBot/commit/09f396d8e7ce693e5bbfe6e9406e90cb431d0a89))
+
+### Features
+
+- **robot**: Colour face, and photos taken from a camera preview with a 3-2-1 countdown and a
+  shutter
+  ([`15e91ea`](https://github.com/dixonsatit/FlyBot/commit/15e91eaa5a7a20ff086c3bb79e0c71e9b83a5954))
+
+
 ## v0.47.0 (2026-10-16)
 
 ### Features
