@@ -442,7 +442,8 @@ class Dashboard:
             seconds = self.play_wav(self.countdown_wav())
             time.sleep(seconds + 1.5)  # the robot fetches the clip first
         self._center_face()
-        jpeg = self.bridge.snapshot(6.0)
+        # one more ask: right after the countdown clip the first request was lost once
+        jpeg = self.bridge.snapshot(6.0) or self.bridge.snapshot(6.0)
         if not jpeg:
             raise ValueError("the robot sent no picture")
         name = self.album.save(jpeg)
