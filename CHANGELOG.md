@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.1 (2026-10-16)
+
+### Bug Fixes
+
+- **firmware**: Silence the camera driver's interrupt prints, slower camera clock
+  ([`a1f0c74`](https://github.com/dixonsatit/FlyBot/commit/a1f0c74771ffe3cae421ae47f13ad0b952eee8f8))
+
+
 ## v0.41.0 (2026-10-16)
 
 ### Features
