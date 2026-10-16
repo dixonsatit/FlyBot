@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.3 (2026-10-16)
+
+### Bug Fixes
+
+- **firmware**: 802.11b/g only, sturdier rates on a weak hospital link
+  ([`24d619f`](https://github.com/dixonsatit/FlyBot/commit/24d619f8087a234cff1a54f4026d1b9475170d07))
+
+
 ## v0.41.2 (2026-10-16)
 
 ### Bug Fixes
