@@ -65,7 +65,7 @@ class StackChanBridge:
         self.power: dict = {}  # last <base>/sensor/power
         self.robot_seen = 0.0  # wall clock of the robot's last message
         self.selftest: dict = {}  # its last boot self-test
-        self._battery_warned = False
+        self._battery_warned, self._battery_warned_at = 0, -float("inf")  # stage said: 1 = 20%, 2 = 10%
         self._jpeg_at = 0.0  # monotonic time the last frame arrived
         self._jpeg_cond = threading.Condition()
         self._asked_at = -float("inf")  # last snapshot/request, so callers share one
@@ -194,13 +194,18 @@ class StackChanBridge:
             return
         self.power = p
         level, charging = p.get("battery", -1), p.get("charging", 0)
-        if 0 <= level <= 15 and not charging and not self._battery_warned:
-            self._battery_warned = True
+        if charging or level > 25:
+            self._battery_warned = 0
+            return
+        # 20%: once; 10% and below: again every 5 min until it is plugged in
+        stage = 2 if 0 <= level <= 10 else 1 if 0 <= level <= 20 else 0
+        now = time.monotonic()
+        if stage and (stage > self._battery_warned or (stage == 2 and now - self._battery_warned_at >= 300)):
+            self._battery_warned, self._battery_warned_at = stage, now
             log.info("battery low: %d%%", level)
             if self.dashboard:
-                self.dashboard.announce(f"แบตหนูเหลือ {level} เปอร์เซ็นต์แล้วครับ ช่วยเสียบสายชาร์จหน่อยนะครับ", force=True)
-        elif charging or level > 25:
-            self._battery_warned = False
+                self.dashboard.announce(f"หนูใกล้หมดพลังแล้ว เหลือ {level} เปอร์เซ็นต์ ช่วยชาร์จหนูด้วยนะครับ "
+                                        "เดี๋ยวหนูตุยนะ", force=True)
 
     def _on_face(self, payload: bytes) -> None:
         """The robot's face detector (several times a second): keep the face centred."""
@@ -563,7 +568,7 @@ def main(argv: list[str] | None = None) -> None:
         client = FaceClient(args.face_url, args.face_token or "")
 
         def greet(person: dict) -> None:
-            if bridge.dashboard.intake_active():  # a patient interview is on: not the time to greet staff
+            if bridge.dashboard.intake_active() or bridge.dashboard.resting:  # a patient interview is on: not the time to greet staff
                 return
             hour = time.localtime().tm_hour
             hello = "อรุณสวัสดิ์" if hour < 11 else "สวัสดีตอนบ่าย" if 12 <= hour < 17 else "สวัสดี"
@@ -572,7 +577,7 @@ def main(argv: list[str] | None = None) -> None:
             log.info("greeted %s", person.get("name"))
 
         def greet_stranger() -> None:
-            if bridge.dashboard.intake_active():
+            if bridge.dashboard.intake_active() or bridge.dashboard.resting:
                 return
             hour = time.localtime().tm_hour
             hello = "อรุณสวัสดิ์" if hour < 11 else "สวัสดีตอนบ่าย" if 12 <= hour < 17 else "สวัสดี"
@@ -584,6 +589,8 @@ def main(argv: list[str] | None = None) -> None:
         from .faces import FaceTracker
 
         def someone_around() -> bool:  # tracking streams frames, so only while somebody may be there
+            if bridge.dashboard.resting:  # resting: no head tracking either
+                return False
             p = bridge.presence
             return bool(p and p.present) or time.monotonic() - bridge._last_motion < 30.0
 

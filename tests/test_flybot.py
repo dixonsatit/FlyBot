@@ -888,6 +888,15 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 7
+        heard["text"] = "น้องหวี่ ไปพักได้แล้ว เดี๋ยวเรียก"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and dash.resting
+        heard["text"] = "หันซ้ายหน่อย"  # right after its reply, but resting: the name is needed
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
+        heard["text"] = "มี"  # a short word is no call while resting
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
+        assert dash.announce("มี PR รอรีวิว") and dash.held[-1] == "มี PR รอรีวิว"  # small news waits
+        heard["text"] = "น้องหวี่"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and not dash.resting
         dash._last_reply = -1e9
         bridge.presence = type("P", (), {"present": True, "note_voice": lambda self: None})()
         heard["text"] = "ดีหันหน้ามา"  # name lost, but at the desk and addressed to the robot
@@ -1171,12 +1180,19 @@ def test_robot_handled_and_battery_events(gains):
     for _ in range(3):
         c.step(s, 0.05)
     assert c.mb.expression == "alert"  # startled
-    for level in (40, 12, 11):
-        b._on_message(None, None, msg("sensor/power", {"battery": level, "charging": 0}))
-    assert len(said) == 1 and "12" in said[0]  # warned once
-    b._on_message(None, None, msg("sensor/power", {"battery": 12, "charging": 1}))
-    b._on_message(None, None, msg("sensor/power", {"battery": 10, "charging": 0}))
-    assert len(said) == 2  # unplugged again after charging: warn again
+    power = lambda level, charging=0: b._on_message(None, None, msg("sensor/power", {"battery": level, "charging": charging}))
+    for level in (40, 19, 18):
+        power(level)
+    assert len(said) == 1 and "19" in said[0] and "ชาร์จ" in said[0]  # warned once at 20%
+    power(10)
+    power(9)
+    assert len(said) == 2  # 10%: warned again...
+    b._battery_warned_at -= 301
+    power(8)
+    assert len(said) == 3  # ...and every 5 min until plugged in
+    power(8, charging=1)
+    power(19)
+    assert len(said) == 4  # unplugged again after charging: warn again
 
 
 def test_wake_word_recording_keeps_clips_instead_of_answering(gains, tmp_path):

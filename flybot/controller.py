@@ -312,6 +312,10 @@ class BrainController:
         """Head stroked (the base's touch strip): a happy face, like the petting reward."""
         self._inbox.put(lambda: self.mb.hold("happy", hold_s))
 
+    def rest(self, on: bool) -> None:
+        """Told to rest: a sleepy face until woken (then the monoamines choose again)."""
+        self._inbox.put(lambda: self.mb.hold("sleepy", 7 * 24 * 3600.0) if on else self.mb.hold("curious", 0.0))
+
     def handled(self, kind: str, hold_s: float = 3.0) -> None:
         """The robot was lifted, tilted or shaken (it already said so itself): a startled face."""
         def apply():

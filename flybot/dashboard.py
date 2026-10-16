@@ -49,6 +49,9 @@ ADDRESSED_RE = re.compile(r"เห็น(ผม|ฉัน|หนู|ไหม)|�
                           r"ส่ายหน้า|หนู(ช่วย|ทำ|รู้|จำ|จด|เตือน)|ช่วย(บอก|ดู|เตือน|จำ|จด|เปิด|หา)|ตอบ(ผม|หน่อย)")
 CALL_MAX_CHARS = 4  # a hands-free utterance this short is taken as the robot being called
 CALL_REPLY = "ว่าไงครับ"
+# "ไปพักได้ เดี๋ยวเรียก": rest until called by name (no greetings, no small talk, sleepy face)
+REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|หลับ)\s*(ก่อน|ได้แล้ว|ได้|เถอะ)|โหมดพัก")
+REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
 # "ซักประวัติ" said to the robot starts history taking (no name needed, no LLM in the way), and
 # "หยุด/ยกเลิกการซักประวัติ" heard during it cancels without a draft.
 INTAKE_START_RE = re.compile(r"(เริ่ม|ช่วย|ขอ|อยาก)?\s*ซัก\s*ประวัติ")
@@ -203,6 +206,7 @@ class Dashboard:
         self.wake = re.compile(wake_name, re.IGNORECASE)
         self.follow_up_s = follow_up_s  # after a spoken reply, the next sentence needs no name
         self._last_reply = -math.inf
+        self.resting = False  # told to rest: only the wake name gets an answer, and wakes it
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.held: list[str] = []  # announcements kept while nobody was at the desk
         self.archive_dir: str | None = None  # set to keep recent voice clips (see archive_clip)
@@ -398,7 +402,7 @@ class Dashboard:
         if not self.tts or not text:
             return False
         presence = getattr(self.bridge, "presence", None)
-        if presence and not presence.present and not force:
+        if (self.resting or (presence and not presence.present)) and not force:
             with self._lock:
                 self.held.append(text)
                 del self.held[:-10]
@@ -431,6 +435,13 @@ class Dashboard:
                 self._announcements.popitem(last=False)
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return wav_seconds(wav)
+
+    def rest(self, on: bool) -> None:
+        """Rest until called by name, or wake up."""
+        self.resting = on
+        self._last_reply = -math.inf  # no follow-up window: the next sentence needs the name
+        self.bridge.controller.rest(on)
+        log.info("resting" if on else "woke up (called by name)")
 
     def intake_active(self) -> bool:
         return bool(self.intake and not self.intake.closed)
@@ -1027,6 +1038,11 @@ class Dashboard:
                         return self._send(204, b"", "audio/wav")  # the interview's greeting follows as an announcement
                     except Exception as e:
                         log.warning("voice: could not start history taking: %s", e)
+                if dash.resting:
+                    if not (text and dash.wake.search(text)):  # resting: everything but its name is ignored
+                        log.info("voice: resting, heard %r -> 204", text)
+                        return self._send(204, b"", "audio/wav")
+                    dash.rest(False)
                 presence = getattr(dash.bridge, "presence", None)
                 if presence and text:
                     presence.note_voice()  # someone is talking next to the robot: they are here
@@ -1051,6 +1067,11 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                if REST_RE.search(text):
+                    dash.rest(True)
+                    log.info("voice: %r -> resting", text)
+                    dash.add("chat", {"type": "reply", "to": text, "text": REST_REPLY, "voice": True})
+                    return self._send(200, to_16k(dash.tts.speak(REST_REPLY)), "audio/wav")
                 if dash.album and PHOTO_RE.search(text):
                     from .intake import wav_seconds
                     wav = dash.countdown_wav()
