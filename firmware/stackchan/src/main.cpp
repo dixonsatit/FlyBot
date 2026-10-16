@@ -739,7 +739,14 @@ static void serviceQr() {
   if (qrShown && int32_t(millis() - qrUntil) > 0) hideQr();
 }
 
+bool heapCheck(const char* where);  // voice.cpp
+
 void loop() {
+  static uint32_t lastHeapCheck = 0;
+  if (millis() - lastHeapCheck > 1000) {
+    lastHeapCheck = millis();
+    heapCheck("(periodic)");
+  }
   M5.update();
   serviceQr();
   voiceUpdate();

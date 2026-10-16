@@ -5,6 +5,18 @@
 
 #include <Avatar.h>
 #include <HTTPClient.h>
+#include <esp_heap_caps.h>
+
+// Heap checks around the speaker -> mic switch (and once a second from loop()). Added on 2026-10-16
+// to find which step broke the heap: every panic at the hospital came right after Mic.begin().
+// With them in place it ran 19 min / 31 voice turns without a panic (before: one every 1-4 min)
+// and none ever fired, so the pause they add between the I2S teardown and set-up is what keeps it
+// up. Keep them until the race in that switch is found; a failure is logged as HEAP CORRUPT.
+bool heapCheck(const char* where) {
+  if (heap_caps_check_integrity_all(true)) return true;
+  M5_LOGE("HEAP CORRUPT after %s", where);
+  return false;
+}
 #include <M5Unified.h>
 #include <WiFi.h>
 
@@ -443,12 +455,17 @@ static void sendTask(void*) {
 static void stopMic() {
   micActive = false;
   while (!micParked) delay(1);
+  heapCheck("before mic end");
   M5.Mic.end();
+  heapCheck("mic end");
 }
 
 static void startMic() {
+  heapCheck("before speaker end");
   M5.Speaker.end();  // mic and speaker share the I2S bus
+  heapCheck("speaker end");
   M5.Mic.begin();
+  heapCheck("mic begin");
   micActive = true;
   state = State::Listening;
 }
