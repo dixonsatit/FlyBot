@@ -155,6 +155,7 @@ class BrainController:
         self._follow: list | None = None  # [pan, tilt, seconds left]: a target to ease towards (face tracking)
         self._escape_dir = 1.0
         self._tilt_home: float | None = None  # tilt to settle back to after an escape
+        self._rest_track: bool | None = None  # track_motion to restore when woken from rest
         self.events: list[dict] = []
         self._game_start: float | None = None
         self._game_last = -math.inf
@@ -313,8 +314,22 @@ class BrainController:
         self._inbox.put(lambda: self.mb.hold("happy", hold_s))
 
     def rest(self, on: bool) -> None:
-        """Told to rest: a sleepy face until woken (then the monoamines choose again)."""
-        self._inbox.put(lambda: self.mb.hold("sleepy", 7 * 24 * 3600.0) if on else self.mb.hold("curious", 0.0))
+        """Told to rest: back to the home pose, a sleepy face and no turning after motion, until woken."""
+        def apply():
+            if on:
+                self._gesture, self._follow = [], None
+                self.cx.set_goal(self.cx.heading + self.cfg.home_pan)
+                self._tilt_home = self.cfg.home_tilt
+                if self._rest_track is None:
+                    self._rest_track = self.cfg.track_motion
+                self.cfg = replace(self.cfg, track_motion=False)
+                self.mb.hold("sleepy", 7 * 24 * 3600.0)
+            else:
+                if self._rest_track is not None:
+                    self.cfg = replace(self.cfg, track_motion=self._rest_track)
+                    self._rest_track = None
+                self.mb.hold("curious", 0.0)
+        self._inbox.put(apply)
 
     def handled(self, kind: str, hold_s: float = 3.0) -> None:
         """The robot was lifted, tilted or shaken (it already said so itself): a startled face."""

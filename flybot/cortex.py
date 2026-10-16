@@ -121,6 +121,7 @@ class Cortex:
         self.narrate_cooldown_s = narrate_cooldown_s
         self.calendar = None  # flybot.meetings.MeetingReminder, set by the bridge
         self.github = None  # flybot.github.GitHubWatcher
+        self.power = None  # () -> the robot's last {"battery": %, "charging": 0/1}
         self.store = None  # flybot.assistant.AssistantStore: notes and reminders
         self.weather = None  # flybot.weather.Weather where the robot is
         self.places = None  # flybot.places.Places (Google Maps) near the robot
@@ -483,6 +484,9 @@ class Cortex:
             Tool("brain_state", "Current expression, head pose, fly-circuit activity and event counts.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
                  lambda: {**c.snapshot, "personality": self.personality, "events_so_far": self.event_counts}),
+            Tool("battery", "Your battery level (%) and whether you are charging.",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: (self.power() if self.power else None) or {"error": "no battery report from the robot yet"}),
             Tool("say", "Show very short text in the robot's speech balloon ("
                         + SCREEN_LINE[self.lang] + ").",
                  {"type": "object", "properties": {"text": {"type": "string"}},

@@ -888,6 +888,10 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "แล้วพรุ่งนี้ล่ะ"  # right after a reply: a follow-up needs no name
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 7
+        bridge.power = {"battery": 73, "charging": 0}
+        heard["text"] = "น้องหวี่ แบตเหลือกี่เปอร์เซ็นต์"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        assert len(published) == 7  # answered from the power report, no LLM turn
         heard["text"] = "น้องหวี่ ไปพักได้แล้ว เดี๋ยวเรียก"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and dash.resting
         heard["text"] = "หันซ้ายหน่อย"  # right after its reply, but resting: the name is needed
@@ -1193,6 +1197,23 @@ def test_robot_handled_and_battery_events(gains):
     power(8, charging=1)
     power(19)
     assert len(said) == 4  # unplugged again after charging: warn again
+
+
+def test_rest_brings_the_head_home_and_stops_turning_after_motion(gains):
+    c = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    s = SensorState()
+    c.look_at(40.0, 25.0)
+    for _ in range(80):
+        c.step(s, 0.05)
+    assert abs(c.pan) > 15
+    c.rest(True)
+    for _ in range(200):
+        c.step(s, 0.05)
+    assert abs(c.pan - c.cfg.home_pan) < 5 and abs(c.tilt - c.cfg.home_tilt) < 5
+    assert c.mb.expression == "sleepy" and not c.cfg.track_motion
+    c.rest(False)
+    c.step(s, 0.05)
+    assert c.cfg.track_motion
 
 
 def test_wake_word_recording_keeps_clips_instead_of_answering(gains, tmp_path):

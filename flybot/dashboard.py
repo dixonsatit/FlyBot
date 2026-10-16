@@ -52,6 +52,18 @@ CALL_REPLY = "ว่าไงครับ"
 # "ไปพักได้ เดี๋ยวเรียก": rest until called by name (no greetings, no small talk, sleepy face)
 REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|หลับ)\s*(ก่อน|ได้แล้ว|ได้|เถอะ)|โหมดพัก")
 REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
+# "แบตเหลือกี่เปอร์เซ็นต์": answered from the robot's last power report, without the LLM
+BATTERY_RE = re.compile(r"(แบต|พลังงาน|battery).*(เหลือ|กี่|เท่าไ|ยัง|หมด|พอ)|(เหลือ|กี่).*(แบต|เปอร์เซ็นต์)", re.I)
+
+
+def battery_line(power: dict) -> str | None:
+    level = power.get("battery", -1)
+    if not isinstance(level, int) or level < 0:
+        return None
+    line = f"แบตหนูเหลือ {level} เปอร์เซ็นต์ครับ"
+    if power.get("charging"):
+        return line + " กำลังชาร์จอยู่"
+    return line + (" ใกล้หมดแล้ว ช่วยชาร์จหนูด้วยนะครับ" if level <= 20 else "")
 # "ซักประวัติ" said to the robot starts history taking (no name needed, no LLM in the way), and
 # "หยุด/ยกเลิกการซักประวัติ" heard during it cancels without a draft.
 INTAKE_START_RE = re.compile(r"(เริ่ม|ช่วย|ขอ|อยาก)?\s*ซัก\s*ประวัติ")
@@ -1067,6 +1079,12 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
+                line = battery_line(getattr(dash.bridge, "power", None) or {}) if BATTERY_RE.search(text) else None
+                if line:
+                    dash._last_reply = time.monotonic()
+                    log.info("voice: %r -> %r", text, line)
+                    dash.add("chat", {"type": "reply", "to": text, "text": line, "voice": True})
+                    return self._send(200, to_16k(dash.tts.speak(line)), "audio/wav")
                 if REST_RE.search(text):
                     dash.rest(True)
                     log.info("voice: %r -> resting", text)

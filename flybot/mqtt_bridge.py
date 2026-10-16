@@ -77,6 +77,7 @@ class StackChanBridge:
                              self.base, emit_event=lambda ev: self.events.emit(ev),
                              snapshot=self.snapshot if vision else None, narrate=narrate,
                              narrate_cooldown_s=narrate_cooldown_s, vision_llm=vision_llm)
+        self.cortex.power = lambda: self.power
 
     def _publish_cortex(self, topic: str, body: str) -> None:
         self.client.publish(topic, body, qos=1)
