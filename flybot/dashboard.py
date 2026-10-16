@@ -58,6 +58,7 @@ INTAKE_SKIP_RE = re.compile(r"ซัก\s*เลย|ไม่\s*(ต้อง\s*
 # "ถ่ายรูปให้หน่อย": taken straight away, no LLM round trip (it was 13 s on qwen)
 PHOTO_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)")
 PHOTO_LINE = "แชะ! ถ่ายแล้วครับ สแกนคิวอาร์บนจอดูรูปได้เลยครับ"
+COUNTDOWN_LINE = "เตรียมตัวนะครับ ยิ้มหน่อย สาม สอง หนึ่ง"
 PHOTO_QR_TEXT = "สแกนดูรูป"
 PAIR_QR_TEXT = "สแกนเพื่อยืนยันตัวตน ThaID"
 PAIR_LINE = ("ถ้าจะยืนยันตัวตน สแกนคิวอาร์บนจอด้วยมือถือ แล้วล็อกอินไทดีครับ "
@@ -283,12 +284,14 @@ class Dashboard:
                 raise ValueError("LLM is not enabled (--llm)")
             self.add("you", {"text": text})
             if self.album and PHOTO_RE.search(text):  # no LLM round trip for this one
-                try:
-                    got = self.take_photo()
-                    reply = f"ถ่ายแล้วครับ ({got['name']}) สแกนคิวอาร์บนจอหุ่นดูรูปได้เลยครับ"
-                except ValueError as e:
-                    reply = f"ถ่ายไม่ได้ครับ: {e}"
-                self.add("chat", {"type": "reply", "to": text, "text": reply})
+                def shoot():
+                    try:
+                        got = self.take_photo(countdown=True)
+                        reply = f"ถ่ายแล้วครับ ({got['name']}) สแกนคิวอาร์บนจอหุ่นดูรูปได้เลยครับ"
+                    except ValueError as e:
+                        reply = f"ถ่ายไม่ได้ครับ: {e}"
+                    self.add("chat", {"type": "reply", "to": text, "text": reply})
+                threading.Thread(target=shoot, name="photo", daemon=True).start()
                 return {"ok": True}
             if body.get("speak"):  # the robot says the reply aloud too
                 self.bridge.cortex.on_chat(text, then=lambda reply: reply and self.announce(reply, force=True))
@@ -329,7 +332,7 @@ class Dashboard:
             if body.get("hide_qr"):
                 self.show_qr("")
                 return {"ok": True}
-            return self.take_photo(show_qr=bool(body.get("qr", True)))
+            return self.take_photo(show_qr=bool(body.get("qr", True)), countdown=bool(body.get("countdown")))
         elif path == "/api/speak":  # say this through the robot's speaker now, even if nobody is there
             text = str(body.get("text", "")).strip()[:300]
             if not text or not self.announce(text, force=True):
@@ -424,17 +427,28 @@ class Dashboard:
         self.bridge.client.publish(f"{self.bridge.base}/screen/qr", json.dumps(
             {"url": url, "text": shape(text), "seconds": round(seconds)}, ensure_ascii=False))
 
-    def take_photo(self, show_qr: bool = True) -> dict:
+    def countdown_wav(self) -> bytes:
+        if not getattr(self, "_countdown", None):
+            self._countdown = to_16k(self.tts.speak(COUNTDOWN_LINE))
+        return self._countdown
+
+    def take_photo(self, show_qr: bool = True, countdown: bool = False) -> dict:
         """A fresh frame from the robot's camera into the album, and a QR on the robot that opens
-        it on a phone."""
+        it on a phone. ``countdown`` says "เตรียมตัว ... สาม สอง หนึ่ง" first and "แชะ" after, so
+        whoever is in front knows when it is taken."""
         if not self.album:
             raise ValueError("photos need --state-dir")
+        if countdown and self.tts:
+            seconds = self.play_wav(self.countdown_wav())
+            time.sleep(seconds + 1.5)  # the robot fetches the clip first
         self._center_face()
         jpeg = self.bridge.snapshot(6.0)
         if not jpeg:
             raise ValueError("the robot sent no picture")
         name = self.album.save(jpeg)
         log.info("photo: %s (%d KB)", name, len(jpeg) // 1024)
+        if countdown and self.tts:
+            self.play_wav(to_16k(self.tts.speak(PHOTO_LINE)))
         self.add("event", {"type": "photo", "name": name})
         return {"ok": True, "name": name, **(self.share_photo(name) if show_qr else {})}
 
@@ -1009,16 +1023,23 @@ class Dashboard:
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
                 if dash.album and PHOTO_RE.search(text):
-                    try:
-                        dash.take_photo()
-                        reply = PHOTO_LINE
-                    except ValueError as e:
-                        log.warning("voice: photo failed: %s", e)
-                        reply = "ขอโทษครับ กล้องไม่ส่งรูปมา ลองใหม่อีกทีนะครับ"
+                    from .intake import wav_seconds
+                    wav = dash.countdown_wav()
+
+                    def shoot(after: float = wav_seconds(wav) + 1.0):  # the reply plays first
+                        time.sleep(after)
+                        try:
+                            dash.take_photo()
+                            reply = PHOTO_LINE
+                        except ValueError as e:
+                            log.warning("voice: photo failed: %s", e)
+                            reply = "ขอโทษครับ กล้องไม่ส่งรูปมา ลองใหม่อีกทีนะครับ"
+                        dash.add("chat", {"type": "reply", "to": text, "text": reply, "voice": True})
+                        dash.play_wav(to_16k(dash.tts.speak(reply)))
+                    threading.Thread(target=shoot, name="photo", daemon=True).start()
                     dash._last_reply = time.monotonic()
-                    dash.add("chat", {"type": "reply", "to": text, "text": reply, "voice": True})
-                    log.info("voice: %r -> photo", text)
-                    return self._send(200, to_16k(dash.tts.speak(reply)), "audio/wav")
+                    log.info("voice: %r -> photo (countdown)", text)
+                    return self._send(200, wav, "audio/wav")
                 t_asr = time.monotonic()
                 try:
                     with dash.progress() as said:

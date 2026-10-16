@@ -535,7 +535,7 @@ function showPhoto(n) {
 }
 $("photoBtn").onclick = async () => {
   $("photoBtn").disabled = true;
-  const j = await post("/api/photos", { qr: true }, "errPhoto");
+  const j = await post("/api/photos", { qr: true, countdown: true }, "errPhoto");
   $("photoBtn").disabled = false;
   if (j) loadPhotos(j.name);
 };

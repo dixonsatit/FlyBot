@@ -407,7 +407,7 @@ class Cortex:
             Tool("take_photo", "Take a photo with the robot's camera when asked (ถ่ายรูป, ถ่ายภาพ). It is saved "
                  "in the album on the dashboard and a QR on the robot's screen opens it on a phone for 10 minutes.",
                  {"type": "object", "properties": {}, "additionalProperties": False},
-                 lambda: self.photo() if self.photo else {"error": "photos are off (no --state-dir)"}),
+                 lambda: self.photo(countdown=True) if self.photo else {"error": "photos are off (no --state-dir)"}),
             Tool("recall", "Look up what you remember from earlier conversations and notes (เมื่อวานคุยเรื่อง"
                  "อะไร, เคยบอกว่าอะไร, งานที่ค้าง). Give the topic in a few words.",
                  {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"],
