@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.39.0 (2026-10-16)
+
+### Features
+
+- **intake**: ThaID login by a QR on the robot before history taking
+  ([`5262e2f`](https://github.com/dixonsatit/FlyBot/commit/5262e2ff922faec1a7bc4490ef5d24dad364b64f))
+
+
 ## v0.38.0 (2026-10-16)
 
 ### Features
