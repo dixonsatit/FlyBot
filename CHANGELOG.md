@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.50.0 (2026-10-16)
+
+### Features
+
+- **voice**: Short head commands (หันซ้าย, เงย, ส่ายหน้า...) move at once, without the LLM
+  ([`6b52369`](https://github.com/dixonsatit/FlyBot/commit/6b523692f3c01a34eb1a467308c8a908f52407c4))
+
+
 ## v0.49.0 (2026-10-16)
 
 ### Features
