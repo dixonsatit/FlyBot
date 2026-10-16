@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.38.0 (2026-10-16)
+
+### Features
+
+- **intake**: Start and stop history taking by voice
+  ([`3f375a4`](https://github.com/dixonsatit/FlyBot/commit/3f375a409a770a16006b41bb830a6926ea26a392))
+
+
 ## v0.37.0 (2026-10-15)
 
 ### Features
