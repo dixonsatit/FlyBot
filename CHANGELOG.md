@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.49.0 (2026-10-16)
+
+### Features
+
+- **robot**: Microphone gain x3 (tunable live), wake on น้องอุ๋ย, and the photo stays 3 s on screen
+  ([`0b0100e`](https://github.com/dixonsatit/FlyBot/commit/0b0100ed7088461aaf840e0473c4c68463453cff))
+
+
 ## v0.48.0 (2026-10-16)
 
 ### Bug Fixes
