@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.45.0 (2026-10-16)
+
+### Features
+
+- **faces**: Greet someone new with the robot's name, keeping nothing of their face
+  ([`cffc988`](https://github.com/dixonsatit/FlyBot/commit/cffc98897f655f8cf653a13364afee4c7426190a))
+
+
 ## v0.44.0 (2026-10-16)
 
 ### Features
