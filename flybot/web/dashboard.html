@@ -677,13 +677,33 @@ async function loadPeople() {
   $("staffRow").style.display = j.staff ? "" : "none";
   $("peopleCount").textContent = j.on ? j.people.length + " คน" : "ระบบจดจำหน้าปิดอยู่";
   $("people").innerHTML = j.people.length ? "" : `<tr><td colspan="4" class="hint">ยังไม่มีใครลงทะเบียน</td></tr>`;
-  for (const p of j.people) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(p.name)}${p.nick ? ` <span class="tag">${esc(p.nick)}</span>` : ""}<div class="hint">${esc(p.position || "")}</div></td>
-      <td>${p.samples}</td><td class="hint">${esc(p.consent_at || "")}</td><td style="width:1%"></td>`;
-    tr.lastChild.append(confirmButton("ลบ", () => post("/api/people/forget", { id: p.id }, "errPeople").then(loadPeople)));
-    $("people").append(tr);
-  }
+  for (const p of j.people) $("people").append(personRow(p));
+}
+function personRow(p) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>${esc(p.name)}${p.nick ? ` <span class="tag">${esc(p.nick)}</span>` : ""}${p.line ? ` <span class="tag" title="ส่ง LINE ได้">LINE</span>` : ""}
+      <div class="hint">${[p.code ? "รหัส " + p.code : "", p.position, p.office].filter(Boolean).map(esc).join(" · ")}</div></td>
+    <td>${p.samples}</td><td class="hint">${esc(p.consent_at || "")}</td><td style="width:1%;white-space:nowrap"></td>`;
+  const edit = document.createElement("button"); edit.textContent = "แก้ไข";
+  edit.onclick = () => tr.replaceWith(personEditor(p));
+  tr.lastChild.append(edit, " ", confirmButton("ลบ", () => post("/api/people/forget", { id: p.id }, "errPeople").then(loadPeople)));
+  return tr;
+}
+function personEditor(p) {
+  const tr = document.createElement("tr");
+  const field = (k, ph, w) => `<input data-k="${k}" placeholder="${ph}" value="${esc(p[k] ?? "")}" style="width:${w}">`;
+  tr.innerHTML = `<td colspan="3"><div class="row">${field("name", "ชื่อ-สกุล", "14em")}${field("nick", "ชื่อเล่น", "6em")}${field("code", "รหัสพนักงาน", "7em")}</div>
+    <div class="row">${field("position", "ตำแหน่ง", "14em")}${field("office", "หน่วยงาน", "14em")}</div></td><td style="white-space:nowrap"></td>`;
+  const save = document.createElement("button"); save.textContent = "บันทึก"; save.className = "primary";
+  const cancel = document.createElement("button"); cancel.textContent = "ยกเลิก";
+  save.onclick = async () => {
+    const body = { id: p.id };
+    tr.querySelectorAll("input[data-k]").forEach((i) => body[i.dataset.k] = i.value);
+    if (await post("/api/people/update", body, "errPeople")) loadPeople();
+  };
+  cancel.onclick = () => tr.replaceWith(personRow(p));
+  tr.lastChild.append(save, " ", cancel);
+  return tr;
 }
 $("staffFind").onclick = async () => {
   const j = await (await fetch("/api/staff?q=" + encodeURIComponent($("staffQ").value))).json();

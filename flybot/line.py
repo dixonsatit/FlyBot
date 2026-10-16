@@ -135,6 +135,19 @@ class LineContacts:
             self._save()
         return self.public(person)
 
+    def rename(self, code, name: str | None = None, nick: str | None = None) -> bool:
+        """Keep a contact's name and nickname in step with the people page."""
+        with self.lock:
+            p = self.people.get(str(code))
+            if not p:
+                return False
+            if name:
+                p["name"] = name
+            if nick is not None:
+                p["nick"] = nick
+            self._save()
+        return True
+
     def remove(self, code) -> bool:
         with self.lock:
             gone = self.people.pop(str(code).strip(), None) is not None

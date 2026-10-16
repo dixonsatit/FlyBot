@@ -1677,6 +1677,25 @@ def test_line_contacts_register_by_employee_code_and_send(tmp_path):
         srv.shutdown()
 
 
+def test_people_page_edits_who_someone_is(tmp_path):
+    from flybot.faces import FaceRegistry
+    from flybot.line import LineContacts
+    reg = FaceRegistry(str(tmp_path / "faces.json"))
+    reg.enroll("p1", {"name": "สาธิตสีถาพล", "nick": "ต๊ะ"}, [[0.1] * 128])
+    got = reg.update("p1", {"name": "สาธิต สีถาพล", "code": "90129", "position": "นักวิชาการคอมพิวเตอร์"})
+    assert got["code"] == 90129 and got["name"] == "สาธิต สีถาพล" and got["nick"] == "ต๊ะ" and got["samples"] == 1
+    assert FaceRegistry(str(tmp_path / "faces.json")).people["p1"]["position"] == "นักวิชาการคอมพิวเตอร์"  # saved
+    for bad in ({"code": "9x"}, {"name": " "}):
+        with pytest.raises(ValueError):
+            reg.update("p1", bad)
+    with pytest.raises(ValueError):
+        reg.update("nobody", {"nick": "x"})
+    line = LineContacts(str(tmp_path / "line.json"), None, None)
+    line.people["90129"] = {"code": 90129, "name": "เก่า", "nick": "", "line_id": "U1"}
+    assert line.rename(90129, "สาธิต สีถาพล", "ต๊ะ") and line.list()[0]["nick"] == "ต๊ะ"
+    assert not line.rename(1, "x")
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

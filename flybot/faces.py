@@ -97,6 +97,31 @@ class FaceRegistry:
                 self._save()
             return gone
 
+    EDITABLE = ("name", "nick", "code", "position", "office")
+
+    def update(self, pid: str, fields: dict) -> dict:
+        """Change who someone is (not their face): name, nickname, employee code, position, office."""
+        with self.lock:
+            if pid not in self.people:
+                raise ValueError("no such person")
+            p = self.people[pid]
+            for k in self.EDITABLE:
+                if k not in fields:
+                    continue
+                v = fields[k]
+                if k == "code":
+                    v = str(v).strip()
+                    if v and not v.isdigit():
+                        raise ValueError("employee code must be a number")
+                    v = int(v) if v else None
+                else:
+                    v = str(v or "").strip()[:80]
+                if k == "name" and not v:
+                    raise ValueError("name can't be empty")
+                p[k] = v
+            self._save()
+        return self.summary(pid)
+
     def summary(self, pid: str) -> dict:
         p = self.people[pid]
         return {"id": pid, **{k: v for k, v in p.items() if k != "embeddings"}, "samples": len(p["embeddings"])}

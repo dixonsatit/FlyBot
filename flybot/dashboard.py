@@ -361,6 +361,13 @@ class Dashboard:
             return self.enroll(body)
         elif path == "/api/people/identify":  # a frame from the browser's camera: who is in it?
             return self.identify(base64.b64decode(str(body.get("image", "")).split(",")[-1]))
+        elif path == "/api/people/update":
+            if not self.faces:
+                raise ValueError("face recognition is off (--face-url)")
+            person = self.faces[1].update(str(body.get("id", "")), body)
+            if self.line and person.get("code"):
+                self.line.rename(person["code"], person.get("name"), person.get("nick", ""))
+            return {"ok": True, "person": person}
         elif path == "/api/people/forget":
             if not self.faces:
                 raise ValueError("face recognition is off (--face-url)")
@@ -872,8 +879,10 @@ class Dashboard:
                     return self._json(200, {"notes": store.notes if store else [],
                                             "reminders": store.reminders if store else []})
                 if self.path == "/api/people":
-                    return self._json(200, {"people": dash.faces[1].list() if dash.faces else [],
-                                            "on": bool(dash.faces), "staff": bool(dash.faces and dash.faces[2])})
+                    line = {c["code"] for c in dash.line.list()} if dash.line else set()
+                    people = [{**p, "line": p.get("code") in line} for p in (dash.faces[1].list() if dash.faces else [])]
+                    return self._json(200, {"people": people, "on": bool(dash.faces),
+                                            "staff": bool(dash.faces and dash.faces[2])})
                 if self.path.startswith("/api/staff?"):
                     q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("q", [""])[0]
                     if not (dash.faces and dash.faces[2]) or len(q.strip()) < 2:
