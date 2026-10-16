@@ -53,6 +53,12 @@ CALL_REPLY = "ว่าไงครับ"
 # "หยุด/ยกเลิกการซักประวัติ" heard during it cancels without a draft.
 INTAKE_START_RE = re.compile(r"(เริ่ม|ช่วย|ขอ|อยาก)?\s*ซัก\s*ประวัติ")
 INTAKE_STOP_RE = re.compile(r"(หยุด|ยกเลิก|เลิก|พอ)(การ)?\s*ซัก\s*ประวัติ|ไม่\s*ซัก(แล้ว|ต่อ)")
+# Interview without logging in, said either with the request or while the QR is up.
+INTAKE_SKIP_RE = re.compile(r"ซัก\s*เลย|ไม่\s*(ต้อง\s*)?(login|ล[็๊]?อ[็๊]?ก\s*อิน|ยืนยัน\s*ตัว\s*ตน)|ข้าม")
+PAIR_QR_TEXT = "สแกนเพื่อยืนยันตัวตน ThaID"
+PAIR_LINE = ("ถ้าจะยืนยันตัวตน สแกนคิวอาร์บนจอด้วยมือถือ แล้วล็อกอินไทดีครับ "
+             "ถ้าไม่ล็อกอิน พูดว่า ซักเลย ได้เลยครับ")
+PAIR_EXPIRED_LINE = "คิวอาร์หมดเวลาแล้วครับ ถ้ายังจะซักประวัติ เรียกหนูใหม่ได้เลยครับ"
 
 # What the robot says when its head is stroked (it calls itself หนู).
 # Lines the robot keeps and plays itself: while a voice reply is being made (Dashboard.progress),
@@ -201,6 +207,11 @@ class Dashboard:
         self.intake_url: str | None = None  # the interview server's /ws (stackchan-interview), --intake-url
         self.intake = None  # flybot.intake.IntakeSession while history taking runs
         self.intake_view: dict = {}  # what the page shows of it (memory only, gone with the session)
+        # ThaID login paired by a QR on the robot (the interview server's PAIR_TOKEN and public URL)
+        self.intake_pair_token: str | None = None
+        self.intake_public_url: str | None = None
+        self.pairing = None  # flybot.intake.Pairing while the QR waits for the patient's phone
+        self.pair_poll_s = 1.0
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
         self.tts = tts  # flybot.tts.WayuTTS or None
@@ -287,9 +298,12 @@ class Dashboard:
             log.info("wake word recording: %s", self.collect)
         elif path == "/api/intake":
             if body.get("stop"):
+                self.cancel_pairing()
                 if self.intake_active():
                     self.intake.cancel()
                 return {"ok": True}
+            if body.get("login") == "thaid":
+                return self.start_pairing(str(body.get("dialect", "th")))
             return self.start_intake(str(body.get("dialect", "th")))
         elif path == "/api/speak":  # say this through the robot's speaker now, even if nobody is there
             text = str(body.get("text", "")).strip()[:300]
@@ -374,14 +388,70 @@ class Dashboard:
     def intake_active(self) -> bool:
         return bool(self.intake and not self.intake.closed)
 
-    def start_intake(self, dialect: str = "th") -> dict:
+    def pairing_on(self) -> bool:
+        return bool(self.intake_url and self.intake_pair_token and self.intake_public_url)
+
+    def pairing_active(self) -> bool:
+        return bool(self.pairing and not self.pairing.done)
+
+    def show_qr(self, url: str, text: str = "", seconds: float = 180) -> None:
+        from .thai_text import shape
+        self.bridge.client.publish(f"{self.bridge.base}/screen/qr", json.dumps(
+            {"url": url, "text": shape(text), "seconds": round(seconds)}, ensure_ascii=False))
+
+    def start_pairing(self, dialect: str = "th") -> dict:
+        """Show a QR so the patient logs in with ThaID on their phone; the interview starts with that
+        login once they have. Saying "ซักเลย" meanwhile starts it without a login."""
+        from .intake import Pairing
+        if not self.pairing_on():
+            raise ValueError("ThaID pairing is off (--intake-pair-token, --intake-public-url)")
+        if self.intake_active() or self.pairing_active():
+            raise ValueError("an interview is already running")
+
+        def bound(code: str) -> None:
+            self.show_qr("")
+            log.info("intake: ThaID login paired")
+            try:
+                self.start_intake(dialect, pair=code)
+            except Exception as e:
+                log.warning("intake: could not start the paired interview: %s", e)
+                self.intake_view["phase"] = "error"
+
+        def expired() -> None:
+            self.show_qr("")
+            self.intake_view["phase"] = "pair-expired"
+            self.add("event", {"type": "intake", "phase": "pair-expired"})
+            self.announce(PAIR_EXPIRED_LINE, force=True)
+
+        pairing = Pairing(self.intake_url, self.intake_pair_token, self.intake_public_url, bound, expired,
+                          poll_s=self.pair_poll_s)
+        url = pairing.start()
+        self.pairing = pairing
+        self.intake_view = {"dialect": dialect, "phase": "pairing", "lines": [], "slots": [], "state": "idle"}
+        self.show_qr(url, PAIR_QR_TEXT, pairing.seconds_left)
+        self.add("event", {"type": "intake", "phase": "pairing"})
+        self.announce(PAIR_LINE, force=True)
+        return {"ok": True, "pairing": True}
+
+    def cancel_pairing(self) -> bool:
+        if not self.pairing_active():
+            return False
+        self.pairing.cancel()
+        self.show_qr("")
+        self.intake_view["phase"] = "cancelled"
+        return True
+
+    def start_intake(self, dialect: str = "th", pair: str | None = None) -> dict:
         """History taking with the patient in front of the robot, through the interview server."""
         from .intake import IntakeSession
         if not self.intake_url:
             raise ValueError("history taking is off (--intake-url)")
         if self.intake_active():
             raise ValueError("an interview is already running")
-        self.intake_view = {"dialect": dialect, "phase": "starting", "lines": [], "slots": [], "state": "idle"}
+        if not pair:
+            self.cancel_pairing()
+        self.intake_view = {"dialect": dialect, "phase": "starting", "lines": [], "slots": [], "state": "idle",
+                            "paired": bool(pair)}
 
         def on_event(ev: dict) -> None:
             v, phase = self.intake_view, ev.get("phase")
@@ -405,7 +475,8 @@ class Dashboard:
                 v["phase"] = phase
                 self.add("event", {"type": "intake", "phase": phase})  # no patient words in the feed
                 log.info("intake: %s", phase)
-        session = IntakeSession(self.intake_url, self.play_wav, self.tts.speak if self.tts else None, on_event, dialect)
+        session = IntakeSession(self.intake_url, self.play_wav, self.tts.speak if self.tts else None, on_event, dialect,
+                                pair=pair, token=self.intake_pair_token)
         session.start()
         self.intake = session
         return {"ok": True}
@@ -682,6 +753,8 @@ class Dashboard:
                     return self._send(200, dash.page, "text/html; charset=utf-8")
                 if self.path == "/api/intake":
                     return self._json(200, {"on": bool(dash.intake_url), "active": dash.intake_active(),
+                                            "pair_on": dash.pairing_on(), "pairing": dash.pairing_active(),
+                                            "pair_left": round(dash.pairing.seconds_left) if dash.pairing_active() else 0,
                                             **dash.intake_view})
                 if self.path == "/api/overview":
                     return self._json(200, dash.overview())
@@ -811,10 +884,26 @@ class Dashboard:
                     log.warning("voice: ASR failed (%.1fs, wake=%d): %s", len(pcm) / 32000, wake, e)
                     return self._json(502, {"error": f"ASR: {e}"})
                 seconds = len(pcm) / 32000
+                if dash.pairing_active() and text:  # the QR is up: the patient may answer without the name
+                    if INTAKE_STOP_RE.search(text):
+                        dash.cancel_pairing()
+                        log.info("voice: %r -> pairing cancelled", text)
+                        return self._send(204, b"", "audio/wav")
+                    if INTAKE_SKIP_RE.search(text):
+                        try:
+                            dash.start_intake("th")
+                            log.info("voice: %r -> history taking without a login", text)
+                            return self._send(204, b"", "audio/wav")
+                        except Exception as e:
+                            log.warning("voice: could not start history taking: %s", e)
                 if dash.intake_url and text and INTAKE_START_RE.search(text) and not INTAKE_STOP_RE.search(text):
                     try:
-                        dash.start_intake("th")
-                        log.info("voice: %r -> history taking", text)
+                        if dash.pairing_on() and not INTAKE_SKIP_RE.search(text):
+                            dash.start_pairing("th")
+                            log.info("voice: %r -> history taking, QR for ThaID", text)
+                        else:
+                            dash.start_intake("th")
+                            log.info("voice: %r -> history taking", text)
                         return self._send(204, b"", "audio/wav")  # the interview's greeting follows as an announcement
                     except Exception as e:
                         log.warning("voice: could not start history taking: %s", e)

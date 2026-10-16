@@ -33,6 +33,7 @@ data:
     topic read stackchan/voice/progress
     topic read stackchan/leds
     topic read stackchan/camera/stream
+    topic read stackchan/screen/qr
 ---
 apiVersion: apps/v1
 kind: Deployment

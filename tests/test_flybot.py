@@ -1474,6 +1474,103 @@ def test_dashboard_intake_is_off_without_a_server_and_voice_goes_to_it_when_on(g
         dash.stop()
 
 
+def test_intake_thaid_pairing_shows_a_qr_and_starts_with_that_login(gains):
+    import json as _json
+    import threading as _th
+    import time as _time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from flybot import dashboard as _d
+
+    state = {"v": "pending"}
+    seen = []
+
+    class Interview(BaseHTTPRequestHandler):  # the interview server's /api/pair
+        def _json(self, obj):
+            body = _json.dumps(obj).encode()
+            self.send_response(200 if self.headers.get("Authorization") == "Bearer tok" else 401)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def do_POST(self):
+            seen.append(("POST", self.path))
+            self._json({"code": "c" * 22, "path": "/auth/thaid/start?pair=" + "c" * 22, "expires_in": 180})
+        def do_GET(self):
+            seen.append(("GET", self.path))
+            self._json({"state": state["v"]})
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Interview)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    ws_url = f"ws://127.0.0.1:{srv.server_address[1]}/ws"
+    try:
+        bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+        published = []
+        bridge.base = "stackchan"
+        bridge.client.publish = lambda topic, payload, qos=0: published.append((topic, _json.loads(payload)))
+        dash = _d.Dashboard(bridge, port=0)
+        dash.intake_url = ws_url
+        with pytest.raises(ValueError):
+            dash.start_pairing()  # no token: pairing is off
+        dash.intake_pair_token, dash.intake_public_url = "tok", "https://interview.example/"
+        started = []
+        dash.start_intake = lambda dialect="th", pair=None: started.append(pair) or {"ok": True}
+        dash.pair_poll_s = 0.05
+        assert dash.start_pairing()["pairing"] and dash.pairing_active()
+        topic, qr = published[0]
+        assert topic == "stackchan/screen/qr" and qr["url"] == "https://interview.example/auth/thaid/start?pair=" + "c" * 22
+        assert qr["seconds"] == 180 and qr["text"]
+        with pytest.raises(ValueError):
+            dash.start_pairing()  # one at a time
+        state["v"] = "bound"
+        for _ in range(100):
+            if started:
+                break
+            _time.sleep(0.02)
+        assert started == ["c" * 22] and not dash.pairing_active()
+        assert published[-1] == ("stackchan/screen/qr", {"url": "", "text": "", "seconds": 180})  # QR gone
+        # nobody logs in: the QR clears and the robot says so
+        state["v"] = "pending"
+        said = []
+        dash.announce = lambda text, force=False: said.append(text) or True
+        dash.start_pairing()
+        state["v"] = "expired"
+        for _ in range(100):
+            if not dash.pairing_active():
+                break
+            _time.sleep(0.02)
+        _time.sleep(0.05)
+        assert dash.intake_view["phase"] == "pair-expired" and said[-1] == _d.PAIR_EXPIRED_LINE
+        assert all(p.startswith("/api/pair") for _, p in seen)
+        assert _d.INTAKE_SKIP_RE.search("ซักเลยครับ") and _d.INTAKE_SKIP_RE.search("ไม่ต้องล็อกอิน")
+        assert not _d.INTAKE_SKIP_RE.search("ซักประวัติหน่อย")
+    finally:
+        srv.shutdown()
+
+
+def test_intake_session_carries_the_pairing():
+    from flybot.intake import IntakeSession, http_base
+    got = {}
+
+    class WS:
+        def send(self, m):
+            pass
+        def __iter__(self):
+            return iter(())
+        def close(self):
+            pass
+
+    def connect(url, **k):
+        got.update(url=url, headers=k.get("additional_headers"))
+        return WS()
+    s = IntakeSession("ws://h/ws", lambda w, t: 0.0, None, lambda e: None, pair="p" * 22, token="tok", connect=connect)
+    s.start()
+    assert "pair=" + "p" * 22 in got["url"] and got["headers"] == {"Authorization": "Bearer tok"}
+    IntakeSession("ws://h/ws", lambda w, t: 0.0, None, lambda e: None, token="tok", connect=connect).start()
+    assert "pair" not in got["url"] and got["headers"] == {}  # no pairing: the token stays home
+    assert http_base("wss://interview.kkh.go.th/ws") == "https://interview.kkh.go.th"
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

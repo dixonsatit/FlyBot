@@ -28,6 +28,7 @@ static Si12T headTouch(SI12T_Type_Low, SI12T_Sensitivity_Level_3);  // as M5Stac
 #endif
 
 extern m5avatar::Avatar avatar;
+bool screenBusy();  // main.cpp: a QR is on screen and the avatar task is stopped
 
 static constexpr uint32_t RATE = 16000;  // asr-typhoon: PCM 16 kHz mono s16le
 static constexpr size_t BLOCK = 1600;    // 0.1 s
@@ -538,7 +539,7 @@ void voiceUpdate() {
     pendingReaction = "";
     if (state == State::Listening) stopMic(), state = State::Off;
     reacting = playFiller(kind.c_str());
-    if (reacting) avatar.setExpression(m5avatar::Expression::Doubt);
+    if (reacting && !screenBusy()) avatar.setExpression(m5avatar::Expression::Doubt);
   }
   if (reacting) {
     if (M5.Speaker.isPlaying()) return;
@@ -571,7 +572,7 @@ void voiceUpdate() {
       }
       if (g == HeadGesture::Pat) {
         stopMic();
-        avatar.setExpression(m5avatar::Expression::Happy);
+        if (!screenBusy()) avatar.setExpression(m5avatar::Expression::Happy);
         request("/api/pat", nullptr);
       } else if (pendingAnnounce.length()) {  // speak up on our own (reminder, CI news)
         String id = pendingAnnounce;

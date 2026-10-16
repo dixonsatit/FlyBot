@@ -318,6 +318,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
     ap.add_argument("--intake-url", help="history taking: the interview server's WebSocket, e.g. "
                                          "ws://stackchan-interview.stackchan-interview.svc/ws")
+    ap.add_argument("--intake-pair-token", help="the interview server's PAIR_TOKEN: offer a QR for ThaID login "
+                                                "on the patient's phone before history taking")
+    ap.add_argument("--intake-public-url", default="https://interview.kkh.go.th",
+                    help="the interview server as the patient's phone reaches it (the QR's host)")
     mem = ap.add_argument_group("long-term memory (every part swappable)")
     mem.add_argument("--memory-dsn", help="postgresql://... for notes, reminders, episodes and the audit log "
                                          "(default: a JSON file in --state-dir)")
@@ -444,6 +448,8 @@ def main(argv: list[str] | None = None) -> None:
                                      follow_up_s=args.follow_up)
         bridge.dashboard.robot_user, bridge.dashboard.robot_password = args.robot_user, args.robot_password
         bridge.dashboard.intake_url = args.intake_url
+        bridge.dashboard.intake_pair_token = args.intake_pair_token
+        bridge.dashboard.intake_public_url = args.intake_public_url
         bridge.dashboard.start()
     if args.presence and bridge.dashboard:
         from .presence import Presence

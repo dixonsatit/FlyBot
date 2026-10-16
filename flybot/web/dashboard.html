@@ -158,10 +158,12 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
     <div class="card">
       <h2>ซักประวัติผู้ป่วย <span class="sp"></span><span class="tag" id="ikState">ปิดอยู่</span></h2>
       <div class="row">
-        <button id="ikStartTh" class="primary">เริ่ม (ภาษากลาง)</button>
+        <button id="ikStartThaid" class="primary">เริ่ม + ยืนยันตัวตน ThaID (QR บนหุ่น)</button>
+        <button id="ikStartTh">เริ่ม (ภาษากลาง)</button>
         <button id="ikStartIsan">เริ่ม (อีสาน)</button>
         <button id="ikStop" class="danger">ยกเลิก (ไม่บันทึก)</button>
       </div>
+      <div id="ikPair" class="hint"></div>
       <div id="ikAlert" class="err" style="font-size:15px"></div>
       <div id="ikDone" class="hint"></div>
       <div class="feed" id="ikLines" style="height:360px"></div>
@@ -494,9 +496,13 @@ const IK_STATE = { idle: "รอ", listening: "กำลังฟัง", thinki
 let ikTimer = null;
 async function loadIntake() {
   let j; try { j = await (await fetch("/api/intake")).json(); } catch { return; }
-  ["ikStartTh", "ikStartIsan"].forEach((id) => $(id).disabled = !j.on || j.active);
-  $("ikStop").disabled = !j.active;
-  $("ikState").textContent = !j.on ? "ยังไม่ได้ตั้ง --intake-url" : j.active ? (IK_STATE[j.state] || j.state || "เริ่มแล้ว") : (j.phase ? "ไม่ได้ซัก" : "ปิดอยู่");
+  ["ikStartTh", "ikStartIsan"].forEach((id) => $(id).disabled = !j.on || j.active || j.pairing);
+  $("ikStartThaid").disabled = !j.pair_on || j.active || j.pairing;
+  $("ikStartThaid").title = j.pair_on ? "" : "ต้องตั้ง --intake-pair-token (PAIR_TOKEN ของระบบซักประวัติ)";
+  $("ikStop").disabled = !j.active && !j.pairing;
+  $("ikState").textContent = !j.on ? "ยังไม่ได้ตั้ง --intake-url" : j.pairing ? "รอสแกน QR" : j.active ? (IK_STATE[j.state] || j.state || "เริ่มแล้ว") : (j.phase ? "ไม่ได้ซัก" : "ปิดอยู่");
+  $("ikPair").textContent = j.pairing ? `หุ่นแสดง QR อยู่ ผู้ป่วยสแกนแล้ว login ThaID บนมือถือ (เหลือ ${j.pair_left} วินาที) หรือพูดว่า "ซักเลย" เพื่อซักแบบไม่ login`
+    : j.phase === "pair-expired" ? "QR หมดเวลา ไม่มีใคร login" : j.active ? (j.paired ? "ยืนยันตัวตนด้วย ThaID แล้ว (หุ่นทำตัวเป็นตู้: ซักอย่างเดียว ไม่พูดข้อมูลส่วนตัว)" : "ไม่ได้ยืนยันตัวตน") : "";
   $("ikAlert").textContent = j.alert ? "⚠️ อาการที่ต้องพบเจ้าหน้าที่ทันที: " + (j.alert.detail || (j.alert.labels || []).join(", ")) : "";
   $("ikDone").textContent = j.done ? `จบ: ${j.done.status}${j.done.conflicts ? ` · คำตอบขัดกัน ${j.done.conflicts} จุด` : ""}` : "";
   const box = $("ikLines"), atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -511,8 +517,9 @@ async function loadIntake() {
     $("ikSlots").append(tr);
   }
   clearTimeout(ikTimer);
-  if (j.active || document.querySelector("#tab-intake.active")) ikTimer = setTimeout(loadIntake, j.active ? 1000 : 4000);
+  if (j.active || j.pairing || document.querySelector("#tab-intake.active")) ikTimer = setTimeout(loadIntake, j.active || j.pairing ? 1000 : 4000);
 }
+$("ikStartThaid").onclick = () => post("/api/intake", { dialect: "th", login: "thaid" }, "errIntake").then(loadIntake);
 $("ikStartTh").onclick = () => post("/api/intake", { dialect: "th" }, "errIntake").then(loadIntake);
 $("ikStartIsan").onclick = () => post("/api/intake", { dialect: "isan" }, "errIntake").then(loadIntake);
 $("ikStop").onclick = () => post("/api/intake", { stop: true }, "errIntake").then(loadIntake);

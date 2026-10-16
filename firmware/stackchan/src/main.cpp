@@ -8,6 +8,7 @@
 //                                      "text": speech balloon (attention game), optional}
 //            <base>/snapshot/request  -> publishes one JPEG frame on <base>/snapshot (LLM vision)
 //            <base>/selftest          boot self-test result (retained), see selftest.cpp
+//            <base>/screen/qr         {"url","text","seconds"}: full-screen QR (ThaID pairing); url "" clears
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include <ArduinoJson.h>
@@ -373,6 +374,13 @@ static Expression toExpression(const char* e) {
 }
 
 static volatile bool snapshotRequested = false;
+// <base>/screen/qr {"url", "text", "seconds"}: a QR for the patient's phone (ThaID login paired with
+// this robot); {"url": ""} clears it. The avatar task is stopped while it shows, since it repaints
+// the whole screen every frame.
+static String qrUrl, qrText;
+static uint32_t qrUntil = 0;
+static bool qrPending = false, qrShown = false;
+bool screenBusy() { return qrShown || qrPending; }
 // <base>/camera/stream {"fps", "seconds"}: someone watches the dashboard camera, so send frames
 // on our own instead of one per request (a round trip through the VPN took 0.3-3.7 s).
 static uint32_t streamUntil = 0, streamEveryMs = 250, lastStreamMs = 0;
@@ -423,6 +431,16 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     if (!deserializeJson(a, payload, len) && a["say"].is<const char*>()) voiceProgress(a["say"]);
     return;
   }
+  if (topicBase + "/screen/qr" == topic) {
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len)) {
+      qrUrl = a["url"] | "";
+      qrText = a["text"] | "";
+      qrUntil = millis() + uint32_t(constrain(float(a["seconds"] | 180.0f), 5.0f, 600.0f) * 1000);
+      qrPending = true;
+    }
+    return;
+  }
   if (topicBase + "/announce" == topic) {  // the bridge wants to say something: {"id": "..."}
     JsonDocument a;
     if (!deserializeJson(a, payload, len) && a["id"].is<const char*>()) voiceAnnounce(a["id"]);
@@ -447,7 +465,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     lastFace = face;
     faceDirty = false;
     tele.face = face;
-    avatar.setExpression(toExpression(face));
+    if (!screenBusy()) avatar.setExpression(toExpression(face));
   }
 
   static String lastText;
@@ -603,6 +621,7 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/voice/progress").c_str(), 0);
     mqtt.subscribe((topicBase + "/leds").c_str(), 0);
     mqtt.subscribe((topicBase + "/camera/stream").c_str(), 0);
+    mqtt.subscribe((topicBase + "/screen/qr").c_str(), 0);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
@@ -679,8 +698,43 @@ void setup() {
   streamBegin();
 }
 
+static void hideQr() {
+  if (!qrShown) return;
+  qrShown = false;
+  M5.Display.fillScreen(TFT_BLACK);
+  avatar.start();
+  faceDirty = true;  // the next command puts the expression back
+}
+
+static void serviceQr() {
+  if (qrPending) {
+    qrPending = false;
+    if (!qrUrl.length()) return hideQr();
+    if (!qrShown) {
+      // stop() lets the draw/facial tasks finish their frame and exit (they delay 10/33 ms);
+      // drawing over a suspended frame would leave its half-pushed sprite on the bus
+      avatar.stop();
+      delay(120);
+      qrShown = true;
+    }
+    auto& d = M5.Display;
+    d.fillScreen(TFT_WHITE);
+    const int side = qrText.length() ? 196 : 232;
+    d.qrcode(qrUrl.c_str(), (d.width() - side) / 2, 4, side, 1, true);
+    if (qrText.length()) {
+      d.setFont(&thaiFont);
+      d.setTextSize(1.5f);
+      d.setTextColor(TFT_BLACK, TFT_WHITE);
+      d.setTextDatum(top_center);
+      d.drawString(qrText, d.width() / 2, 204);
+    }
+  }
+  if (qrShown && int32_t(millis() - qrUntil) > 0) hideQr();
+}
+
 void loop() {
   M5.update();
+  serviceQr();
   voiceUpdate();
   publishStatus();
   ensureConnected();
