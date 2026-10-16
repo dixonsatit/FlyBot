@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.42.1 (2026-10-16)
+
+### Bug Fixes
+
+- **line**: Keep the employee's LINE id that this OA can reach
+  ([`0b1f6c4`](https://github.com/dixonsatit/FlyBot/commit/0b1f6c48ec3e97f7534779470240c276e4ee4418))
+
+
 ## v0.42.0 (2026-10-16)
 
 ### Features
