@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 # Tools that fetch something over the network: the robot says it is searching while they run.
 LOOKUPS = {"places", "weather", "github_status", "upcoming_meetings", "look"}
 # Tools that only read: everything else is an action and goes into the audit log.
-READ_ONLY = LOOKUPS | {"recall", "notes_and_reminders", "brain_state"}
+READ_ONLY = LOOKUPS | {"recall", "notes_and_reminders", "brain_state", "line_contacts"}
 
 PERSONA = """You are น้องหวี่ (Nong Wee), a desk assistant robot (an M5Stack StackChan) for a hospital IT
 manager and full-stack developer (TypeScript, Vue/Nuxt, Hono, Drizzle, PostgreSQL, Kubernetes). You are a
@@ -130,6 +130,7 @@ class Cortex:
         self.episodes = None  # flybot.memory.Episodes: summaries of past conversations (recall)
         self.audit = None  # flybot.memory.Audit: what was done, append-only
         self.photo = None  # Dashboard.take_photo: a picture into the album, QR on the robot
+        self.line = None  # flybot.line.LineContacts: staff registered for LINE messages
         self._transcript: list[str] = []  # this conversation, summarised into an episode when it ends
         self._last_turn = 0.0
         self.history: list[dict] = []
@@ -309,6 +310,14 @@ class Cortex:
             return Tool(t.name, t.description, t.parameters, fn)
         return [wrap(t) for t in tools]
 
+    def _send_line(self, to: str, text: str) -> dict:
+        if not self.line:
+            return {"error": "LINE is not connected"}
+        try:
+            return self.line.send(to, text)
+        except Exception as e:  # the model hears why and can tell the user
+            return {"error": str(e)}
+
     # -- long-term memory ----------------------------------------------------------
     def _memories_for(self, text: str, k: int = 3, min_score: float = 0.52) -> str:
         """Past episodes that look related to what was just said, so "เรื่องเมื่อวาน" needs no tool.
@@ -404,6 +413,16 @@ class Cortex:
                                                    "pan": {"type": "number"}, "tilt": {"type": "number"}},
                   "additionalProperties": False},
                  self._move_head),
+            Tool("line_contacts", "Staff you may send a LINE message to (registered by employee code on the dashboard).",
+                 {"type": "object", "properties": {}, "additionalProperties": False},
+                 lambda: self.line.list() if self.line else {"error": "LINE is not connected"}),
+            Tool("send_line", "Send a LINE message (KKH LINE OA) to a registered staff member when asked "
+                 "(ส่งไลน์บอก..., แจ้ง...ทางไลน์). to: their nickname, name or employee code. Write the message "
+                 "in Thai, short and complete, and say who it is from if the user is not the recipient. "
+                 "Only registered contacts can be reached; never put patient information in it.",
+                 {"type": "object", "properties": {"to": {"type": "string"}, "text": {"type": "string"}},
+                  "required": ["to", "text"], "additionalProperties": False},
+                 lambda to, text: self._send_line(to, text)),
             Tool("take_photo", "Take a photo with the robot's camera when asked (ถ่ายรูป, ถ่ายภาพ). It is saved "
                  "in the album on the dashboard and a QR on the robot's screen opens it on a phone for 10 minutes.",
                  {"type": "object", "properties": {}, "additionalProperties": False},

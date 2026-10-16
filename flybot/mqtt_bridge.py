@@ -338,6 +338,9 @@ def main(argv: list[str] | None = None) -> None:
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
     gh.add_argument("--face-url", help="tools/face_server.py (e.g. http://192.168.3.57:7880): greet enrolled people")
     gh.add_argument("--face-token", help="the face server's FACE_TOKEN")
+    gh.add_argument("--line-token", help="KKH LINE OA channel access token (Messaging API): send_line to staff")
+    gh.add_argument("--line-dsn", help="mysql://... with the v_stackchan_line view (employee code -> LINE id); "
+                                      "default --staff-dsn")
     gh.add_argument("--staff-dsn", help="mysql://user:pass@host/db with a narrow staff view (v_stackchan_staff)")
     gh.add_argument("--google-maps-key", help="Google Maps Platform key with Places API (New) for the places tool")
     gh.add_argument("--github-token", help="read-only token (fine-grained: Actions + Pull requests read)")
@@ -502,6 +505,13 @@ def main(argv: list[str] | None = None) -> None:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
         from .photos import PhotoAlbum
         bridge.dashboard.album = PhotoAlbum(os.path.join(args.state_dir, "photos"))
+        from .line import LineContacts, LineDirectory, LineMessenger
+        line_dsn = args.line_dsn or args.staff_dsn
+        bridge.dashboard.line = LineContacts(os.path.join(args.state_dir, "line_contacts.json"),
+                                             LineDirectory(line_dsn) if line_dsn else None,
+                                             LineMessenger(args.line_token) if args.line_token else None)
+        if bridge.cortex:
+            bridge.cortex.line = bridge.dashboard.line
         bridge.dashboard.public_url = args.public_url
         if bridge.cortex:
             bridge.cortex.photo = bridge.dashboard.take_photo

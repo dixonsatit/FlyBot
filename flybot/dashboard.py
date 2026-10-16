@@ -221,6 +221,7 @@ class Dashboard:
         self.pairing = None  # flybot.intake.Pairing while the QR waits for the patient's phone
         self.pair_poll_s = 1.0
         self.album = None  # flybot.photos.PhotoAlbum, with --state-dir
+        self.line = None  # flybot.line.LineContacts, with --state-dir
         self.public_url = "https://stackchan.kkh.go.th"  # where a phone opens a shared photo
         self._announce_seq = 0
         self._fillers: dict[str, bytes] = {}
@@ -325,6 +326,14 @@ class Dashboard:
             if body.get("login") == "thaid":
                 return self.start_pairing(str(body.get("dialect", "th")))
             return self.start_intake(str(body.get("dialect", "th")))
+        elif path == "/api/line":
+            if not self.line:
+                raise ValueError("LINE needs --state-dir")
+            if body.get("add") is not None:
+                return {"ok": True, "contact": self.line.register(body["add"])}
+            if body.get("remove") is not None:
+                return {"ok": self.line.remove(body["remove"])}
+            return self.line.send(str(body.get("to", "")), str(body.get("text", "")))
         elif path == "/api/photos":
             if not self.album:
                 raise ValueError("photos need --state-dir")
@@ -826,6 +835,11 @@ class Dashboard:
                     return self._shared_photo(self.path[3:].split("?")[0])
                 if not self._auth():
                     return
+                if self.path == "/api/line":
+                    ln = dash.line
+                    return self._json(200, {"on": bool(ln), "token": bool(ln and ln.messenger),
+                                            "directory": bool(ln and ln.directory),
+                                            "contacts": ln.list() if ln else []})
                 if self.path == "/api/photos":
                     return self._json(200, {"on": bool(dash.album), "photos": dash.album.names()[:60] if dash.album else []})
                 if self.path.startswith("/api/photos/"):

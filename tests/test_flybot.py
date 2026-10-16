@@ -1613,6 +1613,60 @@ def test_photos_are_saved_and_shared_by_a_short_lived_link(gains, tmp_path):
     assert PHOTO_RE.search("น้องหวี่ถ่ายรูปให้หน่อย") and PHOTO_RE.search("ถ่ายภาพหน่อย")
 
 
+def test_line_contacts_register_by_employee_code_and_send(tmp_path):
+    import json as _json
+    import threading as _th
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from flybot.cortex import READ_ONLY
+    from flybot.line import LineContacts, LineMessenger
+
+    got = []
+
+    class Line(BaseHTTPRequestHandler):  # LINE's push endpoint
+        def do_POST(self):
+            body = _json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            ok = self.headers.get("Authorization") == "Bearer tok"
+            if ok:
+                got.append(body)
+            self.send_response(200 if ok else 401)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Line)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/push"
+
+    class Directory:  # the v_stackchan_line view
+        rows = {90129: {"code": 90129, "title": "นาย", "name": "สาธิต", "surname": "สีถาพล", "nicname": "ต๊ะ",
+                        "line_id": "Uaaaa"},
+                55: {"code": 55, "title": "นาง", "name": "ไม่มี", "surname": "ไลน์", "nicname": "", "line_id": None}}
+        def get(self, code):
+            return self.rows.get(code)
+
+    try:
+        path = str(tmp_path / "line.json")
+        contacts = LineContacts(path, Directory(), LineMessenger("tok", push_url=url))
+        assert contacts.register("90129") == {"code": 90129, "name": "นายสาธิต สีถาพล", "nick": "ต๊ะ"}
+        for bad in ("abc", 1, 55):  # not a number / not an employee / no LINE linked
+            with pytest.raises(ValueError):
+                contacts.register(bad)
+        assert "line_id" not in _json.dumps(contacts.list())  # the page and the LLM never see it
+        assert contacts.send("พี่ต๊ะ", "ประชุมเลื่อนเป็นบ่ายสอง")["to"]["code"] == 90129
+        assert got == [{"to": "Uaaaa", "messages": [{"type": "text", "text": "ประชุมเลื่อนเป็นบ่ายสอง"}]}]
+        with pytest.raises(ValueError):
+            contacts.send("ใครก็ไม่รู้", "x")  # only registered people
+        assert LineContacts(path, None, None).list()[0]["code"] == 90129  # kept on disk
+        with pytest.raises(ValueError):
+            LineContacts(path, Directory(), LineMessenger("wrong", push_url=url)).send("90129", "x")  # 401 explained
+        assert contacts.remove(90129) and contacts.list() == []
+        assert "line_contacts" in READ_ONLY and "send_line" not in READ_ONLY  # sending is audited
+    finally:
+        srv.shutdown()
+
+
 def test_to_16k_resamples_wayu_wav():
     import struct
     from flybot.dashboard import to_16k

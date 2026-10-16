@@ -264,6 +264,14 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
       <dl class="kv" id="cfgKv"></dl>
       <div class="err" id="errSet"></div>
     </div>
+    <div class="card"><h2>LINE <span class="sp"></span><span class="tag" id="lineState">ปิดอยู่</span></h2>
+      <div class="hint">ส่งข้อความหาเจ้าหน้าที่ทาง LINE OA ของโรงพยาบาล เฉพาะคนที่ลงทะเบียนด้วยรหัสพนักงาน (employee code) และเคยผูก LINE กับ LINE OA แล้ว
+        · สั่งน้องหวี่ได้ เช่น "ส่งไลน์บอกพี่เปรมว่าประชุมเลื่อนเป็นบ่ายสอง"</div>
+      <div class="row"><input id="lineCode" placeholder="รหัสพนักงาน เช่น 90129" inputmode="numeric" style="width:160px"><button id="lineAdd" class="primary">ลงทะเบียน</button></div>
+      <table><tbody id="lineList"></tbody></table>
+      <div class="compose"><select id="lineTo"></select><input id="lineText" placeholder="ข้อความทดสอบ" maxlength="500"><button id="lineSend">ส่ง</button></div>
+      <div class="err" id="errLine"></div>
+    </div>
     <div class="card"><h2>ความเป็นส่วนตัว</h2>
       <ul class="hint" style="margin:0;padding-left:18px">
         <li>เสียงที่หุ่นอัดเก็บไว้ล่าสุด 30 คลิป ใช้ไล่ปัญหาเท่านั้น</li>
@@ -507,6 +515,30 @@ async function startMic(button) {
     $("msg" + micFrom).placeholder = "พิมพ์สั่งงานหรือถาม แล้วกด Enter";
   } };
 }
+
+// ---- LINE --------------------------------------------------------------------------
+async function loadLine() {
+  let j; try { j = await (await fetch("/api/line")).json(); } catch { return; }
+  $("lineState").textContent = !j.on ? "ปิดอยู่" : !j.token ? "ยังไม่ได้ตั้ง token" : !j.directory ? "ยังไม่ได้ต่อฐานข้อมูลพนักงาน" : `${j.contacts.length} คน`;
+  $("lineList").innerHTML = j.contacts.length ? "" : `<tr><td class="hint">ยังไม่มีใครลงทะเบียน</td></tr>`;
+  $("lineTo").innerHTML = "";
+  for (const c of j.contacts) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(c.name)}${c.nick ? ` (${esc(c.nick)})` : ""}</td><td class="hint">${c.code}</td><td><button class="danger">ลบ</button></td>`;
+    tr.querySelector("button").onclick = async () => { await post("/api/line", { remove: c.code }, "errLine"); loadLine(); };
+    $("lineList").append(tr);
+    const o = document.createElement("option"); o.value = c.code; o.textContent = c.nick || c.name; $("lineTo").append(o);
+  }
+}
+$("lineAdd").onclick = async () => {
+  const code = $("lineCode").value.trim(); if (!code) return;
+  if (await post("/api/line", { add: code }, "errLine")) { $("lineCode").value = ""; loadLine(); }
+};
+$("lineSend").onclick = async () => {
+  const text = $("lineText").value.trim(); if (!text || !$("lineTo").value) return;
+  if (await post("/api/line", { to: $("lineTo").value, text }, "errLine")) { $("lineText").value = ""; $("errLine").textContent = "ส่งแล้ว"; }
+};
+loadLine();
 
 // ---- photos ------------------------------------------------------------------------
 let photoSel = null;
