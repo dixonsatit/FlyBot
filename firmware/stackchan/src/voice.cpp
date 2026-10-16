@@ -87,6 +87,10 @@ static void logTurn(char kind, uint16_t ms) {
   ++turnCount;
 }
 static Turn& lastTurn() { return turns[(turnCount + 9) % 10]; }
+// Least free stack seen per task (bytes), for /status: a task that overruns its stack corrupts
+// the neighbouring task's control block, which is what the panics looked like.
+static TaskHandle_t micHandle = nullptr;
+static volatile uint32_t sendStackFree = 0, fillerStackFree = 0;
 static volatile int32_t micLevel = 0;  // last block's RMS, for the monitor page
 static volatile float micNoise = 0;
 static volatile float micShare = 0;  // voice-band share of the last block
@@ -123,11 +127,15 @@ String voiceStatusJson() {
            "{\"state\":\"%s\",\"level\":%ld,\"share\":%.2f,\"noise\":%.0f,\"threshold\":%.0f,\"url\":\"%s\",\"turns\":[",
            NAMES[int(state)], long(micLevel), micShare, micNoise, max(float(P.vadMinRms), micNoise * P.vadRatio),
            voiceUrl.c_str());
+  char sbuf[96];
+  snprintf(sbuf, sizeof sbuf, "\"stack_free\":{\"mic\":%u,\"send\":%u,\"filler\":%u},",
+           micHandle ? unsigned(uxTaskGetStackHighWaterMark(micHandle)) : 0u, unsigned(sendStackFree),
+           unsigned(fillerStackFree));
   String out = buf;
   char tbuf[112];
   snprintf(tbuf, sizeof tbuf, "{\"touch\":[%u,%u,%u],\"touch_last\":\"%s\",", touchRaw[0], touchRaw[1], touchRaw[2],
            touchLast);
-  out = String(tbuf) + out.substring(1);
+  out = String(tbuf) + sbuf + out.substring(1);
   for (int i = max(0, turnCount - 10); i < turnCount; ++i) {
     const Turn& t = turns[i % 10];
     char row[96];
@@ -410,6 +418,7 @@ static bool fillersComplete() {
 static void fillerTask(void*) {
   for (int i = 0; i < FILLERS; ++i)
     if (!filler[i]) fetchFiller(i);
+  fillerStackFree = uxTaskGetStackHighWaterMark(nullptr);
   fillerFetching = false;
   vTaskDelete(nullptr);
 }
@@ -448,6 +457,8 @@ static size_t lastReplyLen = 0;
 static void sendTask(void*) {
   httpCode = voiceRequest();
   if (turnCount) lastTurn().code = httpCode, lastTurn().bytes = wavLen;
+  const uint32_t free = uxTaskGetStackHighWaterMark(nullptr);
+  if (!sendStackFree || free < sendStackFree) sendStackFree = free;
   state = wavLen ? State::Speaking : State::Off;  // Off: main restarts the mic
   vTaskDelete(nullptr);
 }
@@ -494,7 +505,7 @@ void voiceBegin() {
 #if STACKCHAN_OFFICIAL
   headTouch.begin();
 #endif
-  xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(micTask, "mic", 4096, nullptr, 2, &micHandle, 0);
 }
 
 // The base's touch strip (3 pads), position as in M5Stack's hal_head_touch.cpp: the

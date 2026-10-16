@@ -552,20 +552,40 @@ static const Network NETWORKS[] = {
 #endif
     {WIFI2_SSID, WIFI2_PASSWORD, WIFI2_MQTT_HOST, WIFI2_MQTT_PORT, WIFI2_VOICE_URL, WIFI2_WAKE_NAME},
 #endif
+#ifdef WIFI3_SSID  // another network at the same site, e.g. a closer AP; hosts default to WIFI_*'s
+#ifndef WIFI3_MQTT_HOST
+#define WIFI3_MQTT_HOST MQTT_HOST
+#define WIFI3_MQTT_PORT MQTT_PORT
+#define WIFI3_VOICE_URL VOICE_URL
+#endif
+    {WIFI3_SSID, WIFI3_PASSWORD, WIFI3_MQTT_HOST, WIFI3_MQTT_PORT, WIFI3_VOICE_URL, true},
+#endif
 };
 static constexpr int N_NETWORKS = sizeof NETWORKS / sizeof *NETWORKS;
 static int network = 0;
 static uint32_t lastJoin = 0;  // give each join 10 s before starting over
 
-// The strongest known network in a scan (logged, so a weak or missing AP shows on serial).
+// The strongest known network in a scan (logged, so a weak or missing AP shows on serial), and
+// that AP's BSSID and channel: a hospital SSID has many APs, and WiFi.begin(ssid) alone joined
+// one at -80 dBm with another at -57 in range.
+static uint8_t bestBssid[6];
+static int32_t bestChannel = 0;
 static int pickNetwork() {
   int best = network, bestRssi = -1000;
+  bestChannel = 0;
   int found = WiFi.scanNetworks();
   for (int i = 0; i < found; ++i) {
+    if (WiFi.SSID(i).startsWith("KKH"))  // the hospital's own networks, to choose one by signal
+      M5_LOGW("scan: seen %s rssi %d ch %d auth %d", WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i),
+              int(WiFi.encryptionType(i)));
     for (int n = 0; n < N_NETWORKS; ++n) {
       if (WiFi.SSID(i) == NETWORKS[n].ssid) {
         M5_LOGW("scan: %s rssi %d ch %d", NETWORKS[n].ssid, WiFi.RSSI(i), WiFi.channel(i));
-        if (WiFi.RSSI(i) > bestRssi) bestRssi = WiFi.RSSI(i), best = n;
+        if (WiFi.RSSI(i) > bestRssi) {
+          bestRssi = WiFi.RSSI(i), best = n;
+          bestChannel = WiFi.channel(i);
+          memcpy(bestBssid, WiFi.BSSID(i), 6);
+        }
       }
     }
   }
@@ -578,7 +598,8 @@ static void joinNetwork() {
   network = pickNetwork();
   lastJoin = millis();
   const Network& n = NETWORKS[network];
-  WiFi.begin(n.ssid, n.password);
+  if (bestChannel) WiFi.begin(n.ssid, n.password, bestChannel, bestBssid);
+  else WiFi.begin(n.ssid, n.password);
   mqtt.disconnect();
   String host = n.mqttHost;
   if (host.startsWith("wss://")) {  // e.g. wss://stackchan.kkh.go.th/mqtt, port 443

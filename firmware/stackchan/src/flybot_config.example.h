@@ -12,7 +12,9 @@
 
 // Optional second network with its own broker (the strongest known one is joined), e.g. home
 // WiFi through a laptop running tools/lan_relay.py over its VPN.
-// #define WIFI2_SSID "home-ssid"
+// #define WIFI3_SSID "another-ssid"  // same site, same hosts as WIFI_*; the strongest one wins
+// #define WIFI3_PASSWORD "..."
+#define WIFI2_SSID "home-ssid"
 // #define WIFI2_PASSWORD "home-password"
 // #define WIFI2_MQTT_HOST "192.168.1.104"
 // #define WIFI2_MQTT_PORT 31883
