@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.40.1 (2026-10-16)
+
+### Bug Fixes
+
+- **firmware**: Turn off the on-device face detector that crashed the robot
+  ([`db2923d`](https://github.com/dixonsatit/FlyBot/commit/db2923d0ea9d224bf1b78f43b90f742653563795))
+
+
 ## v0.40.0 (2026-10-16)
 
 ### Features
