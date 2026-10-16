@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.4 (2026-10-16)
+
+### Bug Fixes
+
+- **firmware**: Join the strongest AP of a known SSID, a third network, task stack in /status
+  ([`697ede9`](https://github.com/dixonsatit/FlyBot/commit/697ede9d3d211a8b963e607be8af9ca837029db3))
+
+
 ## v0.41.3 (2026-10-16)
 
 ### Bug Fixes
