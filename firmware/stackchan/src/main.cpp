@@ -9,8 +9,10 @@
 //            <base>/snapshot/request  -> publishes one JPEG frame on <base>/snapshot (LLM vision)
 //            <base>/selftest          boot self-test result (retained), see selftest.cpp
 //            <base>/screen/qr         {"url","text","seconds"}: full-screen QR (ThaID pairing); url "" clears
+//            <base>/screen/preview    {"seconds"}: camera preview with a countdown, then the photo on <base>/snapshot
 #include <M5CoreS3.h>
 #include <Avatar.h>
+#include "look.h"
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
@@ -387,7 +389,12 @@ static volatile bool snapshotRequested = false;
 static String qrUrl, qrText;
 static uint32_t qrUntil = 0;
 static bool qrPending = false, qrShown = false;
-bool screenBusy() { return qrShown || qrPending; }
+// <base>/screen/preview {"seconds": 3}: whoever is in front sees themselves (mirrored, like a phone's
+// front camera) with a big countdown, then the frame is published on <base>/snapshot as the photo.
+static uint32_t previewStart = 0, previewMs = 0, previewStillUntil = 0;
+static bool previewPending = false, previewShown = false;
+static M5Canvas* previewCanvas = nullptr;  // 150 KB, in PSRAM
+bool screenBusy() { return qrShown || qrPending || previewShown || previewPending; }
 // <base>/camera/stream {"fps", "seconds"}: someone watches the dashboard camera, so send frames
 // on our own instead of one per request (a round trip through the VPN took 0.3-3.7 s).
 static uint32_t streamUntil = 0, streamEveryMs = 250, lastStreamMs = 0;
@@ -448,6 +455,13 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     }
     return;
   }
+  if (topicBase + "/screen/preview" == topic) {
+    JsonDocument a;
+    float seconds = deserializeJson(a, payload, len) ? 3.0f : float(a["seconds"] | 3.0f);
+    previewMs = uint32_t(constrain(seconds, 1.0f, 10.0f) * 1000);
+    previewPending = true;
+    return;
+  }
   if (topicBase + "/announce" == topic) {  // the bridge wants to say something: {"id": "..."}
     JsonDocument a;
     if (!deserializeJson(a, payload, len) && a["id"].is<const char*>()) voiceAnnounce(a["id"]);
@@ -472,7 +486,7 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     lastFace = face;
     faceDirty = false;
     tele.face = face;
-    if (!screenBusy()) avatar.setExpression(toExpression(face));
+    if (!screenBusy()) lookExpression(avatar, toExpression(face));
   }
 
   static String lastText;
@@ -653,6 +667,7 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/leds").c_str(), 0);
     mqtt.subscribe((topicBase + "/camera/stream").c_str(), 0);
     mqtt.subscribe((topicBase + "/screen/qr").c_str(), 0);
+    mqtt.subscribe((topicBase + "/screen/preview").c_str(), 0);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
@@ -712,14 +727,14 @@ void setup() {
   M5_LOGW("selftest %s", selfTestJson.c_str());
   delay(report.allOk() ? 2500 : 10000);  // leave failures on screen long enough to read
 
-  avatar.init();
+  lookBegin(avatar);
   thaiFontData.set(thai_font_vlw, thai_font_vlw_len);
   if (thaiFont.loadFont(&thaiFontData)) {
     avatar.setSpeechFont(&thaiFont);
   } else {
     M5_LOGE("Thai font failed to load");
   }
-  avatar.setExpression(Expression::Neutral);
+  lookExpression(avatar, Expression::Neutral);
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -747,7 +762,7 @@ static void hideQr() {
   if (!qrShown) return;
   qrShown = false;
   M5.Display.fillScreen(TFT_BLACK);
-  avatar.start();
+  avatar.start(16);
   faceDirty = true;  // the next command puts the expression back
 }
 
@@ -777,6 +792,90 @@ static void serviceQr() {
   if (qrShown && int32_t(millis() - qrUntil) > 0) hideQr();
 }
 
+// One camera frame into the preview canvas, mirrored. The frame is RGB565 big-endian.
+static bool previewFrame(camera_fb_t* fb) {
+  if (fb->format != PIXFORMAT_RGB565 || fb->width != 320 || fb->height != 240) return false;
+  auto* dst = (uint16_t*)previewCanvas->getBuffer();
+  const auto* src = (const uint16_t*)fb->buf;
+  for (int y = 0; y < 240; ++y) {
+    const uint16_t* row = src + y * 320;
+    uint16_t* out = dst + y * 320;
+    for (int x = 0; x < 320; ++x) out[x] = row[319 - x];  // both big-endian: the canvas swaps on push
+  }
+  return true;
+}
+
+static void endPreview() {
+  previewShown = false;
+  M5.Display.fillScreen(TFT_BLACK);
+  avatar.start(16);
+  faceDirty = true;
+}
+
+static void servicePreview() {
+  if (previewPending) {
+    previewPending = false;
+    if (!cameraOk) return;
+    if (!previewCanvas) {
+      previewCanvas = new M5Canvas(&M5.Display);
+      previewCanvas->setPsram(true);
+      previewCanvas->setColorDepth(16);
+      if (!previewCanvas->createSprite(320, 240)) {
+        M5_LOGE("preview: no memory for the canvas");
+        delete previewCanvas;
+        previewCanvas = nullptr;
+        return;
+      }
+    }
+    if (!previewShown && !qrShown) {
+      avatar.stop();  // see serviceQr(): let the draw task finish its frame first
+      delay(120);
+    }
+    previewShown = true;
+    previewStart = millis();
+    previewStillUntil = 0;
+  }
+  if (!previewShown) return;
+  auto& d = M5.Display;
+  if (previewStillUntil) {  // the photo stays a moment so they see what was taken
+    if (int32_t(millis() - previewStillUntil) > 0) endPreview();
+    return;
+  }
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) return;
+  const uint32_t elapsed = millis() - previewStart;
+  if (elapsed >= previewMs) {  // shutter: this frame is the photo
+    uint8_t* jpg = nullptr;
+    size_t len = 0;
+    bool ok = frame2jpg(fb, 85, &jpg, &len);
+    previewFrame(fb);
+    esp_camera_fb_return(fb);
+    voiceShutter();
+    d.fillScreen(TFT_WHITE);  // flash
+    if (ok && mqtt.beginPublish((topicBase + "/snapshot").c_str(), len, false)) {
+      mqtt.write(jpg, len);
+      mqtt.endPublish();
+    }
+    free(jpg);
+    previewCanvas->pushSprite(&d, 0, 0);
+    previewStillUntil = millis() + 1500;
+    return;
+  }
+  const bool ok = previewFrame(fb);
+  esp_camera_fb_return(fb);
+  if (!ok) return;
+  const int left = (previewMs - elapsed + 999) / 1000;  // 3, 2, 1
+  auto* c = previewCanvas;
+  c->setTextDatum(middle_center);
+  c->setFont(&fonts::Font8);  // 7-segment-like digits, 75 px
+  c->setTextSize(1.6f);
+  c->setTextColor(TFT_BLACK);
+  c->drawNumber(left, 163, 123);  // a shadow so it reads on any background
+  c->setTextColor(TFT_WHITE);
+  c->drawNumber(left, 160, 120);
+  c->pushSprite(&d, 0, 0);
+}
+
 bool heapCheck(const char* where);  // voice.cpp
 
 void loop() {
@@ -786,7 +885,8 @@ void loop() {
     heapCheck("(periodic)");
   }
   M5.update();
-  serviceQr();
+  servicePreview();
+  if (!previewShown) serviceQr();  // a QR that came during the countdown waits for it
   voiceUpdate();
   publishStatus();
   ensureConnected();
@@ -808,12 +908,12 @@ void loop() {
   }
 
   const bool streaming = int32_t(streamUntil - millis()) > 0 && millis() - lastStreamMs >= streamEveryMs;
-  if (cameraOk && (snapshotRequested || streaming)) {
+  if (cameraOk && !previewShown && (snapshotRequested || streaming)) {
     snapshotRequested = false;
     lastStreamMs = millis();
     publishSnapshot();
   }
-  if (cameraOk) processCamera();
+  if (cameraOk && !previewShown) processCamera();  // the preview takes every frame
   FaceResult face;
   if (faceTake(&face)) {
     tele.faceFound = face.found, tele.faceX = face.x, tele.faceY = face.y, tele.faceMs = face.inferMs;

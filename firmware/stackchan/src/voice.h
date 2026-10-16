@@ -20,6 +20,7 @@ void voiceUpdate();  // call every loop()
 const char* voiceStateName();  // off, listening, capturing, waiting, speaking, reacting
 bool voiceBusy();        // capturing, waiting or speaking: the face stays steady
 bool voiceOwnsAudio();   // the mic or a reply holds the I2S bus: no tones (they would crash it)
+bool voiceShutter();     // a camera shutter click (pauses the mic); false while a turn is on
 String voiceStatusJson();  // for the monitor page
 // Where the last voice came from: the delay of the right mic behind the left in samples at
 // 16 kHz (sub-sample), the left-right level difference in dB and the peak correlation (0..1).

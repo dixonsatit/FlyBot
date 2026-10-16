@@ -1342,6 +1342,25 @@ def test_bridge_snapshot_callers_share_frames(gains):
     assert asked.count("stackchan/camera/stream") == 1  # renewed only halfway through
 
 
+def test_photo_comes_from_the_robots_preview_countdown(gains):
+    import threading as _th
+    import time as _t
+    from flybot.mqtt_bridge import StackChanBridge
+    b = StackChanBridge(BrainController(ControllerConfig(backend="rate"), gains=gains), "localhost", 1883, "stackchan", 20.0)
+    asked = []
+    b.client.publish = lambda topic, payload=None, qos=0: asked.append((topic, payload))
+    frame = lambda data: b._on_message(None, None, type("M", (), {"topic": "stackchan/snapshot", "payload": data}))
+    got = []
+    t = _th.Thread(target=lambda: got.append(b.preview_photo(0.6, timeout=2.0)))
+    t.start()
+    _t.sleep(0.05)
+    frame(b"streamed")  # a frame from before the countdown ended is not the photo
+    _t.sleep(0.4)
+    frame(b"photo")
+    t.join()
+    assert got == [b"photo"] and asked == [("stackchan/screen/preview", '{"seconds": 0.6}')]
+
+
 def test_face_tracker_centres_the_face_and_pauses_for_manual_moves(gains, tmp_path):
     from flybot.faces import FaceRegistry, FaceTracker, Greeter
     c = BrainController(ControllerConfig(backend="rate", track_motion=False), gains=gains)

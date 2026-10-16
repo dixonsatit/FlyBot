@@ -99,6 +99,15 @@ class StackChanBridge:
             ok = self._jpeg_cond.wait_for(lambda: self._jpeg_at > since, timeout)
             return self._jpeg if ok else None
 
+    def preview_photo(self, seconds: float = 3.0, timeout: float = 8.0) -> bytes | None:
+        """The robot shows its camera on screen with a countdown and sends the frame it ends on."""
+        with self._jpeg_cond:
+            start = time.monotonic()
+            self.client.publish(f"{self.base}/screen/preview", json.dumps({"seconds": seconds}), qos=0)
+            # a streamed frame from before the countdown is not the photo
+            ok = self._jpeg_cond.wait_for(lambda: self._jpeg_at > start + seconds - 0.5, seconds + timeout)
+            return self._jpeg if ok else None
+
     def stream(self, seconds: float = 20.0, fps: int = 4) -> None:
         """Have the robot send frames by itself for ``seconds`` (renewed while someone watches)."""
         now = time.monotonic()

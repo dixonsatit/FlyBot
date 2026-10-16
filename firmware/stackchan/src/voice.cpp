@@ -18,6 +18,7 @@ bool heapCheck(const char* where) {
   return false;
 }
 #include <M5Unified.h>
+#include "look.h"
 #include <WiFi.h>
 
 #if __has_include("flybot_config.h")
@@ -463,6 +464,42 @@ static void sendTask(void*) {
   vTaskDelete(nullptr);
 }
 
+static void stopMic();
+
+// A camera shutter, synthesised once: a short click, then the louder "chak" of the curtain.
+static int16_t* shutterPcm = nullptr;
+static constexpr size_t SHUTTER_LEN = 16000 * 140 / 1000;
+
+static void buildShutter() {
+  shutterPcm = (int16_t*)ps_malloc(SHUTTER_LEN * sizeof(int16_t));
+  if (!shutterPcm) return;
+  uint32_t seed = 12345;
+  for (size_t i = 0; i < SHUTTER_LEN; ++i) {
+    const float t = i / 16000.0f;
+    seed = seed * 1664525u + 1013904223u;
+    const float noise = int32_t(seed) / 2147483648.0f;
+    float v = 0.55f * noise * expf(-t / 0.004f);  // click
+    if (t >= 0.055f) {
+      const float u = t - 0.055f;
+      v += 0.9f * noise * expf(-u / 0.012f) + 0.5f * sinf(2 * PI * 140 * u) * expf(-u / 0.02f);  // chak + body
+    }
+    shutterPcm[i] = int16_t(constrain(v, -1.0f, 1.0f) * 28000);
+  }
+}
+
+bool voiceShutter() {
+  if (state == State::Capturing || state == State::Waiting || state == State::Speaking) return false;
+  if (!shutterPcm) buildShutter();
+  if (!shutterPcm) return false;
+  if (state == State::Listening) {
+    stopMic();
+    state = State::Off;  // the mic comes back once the click has played
+  }
+  M5.Speaker.begin();
+  M5.Speaker.setVolume(P.voiceVolume);
+  return M5.Speaker.playRaw(shutterPcm, SHUTTER_LEN, 16000, false);
+}
+
 static void stopMic() {
   micActive = false;
   while (!micParked) delay(1);
@@ -567,7 +604,7 @@ void voiceUpdate() {
     pendingReaction = "";
     if (state == State::Listening) stopMic(), state = State::Off;
     reacting = playFiller(kind.c_str());
-    if (reacting && !screenBusy()) avatar.setExpression(m5avatar::Expression::Doubt);
+    if (reacting && !screenBusy()) lookExpression(avatar, m5avatar::Expression::Doubt);
   }
   if (reacting) {
     if (M5.Speaker.isPlaying()) return;
@@ -586,6 +623,7 @@ void voiceUpdate() {
         avatar.setSpeechText(httpCode == 200 || httpCode == 204 ? "" : "voice error");
         httpCode = 0;
       }
+      if (M5.Speaker.isPlaying()) return;  // a shutter click: the mic waits for it
       if (WiFi.status() == WL_CONNECTED && voiceUrl.length()) startMic();
       return;
 
@@ -600,7 +638,7 @@ void voiceUpdate() {
       }
       if (g == HeadGesture::Pat) {
         stopMic();
-        if (!screenBusy()) avatar.setExpression(m5avatar::Expression::Happy);
+        if (!screenBusy()) lookExpression(avatar, m5avatar::Expression::Happy);
         request("/api/pat", nullptr);
       } else if (pendingAnnounce.length()) {  // speak up on our own (reminder, CI news)
         String id = pendingAnnounce;
@@ -657,6 +695,7 @@ void voiceUpdate() {
 void voiceBegin() {}
 void voiceSetUrl(const char*, bool) {}
 void voiceAnnounce(const char*) {}
+bool voiceShutter() { return false; }
 void voiceUpdate() {}
 bool voiceBusy() { return false; }
 const char* voiceStateName() { return "disabled"; }

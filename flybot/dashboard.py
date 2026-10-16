@@ -76,7 +76,8 @@ PHOTO_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)")
 # often loses in a noisy room; the spoken countdown tells everyone in front before it is taken.
 PHOTO_ASK_RE = re.compile(r"ถ่าย\s*(ภาพ|รูป)\s*(ให้|หน่อย|เลย|กัน|กับ)")
 PHOTO_LINE = "แชะ! ถ่ายแล้วครับ สแกนคิวอาร์บนจอดูรูปได้เลยครับ"
-COUNTDOWN_LINE = "เตรียมตัวนะครับ ยิ้มหน่อย สาม สอง หนึ่ง"
+COUNTDOWN_LINE = "ยิ้มหน่อยนะครับ ดูที่จอหนูได้เลย"  # the robot counts 3-2-1 on its screen
+PREVIEW_S = 3.0
 PHOTO_QR_TEXT = "สแกนดูรูป"
 PAIR_QR_TEXT = "สแกนเพื่อยืนยันตัวตน ThaID"
 PAIR_LINE = ("ถ้าจะยืนยันตัวตน สแกนคิวอาร์บนจอด้วยมือถือ แล้วล็อกอินไทดีครับ "
@@ -474,18 +475,24 @@ class Dashboard:
             self._countdown = to_16k(self.tts.speak(COUNTDOWN_LINE))
         return self._countdown
 
-    def take_photo(self, show_qr: bool = True, countdown: bool = False) -> dict:
+    def take_photo(self, show_qr: bool = True, countdown: bool = False, preview: bool | None = None) -> dict:
         """A fresh frame from the robot's camera into the album, and a QR on the robot that opens
-        it on a phone. ``countdown`` says "เตรียมตัว ... สาม สอง หนึ่ง" first and "แชะ" after, so
-        whoever is in front knows when it is taken."""
+        it on a phone. ``countdown`` says "ยิ้มหน่อย" first and "แชะ" after; ``preview`` (with the
+        countdown by default) has the robot show its camera and count 3-2-1 on screen first."""
+        preview = countdown if preview is None else preview
         if not self.album:
             raise ValueError("photos need --state-dir")
         if countdown and self.tts:
             seconds = self.play_wav(self.countdown_wav())
             time.sleep(seconds + 1.5)  # the robot fetches the clip first
         self._center_face()
+        jpeg = None
+        if preview and hasattr(self.bridge, "preview_photo"):
+            jpeg = self.bridge.preview_photo(PREVIEW_S)
+            if not jpeg:
+                log.warning("photo: no frame from the preview (old firmware?), taking a snapshot")
         # one more ask: right after the countdown clip the first request was lost once
-        jpeg = self.bridge.snapshot(6.0) or self.bridge.snapshot(6.0)
+        jpeg = jpeg or self.bridge.snapshot(6.0) or self.bridge.snapshot(6.0)
         if not jpeg:
             raise ValueError("the robot sent no picture")
         name = self.album.save(jpeg)
@@ -1094,10 +1101,10 @@ class Dashboard:
                     from .intake import wav_seconds
                     wav = dash.countdown_wav()
 
-                    def shoot(after: float = wav_seconds(wav) + 1.0):  # the reply plays first
+                    def shoot(after: float = wav_seconds(wav) + 0.5):  # the reply plays first
                         time.sleep(after)
                         try:
-                            dash.take_photo()
+                            dash.take_photo(preview=True)
                             reply = PHOTO_LINE
                         except ValueError as e:
                             log.warning("voice: photo failed: %s", e)
