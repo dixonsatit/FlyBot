@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.47.0 (2026-10-16)
+
+### Features
+
+- **voice**: Answer how much battery is left, and rest in the home pose without turning after motion
+  ([`247e43a`](https://github.com/dixonsatit/FlyBot/commit/247e43adad3e35bd8cf401f27b4fe1c8d2374c27))
+
+
 ## v0.46.0 (2026-10-16)
 
 ### Features
