@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.41.0 (2026-10-16)
+
+### Features
+
+- **photos**: Count down aloud before the photo and say when it is taken
+  ([`0e9c3ec`](https://github.com/dixonsatit/FlyBot/commit/0e9c3ec31c409f2f618818df2de183d8f900accb))
+
+
 ## v0.40.1 (2026-10-16)
 
 ### Bug Fixes
