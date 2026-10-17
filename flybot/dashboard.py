@@ -233,6 +233,7 @@ class Dashboard:
         self._last_reply = -math.inf
         self.resting = False  # told to rest: only the wake name gets an answer, and wakes it
         self.head_mode_until = 0.0
+        self.talk_when_facing = True  # a known face in view counts as being spoken to
         self._said_wav: dict[str, bytes] = {}  # short fixed lines, rendered once
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.held: list[str] = []  # announcements kept while nobody was at the desk
@@ -471,6 +472,16 @@ class Dashboard:
             self._head = HeadDriver(self.bridge.controller, say=self.bridge.controller.say)
         self._head.tracker = getattr(self.bridge, "tracker", None)
         return self._head
+
+    FACING_S = 4.0
+
+    def facing(self) -> str | None:
+        """Who is facing the robot right now: a face in the frame within FACING_S that it knows."""
+        tracker, greeter = getattr(self.bridge, "tracker", None), getattr(self.bridge, "greeter", None)
+        if not (tracker and greeter) or time.monotonic() - tracker.last_face > self.FACING_S:
+            return None
+        who = greeter.who(15.0)
+        return (who.get("nick") or who.get("name")) if who else None
 
     def head_mode(self) -> bool:
         return time.monotonic() < self.head_mode_until
@@ -1124,6 +1135,12 @@ class Dashboard:
                 # addressed to it even when the ASR lost the name.
                 if wake and presence and presence.present and ADDRESSED_RE.search(text):
                     follow_up = True
+                # Someone it knows is facing the camera: talking to it, name or not ("วันจันทร์มี
+                # ประชุมไหม" was asked three times without the name and ignored, 2026-10-17)
+                if wake and not follow_up and dash.talk_when_facing and dash.facing() \
+                        and len(text.replace(" ", "")) > CALL_MAX_CHARS:
+                    follow_up = True
+                    log.info("voice: %r taken without the name: %s is facing the robot", text, dash.facing())
                 # A call is the name said alone, which asr-typhoon hears as one short word ("หวี่" came
                 # out as มี / นี่ / วี): answer it and open the follow-up window for the question.
                 if wake and not follow_up and text and len(text.replace(" ", "")) <= CALL_MAX_CHARS:

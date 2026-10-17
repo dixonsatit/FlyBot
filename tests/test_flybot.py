@@ -921,6 +921,19 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "หันไปทางซ้ายเลย"  # head mode over: without the name it is not for the robot
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         assert len(published) == 7
+        import time as _t
+        bridge.tracker = type("T", (), {"last_face": _t.monotonic(), "pause": lambda s, x=0: None})()
+        bridge.greeter = type("G", (), {"who": lambda s, within=0: {"nick": "ต๊ะ"}})()
+        dash._last_reply = -1e9
+        heard["text"] = "วันจันทร์มีประชุมไหม"  # no name, but a known face is looking at the robot
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        assert len(published) == 8
+        bridge.tracker.last_face = _t.monotonic() - 10  # looked away
+        dash._last_reply = -1e9
+        heard["text"] = "วันอังคารมีประชุมไหม"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
+        bridge.tracker = bridge.greeter = None
+        published.pop()
         bridge.power = {"battery": 73, "charging": 0}
         heard["text"] = "น้องหวี่ แบตเหลือกี่เปอร์เซ็นต์"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
