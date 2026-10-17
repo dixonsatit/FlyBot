@@ -14,12 +14,13 @@ import time
 
 SHARE_S = 600.0
 KEEP = 300  # oldest photos go first beyond this, so the volume can't fill up
+KEEP_DAYS = 30.0  # photos show people's faces (PDPA): none is kept longer than this, taken or not
 NAME_RE = re.compile(r"^\d{8}-\d{6}(-\d+)?\.jpg$")
 
 
 class PhotoAlbum:
-    def __init__(self, folder: str, keep: int = KEEP):
-        self.folder, self.keep = folder, keep
+    def __init__(self, folder: str, keep: int = KEEP, keep_days: float = KEEP_DAYS):
+        self.folder, self.keep, self.keep_days = folder, keep, keep_days
         self._shares: dict[str, tuple[str, float]] = {}
         self._lock = threading.Lock()
 
@@ -34,7 +35,32 @@ class PhotoAlbum:
             f.write(jpeg)
         for old in self.names()[self.keep:]:
             self.delete(old)
+        self.prune()
         return name
+
+    def prune(self, now: float | None = None) -> list[str]:
+        """Delete photos older than ``keep_days`` (by file time); returns their names."""
+        if self.keep_days <= 0:
+            return []
+        cutoff = (time.time() if now is None else now) - self.keep_days * 86400
+        gone = []
+        for name in self.names():
+            try:
+                if os.path.getmtime(os.path.join(self.folder, name)) < cutoff and self.delete(name):
+                    gone.append(name)
+            except OSError:
+                pass
+        return gone
+
+    def start_pruning(self, every_s: float = 3600.0) -> threading.Thread:
+        """Prune on a timer too: with no new photo, save() never runs to clear old ones."""
+        def loop():
+            while True:
+                self.prune()
+                time.sleep(every_s)
+        t = threading.Thread(target=loop, name="photo-prune", daemon=True)
+        t.start()
+        return t
 
     def names(self) -> list[str]:
         """Newest first."""

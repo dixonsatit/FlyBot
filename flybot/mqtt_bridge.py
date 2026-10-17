@@ -341,6 +341,8 @@ def main(argv: list[str] | None = None) -> None:
     cal.add_argument("--calendar-refresh", type=float, default=300.0, help="seconds between feed reloads")
     cal.add_argument("--tz", help="time zone for floating times, e.g. Asia/Bangkok (default: system)")
     ap.add_argument("--state-dir", help="writable dir for the assistant's notes and reminders (a volume in k8s)")
+    ap.add_argument("--photo-keep-days", type=float, default=30.0,
+                    help="delete photos older than this many days (0 keeps them until the count limit)")
     ap.add_argument("--intake-url", help="history taking: the interview server's WebSocket, e.g. "
                                          "ws://stackchan-interview.stackchan-interview.svc/ws")
     ap.add_argument("--intake-pair-token", help="the interview server's PAIR_TOKEN: offer a QR for ThaID login "
@@ -536,7 +538,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.state_dir and bridge.dashboard:
         bridge.dashboard.archive_dir = os.path.join(args.state_dir, "voice")
         from .photos import PhotoAlbum
-        bridge.dashboard.album = PhotoAlbum(os.path.join(args.state_dir, "photos"))
+        bridge.dashboard.album = PhotoAlbum(os.path.join(args.state_dir, "photos"), keep_days=args.photo_keep_days)
+        bridge.dashboard.album.start_pruning()
         from .line import LineContacts, LineDirectory, LineMessenger
         line_dsn = args.line_dsn or args.staff_dsn
         bridge.dashboard.line = LineContacts(os.path.join(args.state_dir, "line_contacts.json"),

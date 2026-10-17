@@ -1774,6 +1774,12 @@ def test_photos_are_saved_and_shared_by_a_short_lived_link(gains, tmp_path):
     for _ in range(3):
         album.save(b"x")
     assert len(album.names()) == 2  # oldest goes beyond keep
+    import os as _os
+    import time as _time
+    old_one = album.names()[-1]
+    _os.utime(album.path(old_one), (_time.time() - 31 * 86400,) * 2)
+    assert album.prune() == [old_one] and len(album.names()) == 1  # past keep_days, even unprompted
+    assert PhotoAlbum(str(tmp_path / "keep"), keep_days=0).prune() == []
     assert PHOTO_RE.search("น้องหวี่ถ่ายรูปให้หน่อย") and PHOTO_RE.search("ถ่ายภาพหน่อย")
 
 
