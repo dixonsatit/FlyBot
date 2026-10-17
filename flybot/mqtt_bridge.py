@@ -253,6 +253,9 @@ class StackChanBridge:
             return
         items = report.get("items", [])
         failed = [f"{i.get('name')} ({i.get('detail')})" for i in items if not i.get("ok")]
+        if report.get("reset") in ("panic", "int-watchdog", "task-watchdog", "watchdog", "brownout"):
+            # a crash: what the robot was doing when it went down (firmware breadcrumb)
+            log.warning("Robot restarted after a %s during %r", report.get("reset"), report.get("last"))
         if failed:
             log.warning("Robot self-test FAILED: %s", "; ".join(failed))
         else:

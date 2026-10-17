@@ -463,6 +463,7 @@ void voiceProgress(const char* name) {
     if (state != State::Waiting || M5.Speaker.isPlaying()) return;
     if (!chimePcm) buildChime();
     if (!chimePcm) return;
+    crumb("chime");
     M5.Speaker.begin();  // the mic is off while waiting
     M5.Speaker.setVolume(P.voiceVolume);
     M5.Speaker.playRaw(chimePcm, CHIME_LEN, 16000, false);
@@ -526,12 +527,14 @@ bool voiceShutter() {
     stopMic();
     state = State::Off;  // the mic comes back once the click has played
   }
+  crumb("shutter");
   M5.Speaker.begin();
   M5.Speaker.setVolume(P.voiceVolume);
   return M5.Speaker.playRaw(shutterPcm, SHUTTER_LEN, 16000, false);
 }
 
 static void stopMic() {
+  crumb("mic-stop");
   micActive = false;
   while (!micParked) delay(1);
   heapCheck("before mic end");
@@ -540,6 +543,7 @@ static void stopMic() {
 }
 
 static void startMic() {
+  crumb("mic-start");
   heapCheck("before speaker end");
   M5.Speaker.end();  // mic and speaker share the I2S bus
   heapCheck("speaker end");
@@ -700,6 +704,7 @@ void voiceUpdate() {
         avatar.setSpeechText("");
         M5.Speaker.begin();
         M5.Speaker.setVolume(P.voiceVolume);
+        crumb("speak");
         started = M5.Speaker.playWav(wav, wavLen);
         if (turnCount) lastTurn().played = started;
         if (!started) M5_LOGW("voice: playWav failed (%u bytes)", unsigned(wavLen));

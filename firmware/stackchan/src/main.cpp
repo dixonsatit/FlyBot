@@ -395,6 +395,23 @@ static uint32_t previewStart = 0, previewMs = 0, previewStillUntil = 0;
 static bool previewPending = false, previewShown = false;
 static M5Canvas* previewCanvas = nullptr;  // 150 KB, in PSRAM
 bool screenBusy() { return qrShown || qrPending || previewShown || previewPending; }
+
+// What the robot was doing when it last reset: RTC memory survives a panic or watchdog reset
+// (not a power cut), so the next self-test can say "panic during preview-shutter".
+static RTC_NOINIT_ATTR char lastCrumb[32];
+void crumb(const char* what) { strlcpy(lastCrumb, what, sizeof lastCrumb); }
+static const char* resetName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "int-watchdog";
+    case ESP_RST_TASK_WDT: return "task-watchdog";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout";
+    default: return "other";
+  }
+}
 // <base>/camera/stream {"fps", "seconds"}: someone watches the dashboard camera, so send frames
 // on our own instead of one per request (a round trip through the VPN took 0.3-3.7 s).
 static uint32_t streamUntil = 0, streamEveryMs = 250, lastStreamMs = 0;
@@ -724,6 +741,18 @@ void setup() {
   }
   SelfTestReport report = runSelfTest(cameraOk, proximityOk, servoOk, servoInfo(), full, writeServos);
   selfTestJson = report.toJson();
+  {  // why the last run ended, and where
+    const esp_reset_reason_t why = esp_reset_reason();
+    char last[sizeof lastCrumb + 1];
+    strlcpy(last, why == ESP_RST_POWERON ? "" : lastCrumb, sizeof last);
+    for (char* p = last; *p; ++p)
+      if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') *p = '?';  // garbage after a power cut
+    char extra[96];
+    snprintf(extra, sizeof extra, ",\"reset\":\"%s\",\"last\":\"%s\"}", resetName(why), last);
+    selfTestJson.remove(selfTestJson.length() - 1);
+    selfTestJson += extra;
+    crumb("boot");
+  }
   M5_LOGW("selftest %s", selfTestJson.c_str());
   delay(report.allOk() ? 2500 : 10000);  // leave failures on screen long enough to read
 
@@ -758,8 +787,20 @@ static bool wifiAvailable() {  // bytes waiting on the MQTT connection, whicheve
   return mqtt.connected() && (usingWss ? wssClient.available() : wifiClient.available()) > 0;
 }
 
+// Stop the avatar and wait until its draw and facial tasks have really ended: drawing on the
+// screen while the draw task still holds the SPI bus panicked in spiEndTransaction (2026-10-17,
+// a QR right after the photo preview). The fixed 120 ms wait was enough for the 1-bit face but
+// not for the 16-bit one.
+static void avatarPause() {
+  const UBaseType_t tasks = uxTaskGetNumberOfTasks();
+  avatar.stop();
+  for (uint32_t t0 = millis(); uxTaskGetNumberOfTasks() + 2 > tasks && millis() - t0 < 1500;) delay(10);
+  delay(20);
+}
+
 static void hideQr() {
   if (!qrShown) return;
+  crumb("qr-hide");
   qrShown = false;
   M5.Display.fillScreen(TFT_BLACK);
   avatar.start(16);
@@ -770,11 +811,11 @@ static void serviceQr() {
   if (qrPending) {
     qrPending = false;
     if (!qrUrl.length()) return hideQr();
+    crumb("qr-show");
     if (!qrShown) {
       // stop() lets the draw/facial tasks finish their frame and exit (they delay 10/33 ms);
       // drawing over a suspended frame would leave its half-pushed sprite on the bus
-      avatar.stop();
-      delay(120);
+      avatarPause();
       qrShown = true;
     }
     auto& d = M5.Display;
@@ -806,6 +847,7 @@ static bool previewFrame(camera_fb_t* fb) {
 }
 
 static void endPreview() {
+  crumb("preview-end");
   previewShown = false;
   M5.Display.fillScreen(TFT_BLACK);
   avatar.start(16);
@@ -827,9 +869,9 @@ static void servicePreview() {
         return;
       }
     }
+    crumb("preview-start");
     if (!previewShown && !qrShown) {
-      avatar.stop();  // see serviceQr(): let the draw task finish its frame first
-      delay(120);
+      avatarPause();
     }
     previewShown = true;
     previewStart = millis();
@@ -845,6 +887,7 @@ static void servicePreview() {
   if (!fb) return;
   const uint32_t elapsed = millis() - previewStart;
   if (elapsed >= previewMs) {  // shutter: this frame is the photo
+    crumb("preview-shutter");
     uint8_t* jpg = nullptr;
     size_t len = 0;
     bool ok = frame2jpg(fb, 85, &jpg, &len);
@@ -859,6 +902,7 @@ static void servicePreview() {
     free(jpg);
     previewCanvas->pushSprite(&d, 0, 0);
     previewStillUntil = millis() + 3000;
+    crumb("preview-still");
     return;
   }
   const bool ok = previewFrame(fb);
