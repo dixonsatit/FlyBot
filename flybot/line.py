@@ -53,8 +53,12 @@ class LineMessenger:
                 raise LineError(f"LINE {e.code} while checking the contact") from None
             return False
 
-    def push(self, line_id: str, text: str) -> None:
-        body = json.dumps({"to": line_id, "messages": [{"type": "text", "text": text[:MAX_TEXT]}]}).encode()
+    def push(self, line_id: str, text: str, image_url: str | None = None) -> None:
+        """A text, and a photo after it when ``image_url`` is given (https, which LINE fetches itself)."""
+        messages = [{"type": "text", "text": text[:MAX_TEXT]}]
+        if image_url:
+            messages.append({"type": "image", "originalContentUrl": image_url, "previewImageUrl": image_url})
+        body = json.dumps({"to": line_id, "messages": messages}).encode()
         req = urllib.request.Request(self.push_url, data=body, method="POST", headers={
             "Content-Type": "application/json", "Authorization": f"Bearer {self.token}"})
         try:
@@ -173,7 +177,7 @@ class LineContacts:
         hits = [p for p in self.people.values() if w == p.get("nick") or w in p["name"]]
         return hits[0] if len(hits) == 1 else None
 
-    def send(self, who: str, text: str) -> dict:
+    def send(self, who: str, text: str, image_url: str | None = None) -> dict:
         if not self.messenger:
             raise ValueError("LINE is off: set --line-token (the KKH LINE OA channel access token)")
         text = str(text).strip()
@@ -183,6 +187,6 @@ class LineContacts:
         if not p:
             names = ", ".join(f"{x['nick'] or x['name']} ({x['code']})" for x in self.people.values()) or "nobody yet"
             raise ValueError(f"'{who}' is not a registered LINE contact; registered: {names}")
-        self.messenger.push(p["line_id"], text)
+        self.messenger.push(p["line_id"], text, image_url) if image_url else self.messenger.push(p["line_id"], text)
         log.info("line: sent %d chars to employee %s", len(text), p["code"])
         return {"ok": True, "to": self.public(p)}

@@ -200,6 +200,10 @@ class StackChanBridge:
         if kind in SENSOR_KINDS and isinstance(payload, dict):
             self.sensors.update(kind, payload)
             if kind == "camera" and "x" in payload:
+                guard = getattr(self.dashboard, "guard", None) if self.dashboard else None
+                if guard and guard.on:  # watching: a stranger is reported, not greeted or followed
+                    guard.on_motion()
+                    return
                 self._last_motion = time.monotonic()
                 if self.presence:
                     self.presence.note_motion()
@@ -330,6 +334,53 @@ class StackChanBridge:
             self.client.loop_stop()
             self.client.disconnect()
             self.controller.close()
+
+
+def setup_guard(bridge, args) -> None:
+    """Guard mode (flybot.guard): photos in <state-dir>/guard for 7 days, alerts to --alert-line."""
+    from .guard import Guard
+    from .photos import PhotoAlbum
+    dash = bridge.dashboard
+    album = PhotoAlbum(os.path.join(args.state_dir, "guard"), keep=500, keep_days=7.0)
+    album.start_pruning()
+    faces = dash.faces  # (FaceClient, FaceRegistry, ...) when --face-url is set
+
+    def known(face: dict) -> dict | None:
+        pid, _ = faces[1].match(face["embedding"]) if faces and faces[1].people else (None, 0.0)
+        return faces[1].summary(pid) if pid else None
+
+    vision = getattr(bridge.presence, "vision", None) if bridge.presence else None
+
+    def person_visible(jpeg: bytes) -> bool | None:
+        from .presence import _NO, _POSITION, _YES, PROMPT
+        reply = vision.ask("You check a room camera frame.", [], PROMPT, image_jpeg=jpeg)
+        if _POSITION.search(reply):
+            return True
+        yes, no = list(_YES.finditer(reply)), list(_NO.finditer(reply))
+        return bool(yes) and (not no or yes[-1].start() > no[-1].start())
+
+    codes = [c.strip() for c in (args.alert_line or "").split(",") if c.strip()]
+
+    def alert(jpeg: bytes, name: str, text: str) -> None:
+        line = dash.line
+        if not (codes and line and line.messenger):
+            log.warning("guard: %s (no --alert-line to tell)", text)
+            return
+        url = f"{dash.public_url.rstrip('/')}/g/{album.share(name, 24 * 3600)}.jpg"
+
+        def send():
+            for code in codes:
+                try:
+                    line.send(code, "[น้องหวี่ เฝ้าห้อง] " + text, image_url=url)
+                except Exception as e:
+                    log.warning("guard: LINE to %s failed: %s", code, e)
+        threading.Thread(target=send, name="guard-alert", daemon=True).start()
+
+    dash.guard_album = album
+    dash.guard = Guard(bridge.snapshot, faces[0].embed if faces else None, known,
+                       person_visible if vision else None, album.save, alert)
+    log.info("Guard mode: ready (faces %s, vision %s, LINE %s)", "on" if faces else "off",
+             "on" if vision else "off", ",".join(codes) or "off")
 
 
 def env_defaults(ap: argparse.ArgumentParser, prefix: str = "FLYBOT_") -> None:
@@ -679,6 +730,8 @@ def main(argv: list[str] | None = None) -> None:
             bridge.cortex.greeter = bridge.greeter
         log.info("Faces: %s, %d people enrolled%s", args.face_url, len(registry.people),
                  ", staff directory on" if args.staff_dsn else "")
+    if args.state_dir and bridge.dashboard:
+        setup_guard(bridge, args)
     bridge.run(heartbeat=args.heartbeat)
 
 

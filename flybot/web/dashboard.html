@@ -123,6 +123,14 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
         </div>
         <div class="err" id="errCam"></div>
       </div>
+      <div class="card" id="guardCard">
+        <h2>เฝ้าห้อง (กล้องวงจรปิด) <span class="sp"></span><button id="guardBtn">เริ่มเฝ้า</button></h2>
+        <div class="hint" id="guardState">หรือบอกน้องหวี่ว่า "เฝ้าห้องให้หน่อย" · เลิกเฝ้าเมื่อเรียกชื่อน้องหวี่ ·
+          เห็นคนแปลกหน้าจะส่งรูปเข้า LINE · ดูสดได้จากกล้องด้านบน</div>
+        <div id="guardSeen"></div>
+        <div class="photos" id="guardPhotos"></div>
+        <div class="err" id="errGuard"></div>
+      </div>
       <div class="card">
         <h2>รูปถ่าย <span class="sp"></span><button id="photoBtn" class="primary">📷 ถ่ายรูป</button></h2>
         <div class="hint">หรือบอกน้องหวี่ว่า "ถ่ายรูปให้หน่อย" · หุ่นขึ้น QR ให้สแกนดูรูปบนมือถือ (ลิงก์ใช้ได้ 10 นาที)</div>
@@ -574,6 +582,30 @@ $("lineSend").onclick = async () => {
   if (await post("/api/line", { to: $("lineTo").value, text }, "errLine")) { $("lineText").value = ""; $("errLine").textContent = "ส่งแล้ว"; }
 };
 loadLine();
+
+// ---- guard mode ----------------------------------------------------------------------
+const GUARD_WHAT = { stranger: "คนแปลกหน้า", person: "มีคน (ไม่เห็นหน้า)", motion: "มีความเคลื่อนไหว" };
+let guardOn = false;
+async function loadGuard() {
+  let j; try { j = await (await fetch("/api/guard")).json(); } catch { return; }
+  guardOn = j.on;
+  $("guardCard").style.display = j.available ? "" : "none";
+  $("guardBtn").textContent = j.on ? "เลิกเฝ้า" : "เริ่มเฝ้า";
+  $("guardBtn").className = j.on ? "danger" : "primary";
+  if (j.on) $("guardState").textContent = `กำลังเฝ้าตั้งแต่ ${new Date(j.since * 1000).toLocaleTimeString("th-TH")} · พบ ${j.seen.length} ครั้ง`;
+  $("guardSeen").innerHTML = j.seen.slice(0, 5).map((x) =>
+    `<div class="hint">${new Date(x.at * 1000).toLocaleTimeString("th-TH")} · ${esc(GUARD_WHAT[x.what] || x.what)}</div>`).join("");
+  const box = $("guardPhotos"); box.innerHTML = "";
+  for (const n of j.photos.slice(0, 24)) {
+    const a = document.createElement("a"); a.href = "/api/guard/" + n; a.target = "_blank";
+    const im = document.createElement("img"); im.src = "/api/guard/" + n; im.loading = "lazy"; im.title = n;
+    a.append(im); box.append(a);
+  }
+}
+$("guardBtn").onclick = async () => {
+  if (await post("/api/guard", { on: !guardOn }, "errGuard")) loadGuard();
+};
+loadGuard(); setInterval(loadGuard, 10000);
 
 // ---- photos ------------------------------------------------------------------------
 let photoSel = null;

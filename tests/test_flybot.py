@@ -2309,3 +2309,63 @@ def test_firmware_update_counts_as_done_when_the_robot_boots_back(gains):
     b._on_message(None, None, msg("ota/status", {"progress": 100}))
     b._on_message(None, None, msg("selftest", {"items": [], "reset": "software", "last": "ota-restart", "fw": "abc"}))
     assert b.ota_status["ok"] and b.ota_status["booted"] == "abc"
+
+
+def test_guard_reports_strangers_with_a_photo_and_leaves_known_people_alone():
+    from flybot.guard import Guard
+    now, kept, alerts = [0.0], [], []
+    faces = {"frame": []}
+    g = Guard(lambda timeout: b"jpeg", lambda jpeg: faces["frame"],
+              lambda f: {"name": "สาธิต", "nick": "ต๊ะ"} if f.get("me") else None,
+              lambda jpeg: faces.get("person"), lambda jpeg: kept.append(jpeg) or f"g{len(kept)}.jpg",
+              lambda jpeg, name, text: alerts.append((name, text)),
+              alert_gap_s=300, check_gap_s=3, clock=lambda: now[0])
+    assert g.consider(b"x") == "motion" and not g.on  # (no vision answer: motion is all there is)
+    alerts.clear(), kept.clear()
+    g.start()
+    faces["frame"] = [{"me": True}]
+    assert g.consider(b"x") is None and kept == []  # someone it knows: nothing kept or sent
+    faces["frame"] = [{"me": True}, {}]
+    assert g.consider(b"x") == "stranger" and alerts[-1][0] == "g1.jpg" and "แปลกหน้า" in alerts[-1][1]
+    faces["frame"], faces["person"] = [], False
+    assert g.consider(b"x") is None  # nobody in the frame (the vision check): nothing kept
+    faces["person"] = True
+    assert g.consider(b"x") == "person" and len(kept) == 2 and len(alerts) == 1  # kept, LINE once per 5 min
+    now[0] += 301
+    assert g.consider(b"x") == "person" and len(alerts) == 2
+    assert [s["what"] for s in g.seen] == ["stranger", "person", "person"]
+    g.ended_by_voice()
+    assert not g.on and "เลิกเฝ้า" in alerts[-1][1]
+    g.on_motion()  # off: motion is nobody's business
+    assert len(kept) == 4
+
+
+def test_guard_mode_by_voice_rests_the_robot_and_the_name_ends_it(gains, tmp_path):
+    import json as _json
+    import time as _t
+    from flybot.dashboard import Dashboard
+    from flybot.guard import Guard
+    from flybot.photos import PhotoAlbum
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    dash = Dashboard(bridge, port=0)
+    dash.guard_album = PhotoAlbum(str(tmp_path / "guard"))
+    alerts = []
+    dash.guard = Guard(lambda t: b"\xff\xd8x", None, lambda f: None, None, dash.guard_album.save,
+                       lambda jpeg, name, text: alerts.append(text))
+    dash.start()
+    try:
+        assert _http(dash.port, "POST", "/api/guard", {"on": True})[0] == 200
+        assert dash.guard.on and dash.resting
+        view = _json.loads(_http(dash.port, "GET", "/api/guard")[1])
+        assert view["on"] and view["available"]
+        assert _http(dash.port, "POST", "/api/guard", {"on": False})[0] == 200
+        assert not dash.guard.on and not dash.resting
+        name = dash.guard_album.save(b"\xff\xd8photo")
+        token = dash.guard_album.share(name, 60)
+        assert _http(dash.port, "GET", f"/g/{token}.jpg") == (200, b"\xff\xd8photo")  # LINE fetches it, no login
+        assert _http(dash.port, "GET", "/g/nope.jpg")[0] == 404
+    finally:
+        dash.stop()
+    from flybot.dashboard import GUARD_RE
+    assert GUARD_RE.search("น้องหวี่ เฝ้าห้องให้หน่อย") and GUARD_RE.search("เปิดโหมดกล้องวงจรปิด")
+    assert not GUARD_RE.search("ถ่ายรูปให้หน่อย")

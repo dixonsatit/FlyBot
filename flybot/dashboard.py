@@ -39,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from .controller import PERSONALITIES
+from .guard import GUARD_RE_TEXT, GUARD_REPLY
 from .head import parse as head_parse
 from .plant import PlantConfig, StackChanPlant, World
 
@@ -55,6 +56,7 @@ REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|ห�
 REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
 # A greeting alone opens a turn when awake, but doesn't wake a resting robot: a sigh ("เฮ้ออ")
 # or a hello to someone else did on 2026-10-17. Resting, the name itself has to be there.
+GUARD_RE = re.compile(GUARD_RE_TEXT)
 GREETING_RE = re.compile(r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)\S*", re.IGNORECASE)
 # "น้องหวี่ ขยับหัว": for HEAD_MODE_S the head takes single words ("ซ้าย", "อีก", "ลง", "พอ") without
 # the name; single words survive the ASR better than sentences.
@@ -258,6 +260,8 @@ class Dashboard:
         self.pairing = None  # flybot.intake.Pairing while the QR waits for the patient's phone
         self.pair_poll_s = 1.0
         self.album = None  # flybot.photos.PhotoAlbum, with --state-dir
+        self.guard = None  # flybot.guard.Guard, with --state-dir
+        self.guard_album = None  # its photos, kept apart from the ones people asked for
         self.line = None  # flybot.line.LineContacts, with --state-dir
         self.public_url = "https://stackchan.kkh.go.th"  # where a phone opens a shared photo
         self._announce_seq = 0
@@ -372,6 +376,11 @@ class Dashboard:
             if body.get("remove") is not None:
                 return {"ok": self.line.remove(body["remove"])}
             return self.line.send(str(body.get("to", "")), str(body.get("text", "")))
+        elif path == "/api/guard":
+            if not self.guard:
+                raise ValueError("guard mode needs --state-dir")
+            self.set_guard(bool(body.get("on")))
+            return self.guard_view()
         elif path == "/api/photos":
             if not self.album:
                 raise ValueError("photos need --state-dir")
@@ -504,6 +513,22 @@ class Dashboard:
         self.bridge.controller.rest(on)
         self.publish_sleep()
         log.info("resting" if on else "woke up (called by name)")
+
+    def set_guard(self, on: bool) -> None:
+        """Guard mode rests the robot (screen dark, only the name is answered) and watches."""
+        if on:
+            self.rest(True)
+            self.guard.start()
+        else:
+            self.guard.stop()
+            if self.resting:
+                self.rest(False)
+
+    def guard_view(self) -> dict:
+        g = self.guard
+        return {"available": bool(g), "on": bool(g and g.on), "since": g.since if g and g.on else None,
+                "seen": list(reversed(g.seen[-30:])) if g else [],
+                "photos": self.guard_album.names()[:60] if self.guard_album else []}
 
     def publish_sleep(self) -> None:
         """The robot's screen follows rest mode. Retained, so a robot that restarts while resting
@@ -956,6 +981,10 @@ class Dashboard:
                 if self.path.startswith("/fw/"):  # the robot fetching an update: the token is the key
                     image = dash.firmware(self.path[4:].split("?")[0].removesuffix(".bin"))
                     return self._send(200, image, "application/octet-stream") if image else self._json(404, {"error": "gone"})
+                if self.path.startswith("/g/"):  # a guard photo sent to LINE, which fetches it without a login
+                    token = self.path[3:].split("?")[0].removesuffix(".jpg")
+                    name = dash.guard_album.shared(token) if dash.guard_album else None
+                    return self._send(200, dash.guard_album.read(name), "image/jpeg") if name else self._json(404, {"error": "gone"})
                 if self.path.startswith("/p/"):  # a shared photo: the token is the key, no login
                     return self._shared_photo(self.path[3:].split("?")[0])
                 if not self._auth():
@@ -965,6 +994,11 @@ class Dashboard:
                     return self._json(200, {"on": bool(ln), "token": bool(ln and ln.messenger),
                                             "directory": bool(ln and ln.directory),
                                             "contacts": ln.list() if ln else []})
+                if self.path == "/api/guard":
+                    return self._json(200, dash.guard_view())
+                if self.path.startswith("/api/guard/"):
+                    jpeg = dash.guard_album.read(self.path.split("/")[-1]) if dash.guard_album else None
+                    return self._send(200, jpeg, "image/jpeg") if jpeg else self._json(404, {"error": "no such photo"})
                 if self.path == "/api/photos":
                     return self._json(200, {"on": bool(dash.album), "photos": dash.album.names()[:60] if dash.album else []})
                 if self.path.startswith("/api/photos/"):
@@ -1165,6 +1199,8 @@ class Dashboard:
                     if not (text and dash.wake.search(GREETING_RE.sub("", text, count=1))):  # resting: only its name
                         log.info("voice: resting, heard %r -> 204", text)
                         return self._send(204, b"", "audio/wav")
+                    if dash.guard and dash.guard.on:  # reported with a photo of who called
+                        threading.Thread(target=dash.guard.ended_by_voice, daemon=True).start()
                     dash.rest(False)
                 if dash.head_mode() and text:  # single words, no name needed
                     plan = head_parse(text)
@@ -1216,6 +1252,11 @@ class Dashboard:
                     log.info("voice: %r -> %r", text, line)
                     dash.add("chat", {"type": "reply", "to": text, "text": line, "voice": True})
                     return self._send(200, to_16k(dash.tts.speak(line)), "audio/wav")
+                if dash.guard and GUARD_RE.search(text):
+                    dash.set_guard(True)
+                    log.info("voice: %r -> guard", text)
+                    dash.add("chat", {"type": "reply", "to": text, "text": GUARD_REPLY, "voice": True})
+                    return self._send(200, to_16k(dash.tts.speak(GUARD_REPLY)), "audio/wav")
                 if REST_RE.search(text):
                     dash.rest(True)
                     log.info("voice: %r -> resting", text)
