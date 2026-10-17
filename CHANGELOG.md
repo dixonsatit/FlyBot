@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.52.0 (2026-10-17)
+
+### Features
+
+- **faces**: Follow faces gently by default, and glide the servos instead of stepping
+  ([`1cd1538`](https://github.com/dixonsatit/FlyBot/commit/1cd1538167f40823b06ec861ae18eead409ff625))
+
+
 ## v0.51.1 (2026-10-17)
 
 ### Bug Fixes
