@@ -67,6 +67,7 @@ class StackChanBridge:
         self.robot_seen = 0.0  # wall clock of the robot's last message
         self.selftest: dict = {}  # its last boot self-test
         self.ota_status: dict = {}  # the last firmware update: sent, progress, ok or error
+        self.alerts = None  # flybot.alerts.Alerts when --alert-line is set
         self._battery_warned, self._battery_warned_at = 0, -float("inf")  # stage said: 1 = 20%, 2 = 10%
         self._jpeg_at = 0.0  # monotonic time the last frame arrived
         self._jpeg_cond = threading.Condition()
@@ -146,7 +147,9 @@ class StackChanBridge:
             try:
                 self.selftest = {**json.loads(msg.payload), "at": time.time()}
             except ValueError:
-                pass
+                return
+            if self.alerts:
+                self.alerts.selftest(self.selftest)
             return
         if msg.topic == f"{self.base}/sensor/face":
             self._on_face(msg.payload)
@@ -158,6 +161,8 @@ class StackChanBridge:
                 return
             (log.warning if "error" in status else log.info)("Robot firmware update: %s", status)
             self.ota_status = {**self.ota_status, **status, "at": time.time()}
+            if self.alerts:
+                self.alerts.ota(status)
             return
         if msg.topic == f"{self.base}/event/body":
             self._on_body(msg.payload)
@@ -229,6 +234,8 @@ class StackChanBridge:
         if stage and (stage > self._battery_warned or (stage == 2 and now - self._battery_warned_at >= 300)):
             self._battery_warned, self._battery_warned_at = stage, now
             log.info("battery low: %d%%", level)
+            if self.alerts:
+                self.alerts.battery(level, bool(self.presence and self.presence.present))
             if self.dashboard:
                 self.dashboard.announce(f"หนูใกล้หมดพลังแล้ว เหลือ {level} เปอร์เซ็นต์ ช่วยชาร์จหนูด้วยนะครับ "
                                         "เดี๋ยวหนูตุยนะ", force=True)
@@ -280,7 +287,7 @@ class StackChanBridge:
         # async connect: a broker that is still starting (or restarting) is retried by paho
         self.client.connect_async(self.host, self.port, keepalive=30)
         self.client.loop_start()
-        beat = 0.0
+        beat = checked = 0.0
         topic = f"{self.base}/command"
         last = time.monotonic()
         try:
@@ -301,6 +308,9 @@ class StackChanBridge:
                         self.dashboard.add("event", shown)
                     if self.cortex:
                         self.cortex.on_event(event, self.controller.snapshot.get("brain"))
+                if self.alerts and now - checked >= 10.0:
+                    checked = now
+                    self.alerts.check_online(self.robot_seen)
                 if heartbeat and now - beat >= 1.0:  # liveness: the control loop is still turning
                     beat = now
                     with open(heartbeat, "w") as f:
@@ -383,6 +393,8 @@ def main(argv: list[str] | None = None) -> None:
     gh.add_argument("--face-follow", choices=("off", "gentle", "always"), default="gentle",
                     help="turning the head to the face it sees: never (only before a photo), now and then a "
                          "little when it is well off centre, or all the time")
+    gh.add_argument("--alert-line", help="employee codes (comma-separated) of LINE contacts told when the robot "
+                    "goes offline, restarts after a crash, runs low with nobody near or fails an update")
     gh.add_argument("--line-token", help="KKH LINE OA channel access token (Messaging API): send_line to staff")
     gh.add_argument("--line-dsn", help="mysql://... with the v_stackchan_line view (employee code -> LINE id); "
                                       "default --staff-dsn")
@@ -562,6 +574,10 @@ def main(argv: list[str] | None = None) -> None:
                                              LineMessenger(args.line_token) if args.line_token else None)
         if bridge.cortex:
             bridge.cortex.line = bridge.dashboard.line
+        if args.alert_line and bridge.dashboard.line.messenger:
+            from .alerts import Alerts
+            bridge.alerts = Alerts(bridge.dashboard.line.send, [c.strip() for c in args.alert_line.split(",")])
+            log.info("Alerts: LINE to %s", args.alert_line)
         bridge.dashboard.public_url = args.public_url
         if bridge.cortex:
             bridge.cortex.photo = bridge.dashboard.take_photo

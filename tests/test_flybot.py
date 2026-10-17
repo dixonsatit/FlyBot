@@ -2250,3 +2250,40 @@ def test_firmware_update_is_offered_to_the_robot_behind_a_one_off_link(gains):
         assert _http(dash.port, "GET", "/fw/guess.bin")[0] == 404
     finally:
         dash.stop()
+
+
+def test_alerts_tell_line_when_the_robot_needs_someone():
+    from flybot.alerts import Alerts
+    now, sent = [1000.0], []
+    a = Alerts(lambda who, text: sent.append((who, text)), ["90129"], offline_s=300, cooldown_s=1800,
+               clock=lambda: now[0], background=False)
+    a.check_online(0.0)  # not seen since the bridge started (a deploy): no outage
+    a.check_online(now[0] - 10)
+    assert sent == []
+    a.check_online(now[0] - 400)  # 6+ min gone: one message per outage
+    a.check_online(now[0] - 400)
+    assert len(sent) == 1 and sent[0][0] == "90129" and "หายจากระบบ" in sent[0][1]
+    now[0] += 60
+    a.check_online(now[0] - 2)  # back
+    assert len(sent) == 2 and "กลับมาออนไลน์" in sent[1][1]
+    a.check_online(now[0] - 400)  # a second outage soon after is still reported
+    assert len(sent) == 3
+
+    a.selftest({"reset": "power-on", "last": ""})
+    a.selftest({"reset": "panic", "last": "preview-shutter", "fw": "2c08c1a"})
+    a.selftest({"reset": "panic", "last": "qr-show"})  # within the cooldown: no flood from a crash loop
+    assert len(sent) == 4 and "panic" in sent[3][1] and "preview-shutter" in sent[3][1] and "2c08c1a" in sent[3][1]
+
+    a.battery(9, someone_there=True)  # the robot says it out loud to them
+    assert len(sent) == 4
+    a.battery(9, someone_there=False)
+    assert "9%" in sent[4][1]
+
+    a.ota({"progress": 40})
+    a.ota({"error": "check: MD5 Check Failed"})
+    a.ota({"error": "http 404"})  # each failed update is reported
+    assert len(sent) == 7 and "MD5" in sent[5][1]
+
+    def broken(who, text):
+        raise OSError("LINE down")
+    Alerts(broken, ["1"], background=False).notify("x", "y")  # logged, not raised
