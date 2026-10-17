@@ -350,6 +350,9 @@ def setup_guard(bridge, args) -> None:
         return faces[1].summary(pid) if pid else None
 
     vision = getattr(bridge.presence, "vision", None) if bridge.presence else None
+    cortex = bridge.cortex
+    if not vision and cortex and args.llm_vision:  # the assistant's own model looks at photos too
+        vision = getattr(cortex, "vision_llm", None) or cortex.llm
 
     def person_visible(jpeg: bytes) -> bool | None:
         from .presence import _NO, _POSITION, _YES, PROMPT
