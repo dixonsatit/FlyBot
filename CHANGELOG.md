@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.51.0 (2026-10-17)
+
+### Features
+
+- **robot**: Detailed head commands, a face centred before photos, back after a startle, and a ตุ้ง
+  when a sentence is taken
+  ([`d5c64ac`](https://github.com/dixonsatit/FlyBot/commit/d5c64ac5894b81e17ce73af1e176363a486c6503))
+
+
 ## v0.50.0 (2026-10-16)
 
 ### Features
