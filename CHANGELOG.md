@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.0 (2026-10-17)
+
+### Features
+
+- **guard**: Guard mode watches the room and sends strangers' photos to LINE
+  ([`1d4e2c8`](https://github.com/dixonsatit/FlyBot/commit/1d4e2c88173e0dee66c0aece5757d389d3695f92))
+
+
 ## v0.57.1 (2026-10-17)
 
 ### Bug Fixes
