@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.58.1 (2026-10-17)
+
+### Bug Fixes
+
+- **guard**: Ask the assistant's vision model whether a person is in view
+  ([`fe5bda7`](https://github.com/dixonsatit/FlyBot/commit/fe5bda729c9188045f926b2eca917f1ab631c5ee))
+
+
 ## v0.58.0 (2026-10-17)
 
 ### Features
