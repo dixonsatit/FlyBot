@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.56.0 (2026-10-17)
+
+### Features
+
+- **alerts**: LINE the robot's keepers when it goes offline, crashes, runs low alone or fails an
+  update
+  ([`63887e2`](https://github.com/dixonsatit/FlyBot/commit/63887e2003e635736a08a44c78bec36c809b9aa3))
+
+
 ## v0.55.0 (2026-10-17)
 
 ### Documentation
