@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.51.1 (2026-10-17)
+
+### Bug Fixes
+
+- **faces**: Turn towards a face on a mirrored camera; name who is seen on the dashboard
+  ([`0522828`](https://github.com/dixonsatit/FlyBot/commit/05228287c91537b8f8373959971354e349dd6874))
+
+
 ## v0.51.0 (2026-10-17)
 
 ### Features
