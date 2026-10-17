@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.52.2 (2026-10-17)
+
+### Bug Fixes
+
+- **firmware**: Park the avatar's draw task at a frame start before a QR or the preview
+  ([`f9cf4da`](https://github.com/dixonsatit/FlyBot/commit/f9cf4daf0e53da1f25c1f9ba41410a18fbe2674c))
+
+
 ## v0.52.1 (2026-10-17)
 
 ### Bug Fixes
