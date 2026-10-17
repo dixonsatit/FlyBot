@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.57.1 (2026-10-17)
+
+### Bug Fixes
+
+- **firmware**: Restart when loop() is stuck for 30 s, and say at which step
+  ([`3017de7`](https://github.com/dixonsatit/FlyBot/commit/3017de7f6453b72d324ee17926ef0331fe1a1f37))
+
+- **voice**: A greeting alone no longer wakes a resting robot
+  ([`f65f00a`](https://github.com/dixonsatit/FlyBot/commit/f65f00a5faaf7cefd85157590dc33c9de6efd10c))
+
+
 ## v0.57.0 (2026-10-17)
 
 ### Features
