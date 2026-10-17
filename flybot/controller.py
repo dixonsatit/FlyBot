@@ -63,6 +63,7 @@ class ControllerConfig:
     gf_threshold: float = 1.0
     gf_refractory_s: float = 2.0
     escape_s: float = 0.5
+    escape_return: bool = True  # back to the pose before the startle
     # phototaxis from the camera's left/right/top/bottom brightness: +1 seek light, -1 avoid
     phototaxis: float = 0.0
     k_light: float = 30.0  # deg/s at full left/right contrast
@@ -154,6 +155,7 @@ class BrainController:
         self._gesture: list[list] = []  # [pan, tilt, seconds, elapsed] waypoints a command plays
         self._follow: list | None = None  # [pan, tilt, seconds left]: a target to ease towards (face tracking)
         self._escape_dir = 1.0
+        self._pre_escape: tuple[float, float] | None = None  # pose to go back to once the startle is over
         self._tilt_home: float | None = None  # tilt to settle back to after an escape
         self._rest_track: bool | None = None  # track_motion to restore when woken from rest
         self.events: list[dict] = []
@@ -439,6 +441,8 @@ class BrainController:
             self.gf.observe(None, None)
         escape = self.gf.step(dt, self._clock, approach)
         if escape:
+            if self._pre_escape is None:
+                self._pre_escape = (self.pan, self.tilt)
             self._escape_until = self._clock + cfg.escape_s
             self._escape_dir = -1.0 if (stim[0] if target else self.pan) >= 0 else 1.0
             if self._tilt_home is None:
@@ -446,6 +450,12 @@ class BrainController:
             self.mb.startle()
             self.events.append({"type": "escape", "from": "right" if self._escape_dir < 0 else "left"})
         escaping = self._clock < self._escape_until
+        if not escaping and self._pre_escape is not None:
+            # a startle, not a new place to look: glide back to where it was (it used to stay
+            # turned away, e.g. at pan 44 for good)
+            if cfg.escape_return and not self._gesture:
+                self._gesture = [[*self._pre_escape, 1.0, 0.0]]
+            self._pre_escape = None
         if escaping:
             pan_rate = self._escape_dir * cfg.max_rate_deg_s
             tilt_rate = 0.5 * cfg.max_rate_deg_s

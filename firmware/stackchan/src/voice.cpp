@@ -439,7 +439,35 @@ static bool playFiller(const char* prefix) {
   return M5.Speaker.playWav(filler[i], fillerLen[i]);
 }
 
+// "ตุ้ง": the bridge took the sentence as meant for the robot, before the reply is ready. A warm
+// 560 Hz tone gliding a little up, soft attack; synthesised once (chosen by ear, 2026-10-17).
+static int16_t* chimePcm = nullptr;
+static constexpr size_t CHIME_LEN = 16000 * 550 / 1000;
+
+static void buildChime() {
+  chimePcm = (int16_t*)ps_malloc(CHIME_LEN * sizeof(int16_t));
+  if (!chimePcm) return;
+  float ph = 0;
+  for (size_t i = 0; i < CHIME_LEN; ++i) {
+    const float t = i / 16000.0f;
+    const float f = 560.0f * powf(1.18f, fminf(1.0f, t / 0.08f));
+    ph += 2 * PI * f / 16000.0f;
+    const float attack = 0.5f - 0.5f * cosf(PI * fminf(1.0f, t / 0.02f));
+    const float env = attack * expf(-fmaxf(0.0f, t - 0.02f) / 0.12f);
+    chimePcm[i] = int16_t((sinf(ph) + 0.18f * sinf(2 * ph)) * env * 0.7f / 1.18f * 32767);
+  }
+}
+
 void voiceProgress(const char* name) {
+  if (!strcmp(name, "ack")) {
+    if (state != State::Waiting || M5.Speaker.isPlaying()) return;
+    if (!chimePcm) buildChime();
+    if (!chimePcm) return;
+    M5.Speaker.begin();  // the mic is off while waiting
+    M5.Speaker.setVolume(P.voiceVolume);
+    M5.Speaker.playRaw(chimePcm, CHIME_LEN, 16000, false);
+    return;
+  }
   if (state == State::Waiting && !M5.Speaker.isPlaying()) playFiller(name);
 }
 

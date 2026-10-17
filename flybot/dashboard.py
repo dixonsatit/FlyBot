@@ -39,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 
 from .controller import PERSONALITIES
+from .head import parse as head_parse
 from .plant import PlantConfig, StackChanPlant, World
 
 log = logging.getLogger(__name__)
@@ -52,26 +53,15 @@ CALL_REPLY = "ว่าไงครับ"
 # "ไปพักได้ เดี๋ยวเรียก": rest until called by name (no greetings, no small talk, sleepy face)
 REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|หลับ)\s*(ก่อน|ได้แล้ว|ได้|เถอะ)|โหมดพัก")
 REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
-# Short head commands go straight to a gesture, without the LLM (it took seconds, and sometimes
-# answered without moving). Longer sentences ("หันซ้ายแล้วถ่ายรูป") still go to the LLM.
-HEAD_COMMANDS = [
-    (re.compile(r"หมุน"), "spin"),
-    (re.compile(r"พยัก"), "nod"),
-    (re.compile(r"ส่าย"), "shake"),
-    (re.compile(r"หัน\s*(ไป\s*)?(ทาง\s*)?(ด้าน\s*)?ซ้าย|มอง\s*(ไป\s*)?(ทาง\s*)?ซ้าย"), "left"),
-    (re.compile(r"หัน\s*(ไป\s*)?(ทาง\s*)?(ด้าน\s*)?ขวา|มอง\s*(ไป\s*)?(ทาง\s*)?ขวา"), "right"),
-    (re.compile(r"เงย|มอง\s*(ข้าง\s*)?บน"), "up"),
-    (re.compile(r"ก้ม|มอง\s*(ข้าง\s*)?ล่าง"), "down"),
-    (re.compile(r"หัน\s*(หน้า\s*)?(กลับ|ตรง|มา\s*ตรง)|มอง\s*ตรง|หัน\s*(หน้า\s*)?มา\s*(ทาง\s*)?(นี้|นี่|ผม|หนู|ฉัน)"), "center"),
-]
-HEAD_MAX_CHARS = 28  # without spaces, name included: longer is more than a head command
-HEAD_REPLY = "ได้ครับ"
-
-
-def head_command(text: str) -> str | None:
-    if len(text.replace(" ", "")) > HEAD_MAX_CHARS:
-        return None
-    return next((name for rx, name in HEAD_COMMANDS if rx.search(text)), None)
+# "น้องหวี่ ขยับหัว": for HEAD_MODE_S the head takes single words ("ซ้าย", "อีก", "ลง", "พอ") without
+# the name; single words survive the ASR better than sentences.
+HEAD_MODE_RE = re.compile(r"(ขยับ|บังคับ|คุม)\s*หัว|โหมด\s*(ขยับ|บังคับ|หัว)")
+HEAD_MODE_S = 30.0
+HEAD_MODE_ON = "โหมดขยับหัวครับ สั่ง ซ้าย ขวา ขึ้น ลง อีก ได้เลย พอแล้วบอกว่า พอ"
+HEAD_MODE_OFF = "ออกจากโหมดขยับหัวแล้วครับ"
+# a reply that says the head moved: checked against the tools the LLM really called
+MOVED_RE = re.compile(r"หัน|เงย|ก้ม|พยัก|ส่าย|หมุน")
+MOVE_TOOLS = ("gesture", "move_head", "look_at")
 
 
 # "แบตเหลือกี่เปอร์เซ็นต์": answered from the robot's last power report, without the LLM
@@ -242,6 +232,8 @@ class Dashboard:
         self.follow_up_s = follow_up_s  # after a spoken reply, the next sentence needs no name
         self._last_reply = -math.inf
         self.resting = False  # told to rest: only the wake name gets an answer, and wakes it
+        self.head_mode_until = 0.0
+        self._said_wav: dict[str, bytes] = {}  # short fixed lines, rendered once
         self._announcements: collections.OrderedDict[str, bytes] = collections.OrderedDict()
         self.held: list[str] = []  # announcements kept while nobody was at the desk
         self.archive_dir: str | None = None  # set to keep recent voice clips (see archive_clip)
@@ -471,6 +463,23 @@ class Dashboard:
         self.bridge.client.publish(f"{self.bridge.base}/announce", json.dumps({"id": key}), qos=1)
         return wav_seconds(wav)
 
+    @property
+    def head(self):
+        """flybot.head.HeadDriver, made on first use (the face tracker is attached after the dashboard)."""
+        from .head import HeadDriver
+        if getattr(self, "_head", None) is None:
+            self._head = HeadDriver(self.bridge.controller, say=self.bridge.controller.say)
+        self._head.tracker = getattr(self.bridge, "tracker", None)
+        return self._head
+
+    def head_mode(self) -> bool:
+        return time.monotonic() < self.head_mode_until
+
+    def said_wav(self, line: str) -> bytes:
+        if line not in self._said_wav:
+            self._said_wav[line] = to_16k(self.tts.speak(line))
+        return self._said_wav[line]
+
     def rest(self, on: bool) -> None:
         """Rest until called by name, or wake up."""
         self.resting = on
@@ -497,7 +506,8 @@ class Dashboard:
             self._countdown = to_16k(self.tts.speak(COUNTDOWN_LINE))
         return self._countdown
 
-    def take_photo(self, show_qr: bool = True, countdown: bool = False, preview: bool | None = None) -> dict:
+    def take_photo(self, show_qr: bool = True, countdown: bool = False, preview: bool | None = None,
+                   center: bool = True) -> dict:
         """A fresh frame from the robot's camera into the album, and a QR on the robot that opens
         it on a phone. ``countdown`` says "ยิ้มหน่อย" first and "แชะ" after; ``preview`` (with the
         countdown by default) has the robot show its camera and count 3-2-1 on screen first."""
@@ -507,7 +517,8 @@ class Dashboard:
         if countdown and self.tts:
             seconds = self.play_wav(self.countdown_wav())
             time.sleep(seconds + 1.5)  # the robot fetches the clip first
-        self._center_face()
+        if center:
+            self._center_face()
         jpeg = None
         if preview and hasattr(self.bridge, "preview_photo"):
             jpeg = self.bridge.preview_photo(PREVIEW_S)
@@ -524,17 +535,19 @@ class Dashboard:
         self.add("event", {"type": "photo", "name": name})
         return {"ok": True, "name": name, **(self.share_photo(name) if show_qr else {})}
 
-    def _center_face(self, wait_s: float = 2.5) -> None:
-        """Someone is in view: give the face tracker a moment to bring them to the middle."""
+    def _center_face(self) -> dict | None:
+        """Before a photo: bring the face to the middle of the frame (the tracker may be paused,
+        e.g. after a head command, or not have looked for a while)."""
         tracker = getattr(self.bridge, "tracker", None)
-        if not tracker or tracker.clock() - tracker.last_face > 5.0:
-            return
-        end = time.monotonic() + wait_s
-        while time.monotonic() < end:
-            seen = getattr(tracker, "last_seen", None) or {}
-            if abs(seen.get("x", 0.5) - 0.5) < 0.08 and abs(seen.get("y", 0.5) - 0.5) < 0.1:
-                return
-            time.sleep(0.2)
+        if not tracker:
+            return None
+        try:
+            seen = tracker.center()
+        except Exception as e:
+            log.warning("photo: centring failed: %s", e)
+            return None
+        log.info("photo: face %s", seen if seen else "not in view")
+        return seen
 
     def share_photo(self, name: str) -> dict:
         token = self.album.share(name)
@@ -1039,6 +1052,18 @@ class Dashboard:
                 except Exception as e:
                     return self._json(502, {"error": f"TTS: {e}"})
 
+            def _head_turn(self, text: str, plan):
+                result = dash.head.execute(plan)
+                said = result["said"]
+                if plan.moves[0].kind == "stop" and dash.head_mode():
+                    dash.head_mode_until, said = 0.0, HEAD_MODE_OFF
+                elif dash.head_mode():
+                    dash.head_mode_until = time.monotonic() + HEAD_MODE_S
+                dash._last_reply = time.monotonic()
+                log.info("voice: %r -> head %s%s", text, result.get("moves"), " (at a limit)" if result["clamped"] else "")
+                dash.add("chat", {"type": "reply", "to": text, "text": said, "voice": True})
+                return self._send(200, dash.said_wav(said), "audio/wav")
+
             def _voice(self, pcm: bytes, wake: bool = False):
                 if dash.intake_active():  # history taking: the patient's words go to the interview server only
                     dash.intake.heard(pcm)
@@ -1084,6 +1109,10 @@ class Dashboard:
                         log.info("voice: resting, heard %r -> 204", text)
                         return self._send(204, b"", "audio/wav")
                     dash.rest(False)
+                if dash.head_mode() and text:  # single words, no name needed
+                    plan = head_parse(text)
+                    if plan and plan.pure:
+                        return self._head_turn(text, plan)
                 presence = getattr(dash.bridge, "presence", None)
                 if presence and text:
                     presence.note_voice()  # someone is talking next to the robot: they are here
@@ -1108,18 +1137,16 @@ class Dashboard:
                     dash.archive_clip(pcm, {"text": text, "wake": wake, "outcome": "no-name" if text else "empty"})
                     return self._send(204, b"", "audio/wav")
                 dash.add("you", {"text": text, "voice": True})
-                move = head_command(text)
-                if move:
-                    tracker = getattr(dash.bridge, "tracker", None)
-                    if tracker:
-                        tracker.pause(15.0)  # or it pulls the head back to the face it follows
-                    dash.bridge.controller.gesture(move)
+                # "ตุ้ง" on the robot: heard and meant for it; the reply takes a few more seconds
+                dash.bridge.client.publish(f"{dash.bridge.base}/voice/progress", json.dumps({"say": "ack"}), qos=0)
+                plan = head_parse(text)
+                if plan and plan.pure:
+                    return self._head_turn(text, plan)
+                if HEAD_MODE_RE.search(text):
+                    dash.head_mode_until = time.monotonic() + HEAD_MODE_S
                     dash._last_reply = time.monotonic()
-                    log.info("voice: %r -> gesture %s", text, move)
-                    dash.add("chat", {"type": "reply", "to": text, "text": HEAD_REPLY, "voice": True})
-                    if not getattr(dash, "_head_wav", None):
-                        dash._head_wav = to_16k(dash.tts.speak(HEAD_REPLY))
-                    return self._send(200, dash._head_wav, "audio/wav")
+                    log.info("voice: %r -> head mode", text)
+                    return self._send(200, dash.said_wav(HEAD_MODE_ON), "audio/wav")
                 line = battery_line(getattr(dash.bridge, "power", None) or {}) if BATTERY_RE.search(text) else None
                 if line:
                     dash._last_reply = time.monotonic()
@@ -1136,9 +1163,11 @@ class Dashboard:
                     wav = dash.countdown_wav()
 
                     def shoot(after: float = wav_seconds(wav) + 0.5):  # the reply plays first
-                        time.sleep(after)
+                        start = time.monotonic()
+                        dash._center_face()  # while "ยิ้มหน่อย" plays
+                        time.sleep(max(0.0, after - (time.monotonic() - start)))
                         try:
-                            dash.take_photo(preview=True)
+                            dash.take_photo(preview=True, center=False)
                             reply = PHOTO_LINE
                         except ValueError as e:
                             log.warning("voice: photo failed: %s", e)
@@ -1154,6 +1183,12 @@ class Dashboard:
                     with dash.progress() as said:
                         reply = dash.bridge.cortex.ask(text, on_lookup=lambda tool: said("search"))
                     t_llm = time.monotonic()
+                    acted = getattr(dash.bridge.cortex, "last_actions", [])
+                    if reply and MOVED_RE.search(reply) and not any(a.startswith(MOVE_TOOLS) for a in acted):
+                        plan = head_parse(text)
+                        if plan:
+                            log.warning("voice: the LLM said it moved but called no head tool; doing %r", text)
+                            dash.head.execute(plan)
                     wav = to_16k(dash.tts.speak(reply)) if reply else b""
                 except Exception as e:
                     log.warning("voice: %r failed: %s: %s", text, type(e).__name__, e)

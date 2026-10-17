@@ -128,6 +128,7 @@ class Cortex:
         self.presence = None  # flybot.presence.Presence: whether the camera sees the user
         self.greeter = None  # flybot.faces.Greeter: who the camera recognised
         self.tracker = None  # flybot.faces.FaceTracker: paused when the head is moved on request
+        self.last_actions: list[str] = []
         self.episodes = None  # flybot.memory.Episodes: summaries of past conversations (recall)
         self.audit = None  # flybot.memory.Audit: what was done, append-only
         self.photo = None  # Dashboard.take_photo: a picture into the album, QR on the robot
@@ -264,6 +265,7 @@ class Cortex:
         persona = self.persona + self._memories_for(text) + (VOICE_RULE if voice else "")
         notes_before = len(self.store.notes) if self.store else 0
         done: list[str] = []
+        self.last_actions = done  # what this turn did, e.g. for a check that "หันแล้ว" really moved
         reply = self.llm.ask(persona, self.history, text, tools=self._recording(self.tools(), done, on_lookup, self.audit))
         self._ensure_saved(text, notes_before)
         # History keeps only text, so note the actions taken: without them the next turn sees
@@ -397,7 +399,8 @@ class Cortex:
     def tools(self) -> list[Tool]:
         c = self.controller
         tools = [
-            Tool("look_at", "Turn the robot's head. pan_deg: -90 (left) .. 90 (right); tilt_deg: 0 .. 30 (up).",
+            Tool("look_at", "Steer the gaze slowly (it drifts). To move the head when asked, use gesture or move_head. "
+                 "pan_deg: - = left, + = right; tilt_deg: + = up (limits in move_head's result).",
                  {"type": "object", "properties": {"pan_deg": {"type": "number"}, "tilt_deg": {"type": "number"}},
                   "required": ["pan_deg", "tilt_deg"], "additionalProperties": False},
                  lambda pan_deg, tilt_deg: c.look_at(pan_deg, tilt_deg) or "turning"),

@@ -246,6 +246,10 @@ class FaceTracker:
         self.last_face = -float("inf")
         self._homed = True  # the head already went back to the home pose after the last face
         self.last_seen: dict | None = None  # the box of the face last centred on, for the dashboard
+        # someone is here but no face in view (at tilt 10 the camera saw a seated person's chin and
+        # chest): look up step by step, once, then wait before trying again
+        self._search_tilts: list[float] = []
+        self._next_search = 0.0
         self._stop = threading.Event()
 
     def pause(self, seconds: float = 15.0) -> None:
@@ -257,7 +261,8 @@ class FaceTracker:
         if now < self.paused_until or not self.active():
             return False
         recent = now - self.last_face < self.idle_s
-        if not recent and not self._homed and now - self.last_face > 30.0:
+        homing = not recent and not self._homed and now - self.last_face > 30.0
+        if homing:
             self._homed = True  # nobody for a while: face the desk again, once, then stay still
             self.c.face(self.c.cfg.home_pan, self.c.cfg.home_tilt, hold_s=2.0)
         if recent:  # someone is in view: keep frames coming without a request each time
@@ -268,9 +273,12 @@ class FaceTracker:
         pan, tilt = self.c.pan, self.c.tilt  # the frame is a few hundred ms old; the gain absorbs it
         faces = self.client.embed(jpeg)
         if not faces:
+            if not homing:  # going back to the desk this step: no search on top of it
+                self._search_up(now)
             return False
         self.last_face = self.clock()
         self._homed = False
+        self._search_tilts = []
         x, y, w, h = faces[0]["box"]
         dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
         self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}
@@ -280,6 +288,53 @@ class FaceTracker:
         if self.on_seen:
             self.on_seen()
         return True
+
+    SEARCH_STEP_DEG, SEARCH_AFTER_S, SEARCH_AGAIN_S = 12.0, 3.0, 30.0
+
+    def _search_up(self, now: float) -> None:
+        if now - self.last_face < self.SEARCH_AFTER_S:
+            return
+        if not self._search_tilts:
+            if now < self._next_search:
+                return
+            lo, hi = self.c.cfg.tilt_limits
+            start = self.c.tilt
+            self._search_tilts = [t for t in (start + self.SEARCH_STEP_DEG * k for k in (1, 2, 3)) if t <= min(hi, 60.0)]
+            self._search_tilts.append(self.c.cfg.home_tilt)  # nobody found up there: back to the desk
+            self._next_search = now + self.SEARCH_AGAIN_S
+        self.c.face(self.c.pan, self._search_tilts.pop(0), hold_s=1.5)
+
+    def center(self, timeout_s: float = 5.0, tol: tuple[float, float] = (0.05, 0.07),
+               hold_s: float = 15.0) -> dict | None:
+        """Bring the largest face to the middle now (before a photo): look, turn, look again until it
+        is centred. The tracking loop is paused meanwhile so the two don't fight. Returns where the
+        face ended up ({"x", "y", "w", "centred"}), or None when nobody is in view."""
+        end = time.monotonic() + timeout_s
+        self.pause(timeout_s + hold_s)
+        seen = None
+        while time.monotonic() < end:
+            jpeg = self.snapshot(3.0, 0.0)
+            if not jpeg:
+                break
+            pan, tilt = self.c.pan, self.c.tilt
+            faces = self.client.embed(jpeg)
+            if not faces:
+                if seen is None and self.c.tilt + self.SEARCH_STEP_DEG <= self.c.cfg.tilt_limits[1]:
+                    # nobody in view yet: the face may be above the frame, look up a step
+                    self.c.face(self.c.pan, self.c.tilt + self.SEARCH_STEP_DEG, hold_s=hold_s)
+                    time.sleep(0.9)
+                    continue
+                return seen
+            x, y, w, h = faces[0]["box"]
+            dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
+            seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3),
+                    "centred": abs(dx) <= tol[0] and abs(dy) <= tol[1]}
+            self.last_seen, self.last_face = seen, self.clock()
+            if seen["centred"]:
+                return seen
+            self.c.face(pan + 0.9 * dx * self.c.cfg.hfov_deg, tilt - 0.9 * dy * self.c.cfg.vfov_deg, hold_s=hold_s)
+            time.sleep(0.9)  # let the head get there before the next look
+        return seen
 
     def run(self) -> None:
         while not self._stop.is_set():

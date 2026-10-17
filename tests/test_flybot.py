@@ -220,6 +220,17 @@ def test_controller_escapes_from_looming_object(gains):
     assert brain.pan < pan_at_escape  # turned away (left) from the object on the right
 
 
+def test_controller_goes_back_after_a_startle(gains):
+    brain = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    brain.pan, brain.tilt = 5.0, 10.0
+    s = SensorState()
+    brain._pre_escape, brain._escape_until = (5.0, 10.0), 0.4  # a startle just happened
+    brain.pan = -40.0
+    for i in range(80):
+        brain.step(s, 0.05, now=0.5 + i * 0.05)
+    assert abs(brain.pan - 5.0) < 4 and abs(brain.tilt - 10.0) < 4
+
+
 @pytest.mark.parametrize("name, sign", [("bold", 1), ("skittish", -1)])
 def test_phototaxis_follows_personality(name, sign, gains):
     from dataclasses import replace
@@ -635,7 +646,12 @@ class _FakeBridge:
             @staticmethod
             def is_connected():
                 return True
+
+            @staticmethod
+            def publish(*args, **kwargs):
+                pass
         self.client = _Client()
+        self.base = "stackchan"
 
 
 def _http(port, method, path, body=None, auth=None):
@@ -891,8 +907,20 @@ def test_voice_turn_via_dashboard(gains):
         heard["text"] = "น้องหวี่ หันซ้าย"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
         assert len(published) == 7  # a head command: no LLM turn
+        import time as _t; _t.sleep(0.2)  # the head driver plays on its own thread
         bridge.controller.step(SensorState(), 0.05)
         assert bridge.controller._gesture and bridge.controller._gesture[0][0] < 0  # turning left
+        heard["text"] = "น้องหวี่ ขยับหัว"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and dash.head_mode()
+        dash._last_reply = -1e9  # no follow-up window: only head mode lets a bare word through
+        heard["text"] = "ซ้าย"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
+        heard["text"] = "พอ"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and not dash.head_mode()
+        dash._last_reply = -1e9
+        heard["text"] = "หันไปทางซ้ายเลย"  # head mode over: without the name it is not for the robot
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
+        assert len(published) == 7
         bridge.power = {"battery": 73, "charging": 0}
         heard["text"] = "น้องหวี่ แบตเหลือกี่เปอร์เซ็นต์"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200
@@ -1939,3 +1967,154 @@ def test_parse_his_dsn():
     p = parse_dsn("mysql://flybot_ro:p%40ss@db.local:3307/app_queue")
     assert (p["user"], p["password"], p["host"], p["port"], p["database"]) == ("flybot_ro", "p@ss", "db.local", 3307, "app_queue")
     assert parse_dsn("mysql://u:p@h")["database"] == "app_queue"
+
+
+HEAD_PHRASES = [  # (heard, moves as (kind, pan, tilt, amount|gesture), pure)
+    ("หันซ้าย", [("by", -15, 0, "")], True),
+    ("น้องหวี่ หันซ้าย", [("by", -15, 0, "")], True),
+    ("น้องอี้ หันขวา", [("by", 15, 0, "")], True),
+    ("หันขวานิดนึง", [("by", 8, 0, "nudge")], True),
+    ("หันซ้ายนิดหน่อย", [("by", -8, 0, "nudge")], True),
+    ("หันขวามากๆ", [("by", 30, 0, "much")], True),
+    ("หันซ้ายสุด", [("by", -180, 0, "max")], True),
+    ("หันซ้าย 20 องศา", [("by", -20, 0, "")], True),
+    ("หันขวาสามสิบองศา", [("by", 30, 0, "")], True),
+    ("เงยสิบห้าองศา", [("by", 0, 15, "")], True),
+    ("หันซ้ายยี่สิบห้าองศา", [("by", -25, 0, "")], True),
+    ("เงยหน้า", [("by", 0, 15, "")], True),
+    ("เงยขึ้นนิดนึง", [("by", 0, 8, "nudge")], True),
+    ("ก้มหน้า", [("by", 0, -15, "")], True),
+    ("ก้มลงหน่อย", [("by", 0, -15, "")], True),
+    ("ก้มสุด", [("by", 0, -180, "max")], True),
+    ("มองซ้าย", [("by", -15, 0, "")], True),
+    ("มองไปทางขวา", [("by", 15, 0, "")], True),
+    ("มองมุมขวาบน", [("by", 15, 15, "")], True),
+    ("ขวาบน", [("by", 15, 15, "")], True),
+    ("มุมซ้ายล่างสุด", [("by", -15, -180, "max")], True),
+    ("หันซ้ายแล้วหันขวา", [("by", -15, 0, ""), ("by", 15, 0, "")], True),
+    ("หันซ้ายแล้วก็หันขวา", [("by", -15, 0, ""), ("by", 15, 0, "")], True),
+    ("ก้มแล้วเงย", [("by", 0, -15, ""), ("by", 0, 15, "")], True),
+    ("ซ้าย", [("by", -15, 0, "")], True),
+    ("ขวา", [("by", 15, 0, "")], True),
+    ("ขึ้น", [("by", 0, 15, "")], True),
+    ("ลง", [("by", 0, -15, "")], True),
+    ("อีก", [("again", 15, 0, "")], True),
+    ("อีกนิด", [("again", 8, 0, "nudge")], True),
+    ("หันกลับมา", [("home", 0, 0, "")], True),
+    ("หันหน้ามาทางนี้", [("home", 0, 0, "")], True),
+    ("มองตรง", [("home", 0, 0, "")], True),
+    ("กลับที่เดิม", [("back", 0, 0, "")], True),
+    ("ค้างไว้", [("by", 0, 0, "")], True),
+    ("พยักหน้า", [("gesture", 0, 0, "nod")], True),
+    ("ส่ายหน้า", [("gesture", 0, 0, "shake")], True),
+    ("หมุนตัว", [("gesture", 0, 0, "spin")], True),
+    ("มองรอบๆ", [("gesture", 0, 0, "spin")], True),
+    ("หยุด", [("stop", 0, 0, "")], True),
+    ("น้องหวี่หยุด", [("stop", 0, 0, "")], True),
+    ("พอแล้ว", [("stop", 0, 0, "")], True),
+    ("หันซ้ายแล้วถ่ายรูปให้หน่อย", [("by", -15, 0, "")], False),  # more than the head: the LLM
+    ("ลงทะเบียนยังไง", [("by", 0, -15, "")], False),
+    ("วันนี้มีประชุมกี่โมง", [], False),
+    ("วันนี้ฝนตกไหม", [], False),
+]
+
+
+@pytest.mark.parametrize("heard,moves,pure", HEAD_PHRASES)
+def test_head_commands_parse(heard, moves, pure):
+    from flybot.head import parse
+    plan = parse(heard)
+    got = [(m.kind, round(m.pan), round(m.tilt), m.gesture or m.amount) for m in plan.moves]
+    assert got == [(k, p, t, a) for k, p, t, a in moves], heard
+    if moves:
+        assert plan.pure == pure, heard
+
+
+def test_head_driver_limits_again_and_back(gains):
+    from flybot.head import HeadDriver, parse
+    c = BrainController(ControllerConfig(backend="rate", pan_limits=(-90.0, 90.0), tilt_limits=(5.0, 85.0)),
+                        gains=gains)
+    said = []
+    d = HeadDriver(c, say=lambda text, s: said.append(text))
+    poses = []
+    c.face = lambda pan, tilt, hold_s=1.5: poses.append((round(pan), round(tilt)))
+    c.pan, c.tilt = 0.0, 10.0
+    r = d.execute(parse("หันซ้าย 20 องศา"), wait=True)
+    assert poses[-1] == (-20, 10) and r["said"] == "ได้ครับ" and said
+    c.pan, c.tilt = -20.0, 10.0  # the head got there
+    d.execute(parse("อีก"), wait=True)
+    assert poses[-1] == (-35, 10)  # the same way, 15 more
+    c.pan = -35.0
+    r = d.execute(parse("หันซ้าย 80 องศา"), wait=True)
+    assert poses[-1] == (-90, 10) and r["clamped"] and r["said"] == "สุดแล้วครับ"
+    c.pan = -90.0
+    d.execute(parse("ก้มสุด"), wait=True)
+    assert poses[-1] == (-90, 5)
+    c.tilt = 5.0
+    d.execute(parse("กลับที่เดิม"), wait=True)
+    assert poses[-1] == (-90, 10)  # the pose before the last command
+    d.execute(parse("มองมุมขวาบนสุด"), wait=True)
+    assert poses[-1] == (90, 85)
+    d.execute(parse("หันกลับมา"), wait=True)
+    assert poses[-1] == (round(c.cfg.home_pan), round(c.cfg.home_tilt))
+    poses.clear()
+    d.execute(parse("หันขวา 30 องศาช้าๆ"), wait=True)
+    assert len(poses) > 1  # in small steps
+
+
+def test_face_is_centred_before_a_photo(gains):
+    from flybot.faces import FaceTracker
+    c = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    c.pan, c.tilt = 0.0, 10.0
+    person = (-20.0, 14.0)  # where the face is, in head degrees
+
+    def face(pan, tilt, hold_s=1.5):
+        c.pan, c.tilt = pan, tilt
+
+    c.face = face
+
+    class Client:
+        def embed(self, jpeg):  # the face's box as the camera sees it from the current pose
+            cx = 0.5 + (person[0] - c.pan) / c.cfg.hfov_deg
+            cy = 0.5 - (person[1] - c.tilt) / c.cfg.vfov_deg
+            return [{"box": [cx - 0.1, cy - 0.1, 0.2, 0.2], "embedding": [0.0] * 128}]
+
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: None, Client(), c, None, lambda: True)
+    import flybot.faces as _f
+    real_sleep, _f.time.sleep = _f.time.sleep, lambda s: None
+    try:
+        seen = t.center()
+    finally:
+        _f.time.sleep = real_sleep
+    assert seen and seen["centred"] and abs(c.pan - person[0]) < 3 and abs(c.tilt - person[1]) < 3
+    t.client = type("Nobody", (), {"embed": lambda self, j: []})()
+    assert t.center() is None
+
+
+def test_face_tracker_looks_up_for_a_face_above_the_frame(gains):
+    from flybot.faces import FaceTracker
+    c = BrainController(ControllerConfig(backend="rate", tilt_limits=(5.0, 85.0)), gains=gains)
+    c.pan, c.tilt = 0.0, 10.0
+    tilts = []
+
+    def face(pan, tilt, hold_s=1.5):
+        c.tilt = tilt
+        tilts.append(round(tilt))
+
+    c.face = face
+    face_at = 34.0  # a seated person's face, above the frame at tilt 10
+
+    class Client:
+        def embed(self, jpeg):
+            dy = (face_at - c.tilt) / c.cfg.vfov_deg
+            return [{"box": [0.4, 0.4 - dy, 0.2, 0.2], "embedding": [0.0] * 128}] if abs(dy) < 0.45 else []
+
+    now = [1000.0]
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: None, Client(), c, type("G", (), {"consider": lambda s, f: None})(),
+                    lambda: True, clock=lambda: now[0])
+    t.last_face = 0.0
+    t._homed = True
+    for _ in range(4):
+        now[0] += 2
+        if t.step():
+            break
+    assert tilts[0] == 22 and t.last_face == now[0]  # looked up a step, and found the face
