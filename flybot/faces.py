@@ -238,8 +238,13 @@ class FaceTracker:
     def __init__(self, snapshot, stream: Callable[..., None], client: FaceClient, controller, greeter: Greeter,
                  active: Callable[[], bool], gain: float = 0.8, deadband: tuple[float, float] = (0.06, 0.08),
                  fps: int = 3, idle_s: float = 20.0, clock: Callable[[], float] = time.monotonic,
-                 on_seen: Callable[[], None] | None = None):
+                 on_seen: Callable[[], None] | None = None, follow: bool = True, turn_every_s: float = 0.0):
         self.snapshot, self.stream, self.client, self.c, self.greeter = snapshot, stream, client, controller, greeter
+        # False: look (who is there, greetings) but leave the head alone; center() still turns it
+        # before a photo. Following all the time kept the head moving (2026-10-17).
+        self.follow = follow
+        self.turn_every_s = turn_every_s  # at most one turn this often (0: every frame)
+        self._last_turn = -float("inf")
         self.active, self.gain, self.deadband, self.fps, self.idle_s, self.clock = active, gain, deadband, fps, idle_s, clock
         self.on_seen = on_seen  # e.g. presence.note_face: a face means someone is there
         self.paused_until = 0.0  # a person or the assistant moved the head on purpose
@@ -261,11 +266,11 @@ class FaceTracker:
         if now < self.paused_until or not self.active():
             return False
         recent = now - self.last_face < self.idle_s
-        homing = not recent and not self._homed and now - self.last_face > 30.0
+        homing = self.follow and not recent and not self._homed and now - self.last_face > 30.0
         if homing:
             self._homed = True  # nobody for a while: face the desk again, once, then stay still
             self.c.face(self.c.cfg.home_pan, self.c.cfg.home_tilt, hold_s=2.0)
-        if recent:  # someone is in view: keep frames coming without a request each time
+        if recent and self.follow:  # someone is in view: keep frames coming without a request each time
             self.stream(seconds=10.0, fps=self.fps)
         jpeg = self.snapshot(3.0, 0.0)
         if not jpeg:
@@ -273,7 +278,7 @@ class FaceTracker:
         pan, tilt = self.c.pan, self.c.tilt  # the frame is a few hundred ms old; the gain absorbs it
         faces = self.client.embed(jpeg)
         if not faces:
-            if not homing:  # going back to the desk this step: no search on top of it
+            if self.follow and not homing:  # going back to the desk this step: no search on top of it
                 self._search_up(now)
             return False
         self.last_face = self.clock()
@@ -282,7 +287,9 @@ class FaceTracker:
         x, y, w, h = faces[0]["box"]
         dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
         self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}
-        if abs(dx) > self.deadband[0] or abs(dy) > self.deadband[1]:
+        if self.follow and (abs(dx) > self.deadband[0] or abs(dy) > self.deadband[1]) \
+                and now - self._last_turn >= self.turn_every_s:
+            self._last_turn = now
             self.c.follow(pan + self.gain * self.c.cfg.camera_x_sign * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg)
         self.greeter.consider(faces)
         if self.on_seen:
@@ -344,6 +351,9 @@ class FaceTracker:
                 log.warning("face tracking: %s", e)
                 seen = False
             # following a face: next frame at once; nobody in view: look again every 3 s
+            if not self.follow:  # only looking: who is there changes slowly
+                self._stop.wait(2.0)
+                continue
             self._stop.wait(0.05 if seen or self.clock() - self.last_face < self.idle_s else 3.0)
 
     def start(self) -> None:

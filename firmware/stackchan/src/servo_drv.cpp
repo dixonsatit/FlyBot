@@ -32,6 +32,9 @@
 #ifndef SCS_IDLE_RELEASE_MS  // the factory firmware releases ~0.2 s after the move ends
 #define SCS_IDLE_RELEASE_MS 1500
 #endif
+#ifndef SCS_MIN_MOVE_MS  // >= the bridge's command period (50 ms at 20 Hz): one step runs into the next
+#define SCS_MIN_MOVE_MS 60
+#endif
 #ifndef SCS_MAX_SPEED_DEG_S  // = ControllerConfig.max_rate_deg_s
 #define SCS_MAX_SPEED_DEG_S 200
 #endif
@@ -163,7 +166,9 @@ static void moveTo(Axis& a, float deg) {
   if (stalled(a, raw)) return;
   if (a.last >= 0 && abs(raw - a.last) < 2) return;  // < 0.6 deg: let the head rest
   const int span = a.last < 0 ? int(RAW_MAX * 0.3f) : abs(raw - a.last);
-  const uint16_t ms = max(20, int(span / RAW_PER_DEG / SCS_MAX_SPEED_DEG_S * 1000));
+  // A step that ended in 20 ms and then waited 30 ms for the next command moved the head in
+  // jerks; spread over the command period the steps join into one glide.
+  const uint16_t ms = max(SCS_MIN_MOVE_MS, int(span / RAW_PER_DEG / SCS_MAX_SPEED_DEG_S * 1000));
   scs.WritePos(a.id, raw, ms, 0);  // also turns the torque back on
   a.last = raw;
   a.lastMoveMs = millis();

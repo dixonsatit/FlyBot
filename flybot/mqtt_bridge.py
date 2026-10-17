@@ -59,6 +59,7 @@ class StackChanBridge:
         self._jpeg: bytes | None = None
         self.presence = None  # flybot.presence.Presence when --presence is on
         self.greeter = None  # flybot.faces.Greeter when --face-url is set
+        self.follow_faces = True  # --face-follow: turn the head to faces all the time
         self.tracker = None  # flybot.faces.FaceTracker: keeps the face centred
         self._last_motion = -float("inf")
         self._last_face_turn = 0.0
@@ -230,6 +231,8 @@ class StackChanBridge:
         if not self.presence:
             return
         self.presence.note_face()
+        if not self.follow_faces:
+            return
         dx, dy = f["x"] - 0.5, f["y"] - 0.5
         if abs(dx) < 0.08 and abs(dy) < 0.1:  # centred enough: hold still
             return
@@ -357,6 +360,9 @@ def main(argv: list[str] | None = None) -> None:
     gh = ap.add_argument_group("GitHub (failed CI, review requests)")
     gh.add_argument("--face-url", help="tools/face_server.py (e.g. http://192.168.3.57:7880): greet enrolled people")
     gh.add_argument("--face-token", help="the face server's FACE_TOKEN")
+    gh.add_argument("--face-follow", choices=("off", "gentle", "always"), default="gentle",
+                    help="turning the head to the face it sees: never (only before a photo), now and then a "
+                         "little when it is well off centre, or all the time")
     gh.add_argument("--line-token", help="KKH LINE OA channel access token (Messaging API): send_line to staff")
     gh.add_argument("--line-dsn", help="mysql://... with the v_stackchan_line view (employee code -> LINE id); "
                                       "default --staff-dsn")
@@ -502,7 +508,8 @@ def main(argv: list[str] | None = None) -> None:
             pan, tilt = pose_at_frame
             target = pan + c.cfg.camera_x_sign * (x - 0.5) * c.cfg.hfov_deg, tilt - (y - 0.5) * c.cfg.vfov_deg
             log.info("presence: head at pan %.0f tilt %.0f when the frame was taken -> %.0f, %.0f", pan, tilt, *target)
-            c.face(*target)
+            if bridge.follow_faces:
+                c.face(*target)
             if bridge.greeter:
                 bridge.greeter.on_face_seen()
 
@@ -609,7 +616,11 @@ def main(argv: list[str] | None = None) -> None:
             return bool(p and p.present) or time.monotonic() - bridge._last_motion < 30.0
 
         bridge.tracker = FaceTracker(bridge.snapshot, bridge.stream, client, bridge.controller, bridge.greeter,
-                                     someone_around, on_seen=bridge.presence.note_face if bridge.presence else None)
+                                     someone_around, on_seen=bridge.presence.note_face if bridge.presence else None,
+                                     follow=args.face_follow != "off",
+                                     **({"gain": 0.6, "deadband": (0.15, 0.18), "turn_every_s": 4.0}
+                                        if args.face_follow == "gentle" else {}))
+        bridge.follow_faces = args.face_follow == "always"  # the robot's own detector and presence turns
         if bridge.presence:
             # A vision model's guess of where the person is turned the head to the left edge again and
             # again (x=0.03 three times running); the face tracker's detections steer and decide instead.

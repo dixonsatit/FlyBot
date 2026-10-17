@@ -2145,3 +2145,48 @@ def test_face_centring_follows_a_mirrored_camera(gains):
     finally:
         _f.time.sleep = real_sleep
     assert seen["centred"] and abs(c.pan - person) < 3
+
+
+
+def test_face_tracker_only_looks_when_not_following(gains):
+    from flybot.faces import FaceTracker
+    c = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    moved, seen = [], []
+    c.follow = lambda *a, **k: moved.append(a)
+    c.face = lambda *a, **k: moved.append(a)
+
+    class Client:
+        def embed(self, jpeg):
+            return [{"box": [0.0, 0.0, 0.2, 0.2], "embedding": [0.0] * 128}]  # far off centre
+
+    g = type("G", (), {"consider": lambda s, f: seen.append(f)})()
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: None, Client(), c, g, lambda: True, follow=False)
+    assert t.step() and seen and not moved  # who is there is known, the head stays
+    assert t.last_seen["x"] == 0.1
+
+
+
+def test_face_tracker_turns_gently(gains):
+    from flybot.faces import FaceTracker
+    c = BrainController(ControllerConfig(backend="rate"), gains=gains)
+    moved = []
+    c.follow = lambda *a, **k: moved.append(a)
+    box = [[0.45, 0.4, 0.2, 0.2]]
+
+    class Client:
+        def embed(self, jpeg):
+            return [{"box": box[0], "embedding": [0.0] * 128}]
+
+    now = [100.0]
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: None, Client(), c, type("G", (), {"consider": lambda s, f: None})(),
+                    lambda: True, clock=lambda: now[0], gain=0.6, deadband=(0.15, 0.18), turn_every_s=4.0)
+    t.step()
+    assert not moved  # a little off centre: left alone
+    box[0] = [0.0, 0.4, 0.2, 0.2]
+    t.step()
+    now[0] += 1
+    t.step()
+    assert len(moved) == 1  # well off centre: one turn, not one per frame
+    now[0] += 4
+    t.step()
+    assert len(moved) == 2
