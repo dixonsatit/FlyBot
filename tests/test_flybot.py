@@ -2118,3 +2118,30 @@ def test_face_tracker_looks_up_for_a_face_above_the_frame(gains):
         if t.step():
             break
     assert tilts[0] == 22 and t.last_face == now[0]  # looked up a step, and found the face
+
+
+
+def test_face_centring_follows_a_mirrored_camera(gains):
+    from flybot.faces import FaceTracker
+    c = BrainController(ControllerConfig(backend="rate", camera_x_sign=-1.0), gains=gains)
+    c.pan, c.tilt = 0.0, 25.0
+    person = 15.0
+
+    def face(pan, tilt, hold_s=1.5):
+        c.pan, c.tilt = pan, tilt
+
+    c.face = face
+
+    class Mirrored:  # the face moves the same way as the head turns, as on the robot
+        def embed(self, jpeg):
+            cx = 0.5 - (person - c.pan) / c.cfg.hfov_deg
+            return [{"box": [cx - 0.1, 0.4, 0.2, 0.2], "embedding": [0.0] * 128}] if 0 < cx < 1 else []
+
+    t = FaceTracker(lambda *a: b"jpeg", lambda **k: None, Mirrored(), c, None, lambda: True)
+    import flybot.faces as _f
+    real_sleep, _f.time.sleep = _f.time.sleep, lambda s: None
+    try:
+        seen = t.center()
+    finally:
+        _f.time.sleep = real_sleep
+    assert seen["centred"] and abs(c.pan - person) < 3

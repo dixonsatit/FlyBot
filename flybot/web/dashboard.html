@@ -48,6 +48,9 @@ main { max-width: 1280px; margin: 0 auto; padding: 16px; }
 .cam img { width: 100%; height: 100%; object-fit: contain; cursor: crosshair; }
 .cam .over { position: absolute; left: 8px; top: 8px; display: flex; gap: 6px; }
 .cam .over .pill { background: rgba(0,0,0,.55); color: #fff; }
+.cam .facebox { position: absolute; border: 2px solid #4ade80; border-radius: 8px; pointer-events: none; transition: all .3s; }
+.cam .facebox span { position: absolute; left: -2px; bottom: 100%; background: #4ade80; color: #052e16; font-size: 13px;
+  font-weight: 600; padding: 1px 8px; border-radius: 6px 6px 0 0; white-space: nowrap; }
 .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 8px; }
 .photos img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; cursor: pointer; background: #000; }
 .photos img.sel { outline: 3px solid #3b82f6; }
@@ -104,6 +107,7 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
         <div class="cam" id="camBox">
           <div class="idle" id="camIdle">กด "เปิดกล้อง" เพื่อดูภาพสด<br><span class="hint">แตะที่ภาพเพื่อหันไปทางนั้น</span></div>
           <img id="cam" alt="" style="display:none">
+          <div class="facebox" id="camFace" style="display:none"><span></span></div>
           <div class="over" id="camOver" style="display:none"><span class="pill" id="camFps">–</span><span class="pill" id="camWho" style="display:none"></span></div>
         </div>
         <div class="row" style="justify-content:space-between">
@@ -329,6 +333,13 @@ async function loadOverview() {
   $("pan").textContent = r.pan; $("tilt").textContent = r.tilt; $("expr").textContent = r.expression;
   if (ov.faces.who) { $("camWho").style.display = ""; $("camWho").textContent = "👤 " + (ov.faces.who.nick || ov.faces.who.name); }
   else $("camWho").style.display = "none";
+  const fb = ov.faces.box, el = $("camFace");
+  if (fb && $("cam").style.display !== "none") {  // h: a face is ~1.2 x its width; the frame is 4:3
+    const h = Math.min(1, fb.w * 1.6);
+    Object.assign(el.style, { display: "", left: (fb.x - fb.w / 2) * 100 + "%", top: (fb.y - h / 2) * 100 + "%",
+                              width: fb.w * 100 + "%", height: h * 100 + "%" });
+    el.firstChild.textContent = ov.faces.who ? (ov.faces.who.nick || ov.faces.who.name) : "ไม่รู้จัก";
+  } else el.style.display = "none";
   const kv = [
     ["หุ่น", r.online ? `ออนไลน์ (ล่าสุด ${ago(r.seen_ago)} ที่แล้ว)` : `ออฟไลน์ (ล่าสุด ${ago(r.seen_ago)} ที่แล้ว)`],
     ["แบตเตอรี่", p.battery >= 0 ? `${p.battery}% ${p.charging ? "(กำลังชาร์จ)" : ""}` : "ไม่ทราบ"],
@@ -405,7 +416,8 @@ function addFeed(f) {
   else if (f.kind === "event") { cls += "ev";
     text = d.type === "meeting" ? (d.message || "").replace(/^StackChan:\s*/, "📅 ") : d.type === "body" ? "🤲 " + (d.kind || "")
          : d.type === "enrolled" ? "👤 ลงทะเบียน " + (d.name || "")
-         : d.type === "photo" ? "📷 ถ่ายรูป " + (d.name || "") : (EVENT_TEXT[d.type] || d.type);
+         : d.type === "photo" ? "📷 ถ่ายรูป " + (d.name || "")
+         : d.type === "presence" && d.who ? "👀 " + d.who + " อยู่ตรงนี้" : (EVENT_TEXT[d.type] || d.type);
     if (d.type === "photo" && !firstPoll) loadPhotos(d.name); }
   else return;
   for (const feed of [$("feed"), $("feedFull")]) {

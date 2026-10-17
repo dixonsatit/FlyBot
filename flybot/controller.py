@@ -75,6 +75,9 @@ class ControllerConfig:
     follow_gain: float = 2.5  # 1/s: how briskly the head eases to a tracked face
     follow_max_deg_s: float = 45.0
     home_pan: float = 0.0
+    # -1 when the camera image is mirrored against pan: on the StackChan CoreS3 a face moved left in
+    # the frame as the head turned left (measured 2026-10-17), so turning "towards" it lost it
+    camera_x_sign: float = 1.0
     home_tilt: float = 10.0
     # balloon text language: "th" needs the firmware's Thai font, "en" works on any firmware
     screen_lang: str = "th"

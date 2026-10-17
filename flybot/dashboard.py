@@ -695,7 +695,9 @@ class Dashboard:
                          "last_seen": presence.last_seen if presence and presence.last_seen > 0 else None},
             "faces": {"on": bool(self.faces), "people": len(self.faces[1].people) if self.faces else 0,
                       "who": who and {k: who.get(k) for k in ("name", "nick", "position")},
-                      "tracking": bool(self.tracker and time.monotonic() - self.tracker.last_face < 5)},
+                      "tracking": bool(self.tracker and time.monotonic() - self.tracker.last_face < 5),
+                      # where the face is in the camera frame (fractions), for a name tag on the live view
+                      "box": self.tracker.last_seen if self.tracker and time.monotonic() - self.tracker.last_face < 3 else None},
             "llm": {"on": cortex is not None, "model": getattr(llm, "model", None),
                     "kind": type(llm).__name__ if llm else None},
             "voice": {"stt": self.stt is not None, "tts": self.tts is not None, "wake": self.wake.pattern,

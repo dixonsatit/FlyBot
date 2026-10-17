@@ -283,7 +283,7 @@ class FaceTracker:
         dx, dy = x + w / 2 - 0.5, y + h / 2 - 0.5
         self.last_seen = {"x": round(x + w / 2, 3), "y": round(y + h / 2, 3), "w": round(w, 3)}
         if abs(dx) > self.deadband[0] or abs(dy) > self.deadband[1]:
-            self.c.follow(pan + self.gain * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg)
+            self.c.follow(pan + self.gain * self.c.cfg.camera_x_sign * dx * self.c.cfg.hfov_deg, tilt - self.gain * dy * self.c.cfg.vfov_deg)
         self.greeter.consider(faces)
         if self.on_seen:
             self.on_seen()
@@ -332,7 +332,7 @@ class FaceTracker:
             self.last_seen, self.last_face = seen, self.clock()
             if seen["centred"]:
                 return seen
-            self.c.face(pan + 0.9 * dx * self.c.cfg.hfov_deg, tilt - 0.9 * dy * self.c.cfg.vfov_deg, hold_s=hold_s)
+            self.c.face(pan + 0.9 * self.c.cfg.camera_x_sign * dx * self.c.cfg.hfov_deg, tilt - 0.9 * dy * self.c.cfg.vfov_deg, hold_s=hold_s)
             time.sleep(0.9)  # let the head get there before the next look
         return seen
 

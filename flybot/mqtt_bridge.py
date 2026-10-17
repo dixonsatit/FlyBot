@@ -239,7 +239,7 @@ class StackChanBridge:
         self._last_face_turn = now
         c = self.controller
         # 0.7 of the offset per step from the pose the frame was taken at: converges without overshoot
-        c.face(f["pan"] + 0.7 * dx * c.cfg.hfov_deg, f["tilt"] - 0.7 * dy * c.cfg.vfov_deg, hold_s=0.5)
+        c.face(f["pan"] + 0.7 * c.cfg.camera_x_sign * dx * c.cfg.hfov_deg, f["tilt"] - 0.7 * dy * c.cfg.vfov_deg, hold_s=0.5)
 
     @staticmethod
     def _log_selftest(payload: bytes) -> None:
@@ -273,7 +273,11 @@ class StackChanBridge:
                 for event in self.controller.pop_events():
                     self.events.emit(event, now=now, brain=cmd.get("brain"))
                     if self.dashboard:
-                        self.dashboard.add("event", {k: v for k, v in event.items() if k not in ("time", "key")})
+                        shown = {k: v for k, v in event.items() if k not in ("time", "key")}
+                        who = self.greeter.who(60.0) if self.greeter and event.get("type") == "presence" else None
+                        if who:  # the camera recognised someone: name them in the feed
+                            shown["who"] = who.get("nick") or who.get("name")
+                        self.dashboard.add("event", shown)
                     if self.cortex:
                         self.cortex.on_event(event, self.controller.snapshot.get("brain"))
                 if heartbeat and now - beat >= 1.0:  # liveness: the control loop is still turning
@@ -496,7 +500,7 @@ def main(argv: list[str] | None = None) -> None:
         def look_at_person(x: float, y: float) -> None:  # face at (x, y) of the frame -> turn to it
             c = bridge.controller
             pan, tilt = pose_at_frame
-            target = pan + (x - 0.5) * c.cfg.hfov_deg, tilt - (y - 0.5) * c.cfg.vfov_deg
+            target = pan + c.cfg.camera_x_sign * (x - 0.5) * c.cfg.hfov_deg, tilt - (y - 0.5) * c.cfg.vfov_deg
             log.info("presence: head at pan %.0f tilt %.0f when the frame was taken -> %.0f, %.0f", pan, tilt, *target)
             c.face(*target)
             if bridge.greeter:
