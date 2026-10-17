@@ -16,6 +16,7 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <esp_sntp.h>
 #include "esp_camera.h"
 #include <esp_wifi.h>
@@ -58,6 +59,12 @@ WiFiClient wifiClient;
 WsClient wssClient(KKH_ROOT_CA);  // MQTT host "wss://host/path": through the public HTTPS endpoint
 PubSubClient mqtt(wifiClient);
 static String mqttHost;  // host name only (setServer keeps the pointer)
+// "name.local" hosts (the Mac running tools/lan_relay.py) are looked up by mDNS before each
+// connect: the Mac's DHCP address changed (.107 -> .109) and the robot lost the bridge.
+static String localName, voiceUrlTemplate;
+static uint16_t mqttPort = 0;
+static bool wakeNameOn = true;
+static uint32_t lastResolve = 0;
 String topicBase = MQTT_BASE_TOPIC;
 
 // In PSRAM: internal RAM is kept for TLS (mbedTLS allocates only there in this core).
@@ -649,8 +656,37 @@ static void joinNetwork() {
     usingWss = false;
   }
   mqttHost = host;
+  mqttPort = n.mqttPort, wakeNameOn = n.wakeName;
+  localName = host.endsWith(".local") ? host.substring(0, host.length() - 6) : "";
+  voiceUrlTemplate = n.voiceUrl;
+  lastResolve = 0;
   mqtt.setServer(mqttHost.c_str(), n.mqttPort);
   voiceSetUrl(n.voiceUrl, n.wakeName);
+}
+
+// The address of a ".local" host now; false while it cannot be found (then no connect is tried).
+static bool resolveLocal() {
+  if (!localName.length()) return true;
+  if (lastResolve && millis() - lastResolve < 30000) return true;
+  static bool mdnsUp = false;
+  if (!mdnsUp) mdnsUp = MDNS.begin(("stackchan-" + String((uint32_t)ESP.getEfuseMac(), HEX)).c_str());
+  lastResolve = millis();
+  const IPAddress ip = MDNS.queryHost(localName.c_str(), 1500);
+  if (ip == IPAddress()) {
+    M5_LOGW("mdns: %s.local not found", localName.c_str());
+    lastResolve = 0;
+    return false;
+  }
+  const String addr = ip.toString();
+  if (addr != mqttHost) {
+    M5_LOGW("mdns: %s.local is %s", localName.c_str(), addr.c_str());
+    mqttHost = addr;
+    mqtt.setServer(mqttHost.c_str(), mqttPort);
+    String url = voiceUrlTemplate;
+    url.replace(localName + ".local", addr);
+    voiceSetUrl(url.c_str(), wakeNameOn);
+  }
+  return true;
 }
 
 static void ensureConnected() {
@@ -674,6 +710,7 @@ static void ensureConnected() {
   static uint32_t lastTry = 0;
   if (millis() - lastTry < 2000) return;
   lastTry = millis();
+  if (!resolveLocal()) return;
   String id = "stackchan-" + String((uint32_t)ESP.getEfuseMac(), HEX);
   bool ok = strlen(MQTT_USER) ? mqtt.connect(id.c_str(), MQTT_USER, MQTT_PASSWORD) : mqtt.connect(id.c_str());
   if (ok) {
@@ -693,6 +730,7 @@ static void ensureConnected() {
     M5_LOGI("MQTT connected as %s", id.c_str());
   } else {
     M5_LOGW("MQTT connect failed, state %d", mqtt.state());
+    lastResolve = 0;  // the address may have changed: look it up again
   }
 }
 
