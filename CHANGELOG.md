@@ -2,6 +2,15 @@
 
 <!-- version list -->
 
+## v0.52.1 (2026-10-17)
+
+### Bug Fixes
+
+- **robot**: Wait for the avatar's tasks before drawing a QR or the preview; report why the robot
+  reset
+  ([`6f017ca`](https://github.com/dixonsatit/FlyBot/commit/6f017ca829acddb2442d5bd930e84d7bb8e4d212))
+
+
 ## v0.52.0 (2026-10-17)
 
 ### Features
