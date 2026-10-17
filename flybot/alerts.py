@@ -69,6 +69,7 @@ class Alerts:
         if report.get("reset") in CRASH_RESETS:
             last = report.get("last") or "ไม่ทราบ"
             self.notify("crash", f"หุ่นรีสตาร์ตเพราะ {report['reset']} ตอนกำลัง {last}"
+                                 + (f" loop ค้างที่ {report['loop']}" if report.get("loop") else "")
                                  + (f" (firmware {report['fw']})" if report.get("fw") else ""))
 
     def battery(self, level: int, someone_there: bool) -> None:

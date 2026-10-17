@@ -23,6 +23,7 @@
 #include <esp_sntp.h>
 #include "esp_camera.h"
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 #ifndef WIFI_LEGACY_RATES
 #define WIFI_LEGACY_RATES 1
 #endif
@@ -415,6 +416,10 @@ static uint8_t awakeBrightness = 0;
 // (not a power cut), so the next self-test can say "panic during preview-shutter".
 static RTC_NOINIT_ATTR char lastCrumb[32];
 void crumb(const char* what) { strlcpy(lastCrumb, what, sizeof lastCrumb); }
+// The step loop() is in (crumbs come from every task; this one only from the loop): after a
+// watchdog reset it says where the loop stopped.
+static RTC_NOINIT_ATTR char loopStep[24];
+static inline void step(const char* what) { strlcpy(loopStep, what, sizeof loopStep); }
 static const char* resetName(esp_reset_reason_t r) {
   switch (r) {
     case ESP_RST_POWERON: return "power-on";
@@ -813,12 +818,15 @@ void setup() {
   selfTestJson = report.toJson();
   {  // why the last run ended, and where
     const esp_reset_reason_t why = esp_reset_reason();
-    char last[sizeof lastCrumb + 1];
+    char last[sizeof lastCrumb + 1], at[sizeof loopStep + 1];
     strlcpy(last, why == ESP_RST_POWERON ? "" : lastCrumb, sizeof last);
-    for (char* p = last; *p; ++p)
-      if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') *p = '?';  // garbage after a power cut
-    char extra[128];
-    snprintf(extra, sizeof extra, ",\"reset\":\"%s\",\"last\":\"%s\",\"fw\":\"%s\"}", resetName(why), last, FW_VERSION);
+    strlcpy(at, why == ESP_RST_POWERON ? "" : loopStep, sizeof at);
+    for (char* p : {last, at})
+      for (; *p; ++p)
+        if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') *p = '?';  // garbage after a power cut
+    char extra[176];
+    snprintf(extra, sizeof extra, ",\"reset\":\"%s\",\"last\":\"%s\",\"loop\":\"%s\",\"fw\":\"%s\"}",
+             resetName(why), last, at, FW_VERSION);
     selfTestJson.remove(selfTestJson.length() - 1);
     selfTestJson += extra;
     crumb("boot");
@@ -1009,6 +1017,7 @@ static void otaStatus(const char* json) {
 }
 
 static void otaProgress(int pct) {
+  esp_task_wdt_reset();  // a slow download is not a hang
   auto& d = M5.Display;
   d.fillRect(40, 150, 240 * pct / 100, 16, TFT_GREEN);
   static int lastSent = -1;
@@ -1063,27 +1072,51 @@ static void serviceOta() {
 
 bool heapCheck(const char* where);  // voice.cpp
 
+// On 2026-10-17 the robot hung for 40 min (no MQTT, no reset) until someone pressed reset.
+// A loop stuck this long now panics and restarts; the self-test then names the last step.
+static constexpr uint32_t LOOP_WDT_S = 30;
+
 void loop() {
+  static bool wdtOn = false;
+  if (!wdtOn) {
+    wdtOn = true;
+    esp_task_wdt_init(LOOP_WDT_S, true);
+    esp_task_wdt_add(nullptr);
+  }
+  esp_task_wdt_reset();
   static uint32_t lastHeapCheck = 0;
   if (millis() - lastHeapCheck > 1000) {
     lastHeapCheck = millis();
     heapCheck("(periodic)");
   }
+  step("m5");
   M5.update();
+  step("ota");
   serviceOta();
+  step("preview");
   servicePreview();
+  step("qr");
   if (!previewShown) serviceQr();  // a QR that came during the countdown waits for it
+  step("sleep");
   serviceSleep();
+  step("voice");
   voiceUpdate();
+  step("status");
   publishStatus();
+  step("connect");
   ensureConnected();
   // PubSubClient handles one message per loop(): at ~20 loops/s and 20 commands/s plus the rest,
   // the backlog grew until announcements played minutes late. Drain what has arrived.
+  step("mqtt");
   mqtt.loop();
   for (int i = 0; i < 16 && wifiAvailable(); ++i) mqtt.loop();
+  step("tones");
   serviceTones();
+  step("servo");
   servoUpdate();
+  step("body");
   serviceBody();
+  step("clock");
   serviceClock();
   if (!mqtt.connected()) {
     if (cameraOk) {  // keep the frame buffers moving so the driver never runs out
@@ -1098,10 +1131,13 @@ void loop() {
   if (cameraOk && !previewShown && (snapshotRequested || streaming)) {
     snapshotRequested = false;
     lastStreamMs = millis();
+    step("snapshot");
     publishSnapshot();
   }
+  step("camera");
   if (cameraOk && !previewShown) processCamera();  // the preview takes every frame
   FaceResult face;
+  step("face");
   if (faceTake(&face)) {
     tele.faceFound = face.found, tele.faceX = face.x, tele.faceY = face.y, tele.faceMs = face.inferMs;
     char buf[160];
@@ -1112,6 +1148,7 @@ void loop() {
   }
 
   SoundDirection dir;
+  step("sound");
   if (voiceTakeDirection(&dir)) {
     char buf[120];
     int n = snprintf(buf, sizeof buf, "{\"lag\":%.2f,\"ild_db\":%.1f,\"corr\":%.2f,\"pan\":%.1f,\"tilt\":%.1f}",
@@ -1124,6 +1161,7 @@ void loop() {
   const uint32_t now = millis();
   if (proximityOk && now - lastPs >= PROXIMITY_PERIOD_MS) {
     lastPs = now;
+    step("proximity");
     publishProximity();
   }
 }
