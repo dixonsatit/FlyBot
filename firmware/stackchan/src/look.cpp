@@ -30,6 +30,7 @@ Colors colorsFor(Expression e) {
 }
 
 Colors current;  // read by the draw task each frame
+volatile bool holdWanted = false, parked = false;
 
 class RoundEye final : public Drawable {
  public:
@@ -64,6 +65,12 @@ class RoundEye final : public Drawable {
 class SoftMouth final : public Drawable {
  public:
   void draw(M5Canvas* spr, BoundingRect rect, DrawContext* ctx) override {
+    // the first part drawn each frame, into the canvas only: a safe place for the draw task to wait
+    if (holdWanted) {
+      parked = true;
+      while (holdWanted) vTaskDelay(pdMS_TO_TICKS(5));
+      parked = false;
+    }
     const float open = ctx->getMouthOpenRatio(), breath = std::min(1.0f, ctx->getBreath());
     const int x = rect.getLeft(), y = rect.getTop() + breath * 2;
     // blush below and outside the eyes, under the mouth so it never covers it
@@ -104,6 +111,14 @@ void lookBegin(Avatar& avatar) {
   avatar.setColorPalette(paletteFor(current));
   avatar.init(16);
 }
+
+bool lookHold(uint32_t timeoutMs) {
+  holdWanted = true;
+  for (uint32_t t0 = millis(); !parked && millis() - t0 < timeoutMs;) delay(5);
+  return parked;
+}
+
+void lookRelease() { holdWanted = false; }
 
 void lookExpression(Avatar& avatar, Expression e) {
   current = colorsFor(e);

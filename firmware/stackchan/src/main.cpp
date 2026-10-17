@@ -787,23 +787,12 @@ static bool wifiAvailable() {  // bytes waiting on the MQTT connection, whicheve
   return mqtt.connected() && (usingWss ? wssClient.available() : wifiClient.available()) > 0;
 }
 
-// Stop the avatar and wait until its draw and facial tasks have really ended: drawing on the
-// screen while the draw task still holds the SPI bus panicked in spiEndTransaction (2026-10-17,
-// a QR right after the photo preview). The fixed 120 ms wait was enough for the 1-bit face but
-// not for the 16-bit one.
-static void avatarPause() {
-  const UBaseType_t tasks = uxTaskGetNumberOfTasks();
-  avatar.stop();
-  for (uint32_t t0 = millis(); uxTaskGetNumberOfTasks() + 2 > tasks && millis() - t0 < 1500;) delay(10);
-  delay(20);
-}
-
 static void hideQr() {
   if (!qrShown) return;
   crumb("qr-hide");
   qrShown = false;
   M5.Display.fillScreen(TFT_BLACK);
-  avatar.start(16);
+  lookRelease();
   faceDirty = true;  // the next command puts the expression back
 }
 
@@ -815,7 +804,7 @@ static void serviceQr() {
     if (!qrShown) {
       // stop() lets the draw/facial tasks finish their frame and exit (they delay 10/33 ms);
       // drawing over a suspended frame would leave its half-pushed sprite on the bus
-      avatarPause();
+      if (!lookHold()) M5_LOGW("screen: the avatar did not park");
       qrShown = true;
     }
     auto& d = M5.Display;
@@ -850,7 +839,7 @@ static void endPreview() {
   crumb("preview-end");
   previewShown = false;
   M5.Display.fillScreen(TFT_BLACK);
-  avatar.start(16);
+  lookRelease();
   faceDirty = true;
 }
 
@@ -871,7 +860,7 @@ static void servicePreview() {
     }
     crumb("preview-start");
     if (!previewShown && !qrShown) {
-      avatarPause();
+      if (!lookHold()) M5_LOGW("screen: the avatar did not park");
     }
     previewShown = true;
     previewStart = millis();
