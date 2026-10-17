@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.53.0 (2026-10-17)
+
+### Features
+
+- **firmware**: Find the relay by its .local name over mDNS instead of a fixed IP
+  ([`5b240fc`](https://github.com/dixonsatit/FlyBot/commit/5b240fcae0e695339841d522d1044e324fdc731e))
+
+- **voice**: Take a sentence without the robot's name while a known face is facing it
+  ([`bda9de0`](https://github.com/dixonsatit/FlyBot/commit/bda9de0fcc9b5e60aa68f49109699b0d0d1f2239))
+
+
 ## v0.52.2 (2026-10-17)
 
 ### Bug Fixes
