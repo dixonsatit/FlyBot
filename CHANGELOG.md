@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.54.0 (2026-10-17)
+
+### Features
+
+- **photos**: Delete photos older than 30 days, checked hourly as well as on save
+  ([`617f560`](https://github.com/dixonsatit/FlyBot/commit/617f560a4ebc095827691db99168c43b4450c663))
+
+
 ## v0.53.0 (2026-10-17)
 
 ### Features
