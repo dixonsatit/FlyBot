@@ -53,6 +53,9 @@ CALL_REPLY = "ว่าไงครับ"
 # "ไปพักได้ เดี๋ยวเรียก": rest until called by name (no greetings, no small talk, sleepy face)
 REST_RE = re.compile(r"ไป\s*(พัก|นอน)|(พัก|นอน|หลับ)\s*(ก่อน|ได้แล้ว|ได้|เถอะ)|โหมดพัก")
 REST_REPLY = "ได้ครับ หนูพักก่อนนะครับ อยากคุยเมื่อไหร่เรียกน้องหวี่ได้เลย"
+# A greeting alone opens a turn when awake, but doesn't wake a resting robot: a sigh ("เฮ้ออ")
+# or a hello to someone else did on 2026-10-17. Resting, the name itself has to be there.
+GREETING_RE = re.compile(r"^\s*(สวัสดี|หวัดดี|ฮัลโหล|ฮัลโล|เฮ้|hello|hi\b|hey)\S*", re.IGNORECASE)
 # "น้องหวี่ ขยับหัว": for HEAD_MODE_S the head takes single words ("ซ้าย", "อีก", "ลง", "พอ") without
 # the name; single words survive the ASR better than sentences.
 HEAD_MODE_RE = re.compile(r"(ขยับ|บังคับ|คุม)\s*หัว|โหมด\s*(ขยับ|บังคับ|หัว)")
@@ -1159,7 +1162,7 @@ class Dashboard:
                     except Exception as e:
                         log.warning("voice: could not start history taking: %s", e)
                 if dash.resting:
-                    if not (text and dash.wake.search(text)):  # resting: everything but its name is ignored
+                    if not (text and dash.wake.search(GREETING_RE.sub("", text, count=1))):  # resting: only its name
                         log.info("voice: resting, heard %r -> 204", text)
                         return self._send(204, b"", "audio/wav")
                     dash.rest(False)

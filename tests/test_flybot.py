@@ -948,6 +948,10 @@ def test_voice_turn_via_dashboard(gains):
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         heard["text"] = "มี"  # a short word is no call while resting
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
+        heard["text"] = "เฮ้ออ"  # a sigh: a greeting word alone doesn't wake it
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204 and dash.resting
+        heard["text"] = "สวัสดีครับทุกคน"
+        assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204 and dash.resting
         assert dash.announce("มี PR รอรีวิว") and dash.held[-1] == "มี PR รอรีวิว"  # small news waits
         heard["text"] = "น้องหวี่"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and not dash.resting
