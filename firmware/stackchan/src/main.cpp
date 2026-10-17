@@ -10,6 +10,8 @@
 //            <base>/selftest          boot self-test result (retained), see selftest.cpp
 //            <base>/screen/qr         {"url","text","seconds"}: full-screen QR (ThaID pairing); url "" clears
 //            <base>/screen/preview    {"seconds"}: camera preview with a countdown, then the photo on <base>/snapshot
+//            <base>/ota               {"path","size","md5"}: update the firmware from the bridge (see ota.h),
+//                                     progress and result on <base>/ota/status
 #include <M5CoreS3.h>
 #include <Avatar.h>
 #include "look.h"
@@ -25,6 +27,8 @@
 #endif
 #include "img_converters.h"
 #include "selftest.h"
+#include "fw_version.h"
+#include "ota.h"
 #include "servo_drv.h"
 #include "face.h"
 #include "leds.h"
@@ -445,6 +449,10 @@ static void publishSnapshot() {
   free(jpg);
 }
 
+static String otaPath, otaMd5, voiceUrlNow;
+static size_t otaSize = 0;
+static volatile bool otaPending = false;
+
 static void onCommand(char* topic, byte* payload, unsigned int len) {
   if (topicBase + "/snapshot/request" == topic) {
     snapshotRequested = true;
@@ -484,6 +492,16 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     float seconds = deserializeJson(a, payload, len) ? 3.0f : float(a["seconds"] | 3.0f);
     previewMs = uint32_t(constrain(seconds, 1.0f, 10.0f) * 1000);
     previewPending = true;
+    return;
+  }
+  if (topicBase + "/ota" == topic) {
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len) && a["path"].is<const char*>()) {
+      otaPath = a["path"].as<String>();
+      otaSize = a["size"] | 0;
+      otaMd5 = a["md5"] | "";
+      otaPending = true;
+    }
     return;
   }
   if (topicBase + "/announce" == topic) {  // the bridge wants to say something: {"id": "..."}
@@ -662,6 +680,7 @@ static void joinNetwork() {
   lastResolve = 0;
   mqtt.setServer(mqttHost.c_str(), n.mqttPort);
   voiceSetUrl(n.voiceUrl, n.wakeName);
+  voiceUrlNow = n.voiceUrl;
 }
 
 // The address of a ".local" host now; false while it cannot be found (then no connect is tried).
@@ -685,6 +704,7 @@ static bool resolveLocal() {
     String url = voiceUrlTemplate;
     url.replace(localName + ".local", addr);
     voiceSetUrl(url.c_str(), wakeNameOn);
+    voiceUrlNow = url;
   }
   return true;
 }
@@ -722,12 +742,14 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/camera/stream").c_str(), 0);
     mqtt.subscribe((topicBase + "/screen/qr").c_str(), 0);
     mqtt.subscribe((topicBase + "/screen/preview").c_str(), 0);
+    mqtt.subscribe((topicBase + "/ota").c_str(), 0);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
       selfTestJson = "";
     }
     M5_LOGI("MQTT connected as %s", id.c_str());
+    otaConfirm();  // a new image that reached the broker can be updated again: keep it
   } else {
     M5_LOGW("MQTT connect failed, state %d", mqtt.state());
     lastResolve = 0;  // the address may have changed: look it up again
@@ -785,8 +807,8 @@ void setup() {
     strlcpy(last, why == ESP_RST_POWERON ? "" : lastCrumb, sizeof last);
     for (char* p = last; *p; ++p)
       if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') *p = '?';  // garbage after a power cut
-    char extra[96];
-    snprintf(extra, sizeof extra, ",\"reset\":\"%s\",\"last\":\"%s\"}", resetName(why), last);
+    char extra[128];
+    snprintf(extra, sizeof extra, ",\"reset\":\"%s\",\"last\":\"%s\",\"fw\":\"%s\"}", resetName(why), last, FW_VERSION);
     selfTestJson.remove(selfTestJson.length() - 1);
     selfTestJson += extra;
     crumb("boot");
@@ -947,6 +969,63 @@ static void servicePreview() {
   c->pushSprite(&d, 0, 0);
 }
 
+static void otaStatus(const char* json) {
+  mqtt.publish((topicBase + "/ota/status").c_str(), json);
+}
+
+static void otaProgress(int pct) {
+  auto& d = M5.Display;
+  d.fillRect(40, 150, 240 * pct / 100, 16, TFT_GREEN);
+  static int lastSent = -1;
+  if (pct / 20 != lastSent) {  // every 20 %: enough to see it move without flooding the broker
+    lastSent = pct / 20;
+    char buf[32];
+    snprintf(buf, sizeof buf, "{\"progress\":%d}", pct);
+    otaStatus(buf);
+    mqtt.loop();
+  }
+}
+
+// The whole update runs here, in the loop task: nothing else draws, moves or publishes meanwhile.
+static void serviceOta() {
+  if (!otaPending) return;
+  otaPending = false;
+  // the image comes from the voice server, which the robot already reaches on this network
+  const int slash = voiceUrlNow.indexOf('/', voiceUrlNow.indexOf("//") + 2);
+  if (slash < 0 || !otaPath.startsWith("/")) return otaStatus("{\"error\":\"no voice URL to fetch from\"}");
+  const String url = voiceUrlNow.substring(0, slash) + otaPath;
+  crumb("ota");
+  M5_LOGW("ota: %s (%u bytes)", url.c_str(), (unsigned)otaSize);
+  if (previewShown) endPreview();
+  if (qrShown) hideQr();
+  if (!lookHold()) M5_LOGW("screen: the avatar did not park");
+  auto& d = M5.Display;
+  d.fillScreen(TFT_BLACK);
+  d.setFont(&thaiFont);
+  d.setTextSize(1.5f);
+  d.setTextColor(TFT_WHITE, TFT_BLACK);
+  d.setTextDatum(middle_center);
+  d.drawString("กำลังอัปเดต", d.width() / 2, 110);
+  d.drawRect(38, 148, 244, 20, TFT_WHITE);
+  const String err = otaRun(url, otaSize, otaMd5, otaProgress);
+  if (err.length()) {
+    M5_LOGE("ota: %s", err.c_str());
+    JsonDocument r;
+    r["error"] = err;
+    String out;
+    serializeJson(r, out);
+    otaStatus(out.c_str());
+    d.fillScreen(TFT_BLACK);
+    lookRelease();
+    faceDirty = true;
+    return;
+  }
+  otaStatus("{\"ok\":true,\"restarting\":true}");
+  for (int i = 0; i < 10; ++i, delay(30)) mqtt.loop();  // let the status go out
+  crumb("ota-restart");
+  ESP.restart();
+}
+
 bool heapCheck(const char* where);  // voice.cpp
 
 void loop() {
@@ -956,6 +1035,7 @@ void loop() {
     heapCheck("(periodic)");
   }
   M5.update();
+  serviceOta();
   servicePreview();
   if (!previewShown) serviceQr();  // a QR that came during the countdown waits for it
   voiceUpdate();

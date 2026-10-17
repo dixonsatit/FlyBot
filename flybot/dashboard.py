@@ -113,6 +113,8 @@ FILLERS = {
 
 # What the robot itself calls, with its own (MQTT) login
 ROBOT_PATHS = ("/api/voice", "/api/pat", "/api/announce/", "/api/filler/")
+FIRMWARE_MAX = 0x640000  # one app slot in the robot's partition table
+FIRMWARE_S = 600.0  # the download link for the robot lasts this long
 MAX_FAILURES, LOCKOUT_S = 8, 300.0
 
 PAT_LINES = (
@@ -269,6 +271,7 @@ class Dashboard:
         self.feed: collections.deque = collections.deque(maxlen=80)
         self._feed_id = 0
         self._lock = threading.Lock()
+        self._firmware: tuple[str, bytes, float] | None = None  # (token, image, expires) for the robot
         self.last_cmd: dict = {}
         self.page = resources.files("flybot").joinpath("web/dashboard.html").read_bytes()
         self.server = ThreadingHTTPServer(("0.0.0.0", port), self._handler())
@@ -688,6 +691,29 @@ class Dashboard:
             raise ValueError("assistant memory is off (--state-dir)")
         return store
 
+    def send_firmware(self, image: bytes) -> dict:
+        """Hold ``image`` behind a one-off link and tell the robot to update from it."""
+        import hashlib
+        import secrets
+        if len(image) < 0x10000 or image[0] != 0xE9:  # ESP32 app images start with this byte
+            raise ValueError("not an ESP32 firmware image (use .pio/build/<env>/firmware.bin)")
+        b = self.bridge
+        if not (getattr(b, "robot_seen", 0) and time.time() - b.robot_seen < 15):
+            raise ValueError("the robot is offline")
+        token, md5 = secrets.token_urlsafe(16), hashlib.md5(image).hexdigest()
+        with self._lock:
+            self._firmware = (token, image, time.monotonic() + FIRMWARE_S)
+        b.send_ota(f"/fw/{token}.bin", len(image), md5)
+        log.info("firmware: %d bytes (md5 %s) offered to the robot", len(image), md5)
+        return {"ok": True, "size": len(image), "md5": md5}
+
+    def firmware(self, token: str) -> bytes | None:
+        with self._lock:
+            fw = self._firmware
+        if fw and time.monotonic() < fw[2] and hmac.compare_digest(token, fw[0]):
+            return fw[1]
+        return None
+
     def overview(self) -> dict:
         """Everything the status bar and the status page show, in one call."""
         b, c = self.bridge, self.bridge.controller
@@ -700,6 +726,7 @@ class Dashboard:
             "now": time.time(),
             "robot": {"online": bool(seen) and time.time() - seen < 15, "seen_ago": round(time.time() - seen) if seen else None,
                       "power": getattr(b, "power", {}), "selftest": getattr(b, "selftest", {}),
+                      "ota": getattr(b, "ota_status", {}),
                       "pan": round(c.pan, 1), "tilt": round(c.tilt, 1), "expression": c.mb.expression},
             "broker": b.client.is_connected(),
             "presence": {"on": presence is not None, "present": bool(presence and presence.present),
@@ -916,6 +943,9 @@ class Dashboard:
             def do_GET(self):
                 if self.path == "/healthz":
                     return self._send(200, b"ok", "text/plain")
+                if self.path.startswith("/fw/"):  # the robot fetching an update: the token is the key
+                    image = dash.firmware(self.path[4:].split("?")[0].removesuffix(".bin"))
+                    return self._send(200, image, "application/octet-stream") if image else self._json(404, {"error": "gone"})
                 if self.path.startswith("/p/"):  # a shared photo: the token is the key, no login
                     return self._shared_photo(self.path[3:].split("?")[0])
                 if not self._auth():
@@ -1022,6 +1052,10 @@ class Dashboard:
                     if self.path.split("?")[0] == "/api/voice":  # PCM 16 kHz mono s16le in, WAV out
                         # ?wake=1: hands-free speech, answered only when it calls the robot by name
                         return self._voice(self.rfile.read(length), wake="wake=1" in self.path)
+                    if self.path == "/api/firmware":  # firmware.bin from `pio run`, sent to the robot
+                        if not 0 < length <= FIRMWARE_MAX:
+                            return self._json(413, {"error": f"firmware must be 1..{FIRMWARE_MAX} bytes"})
+                        return self._json(200, dash.send_firmware(self.rfile.read(length)))
                     if self.path == "/api/pat":  # the robot's head was stroked
                         return self._pat()
                     body = json.loads(self.rfile.read(length) or b"{}")

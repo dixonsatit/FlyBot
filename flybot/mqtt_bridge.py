@@ -66,6 +66,7 @@ class StackChanBridge:
         self.power: dict = {}  # last <base>/sensor/power
         self.robot_seen = 0.0  # wall clock of the robot's last message
         self.selftest: dict = {}  # its last boot self-test
+        self.ota_status: dict = {}  # the last firmware update: sent, progress, ok or error
         self._battery_warned, self._battery_warned_at = 0, -float("inf")  # stage said: 1 = 20%, 2 = 10%
         self._jpeg_at = 0.0  # monotonic time the last frame arrived
         self._jpeg_cond = threading.Condition()
@@ -109,6 +110,11 @@ class StackChanBridge:
             ok = self._jpeg_cond.wait_for(lambda: self._jpeg_at > start + seconds - 0.5, seconds + timeout)
             return self._jpeg if ok else None
 
+    def send_ota(self, path: str, size: int, md5: str) -> None:
+        """Tell the robot to update its firmware from ``path`` on the dashboard (see firmware ota.h)."""
+        self.ota_status = {"sent": time.time(), "size": size, "md5": md5, "at": time.time()}
+        self.client.publish(f"{self.base}/ota", json.dumps({"path": path, "size": size, "md5": md5}), qos=1)
+
     def stream(self, seconds: float = 20.0, fps: int = 4) -> None:
         """Have the robot send frames by itself for ``seconds`` (renewed while someone watches)."""
         now = time.monotonic()
@@ -124,6 +130,7 @@ class StackChanBridge:
         for kind in SENSOR_KINDS:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
         client.subscribe(f"{self.base}/selftest", qos=1)
+        client.subscribe(f"{self.base}/ota/status", qos=0)
         client.subscribe(f"{self.base}/sensor/face", qos=0)
         client.subscribe(f"{self.base}/sensor/power", qos=0)
         client.subscribe(f"{self.base}/event/body", qos=0)
@@ -143,6 +150,14 @@ class StackChanBridge:
             return
         if msg.topic == f"{self.base}/sensor/face":
             self._on_face(msg.payload)
+            return
+        if msg.topic == f"{self.base}/ota/status":
+            try:
+                status = json.loads(msg.payload)
+            except ValueError:
+                return
+            (log.warning if "error" in status else log.info)("Robot firmware update: %s", status)
+            self.ota_status = {**self.ota_status, **status, "at": time.time()}
             return
         if msg.topic == f"{self.base}/event/body":
             self._on_body(msg.payload)

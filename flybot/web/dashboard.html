@@ -251,6 +251,12 @@ video { width: 100%; border-radius: 10px; transform: scaleX(-1); background: #00
     <div>
       <div class="card"><h2>ระบบ</h2><dl class="kv" id="sysKv"></dl></div>
       <div class="card"><h2>Self-test ของหุ่น (ตอนเปิดเครื่อง)</h2><div id="selftest" class="hint">ยังไม่มีข้อมูล</div></div>
+      <div class="card"><h2>อัปเดต firmware ผ่าน WiFi</h2>
+        <p class="hint">เลือกไฟล์ <code>.pio/build/stackchan-official/firmware.bin</code> หุ่นจะดาวน์โหลด ตรวจ MD5 แล้วรีสตาร์ต
+          ถ้า firmware ใหม่ต่อ MQTT ไม่ได้ หุ่นจะกลับไปใช้ตัวเดิมเองเมื่อรีสตาร์ตครั้งถัดไป</p>
+        <div class="row"><input type="file" id="fwFile" accept=".bin"><button id="fwSend">ส่งให้หุ่น</button></div>
+        <div id="fwStatus" class="hint"></div><div id="errFw" class="err"></div>
+      </div>
     </div>
     <div class="card"><h2>เสียงล่าสุดที่หุ่นได้ยิน <span class="sp"></span><button id="voiceReload">รีเฟรช</button></h2>
       <p class="hint">ใช้ไล่ว่าทำไมหุ่นไม่ตอบ: กดเล่นเพื่อฟังเสียงที่หุ่นอัดได้จริง</p>
@@ -355,13 +361,29 @@ async function loadOverview() {
   const st = r.selftest || {};
   if (st.items) $("selftest").innerHTML = `<div class="row">${st.items.map((i) =>
       `<span class="tag ${i.ok ? "ok" : "bad"}" title="${esc(i.detail)}">${i.ok ? "✓" : "✗"} ${esc(i.name)}</span>`).join("")}</div>
-      <div class="hint">${st.at ? new Date(st.at * 1000).toLocaleString("th-TH") : ""}</div>`;
+      <div class="hint">${st.at ? new Date(st.at * 1000).toLocaleString("th-TH") : ""}${st.fw ? ` · firmware ${esc(st.fw)}` : ""}${st.reset ? ` · รีสตาร์ตเพราะ ${esc(st.reset)}` : ""}</div>`;
+  const ota = (ov.robot && ov.robot.ota) || {};
+  $("fwStatus").textContent = ota.error ? `อัปเดตไม่สำเร็จ: ${ota.error}`
+    : ota.ok ? "เขียนเสร็จ หุ่นกำลังรีสตาร์ต"
+    : ota.progress != null ? `กำลังอัปเดต ${ota.progress}%`
+    : ota.sent ? "ส่งให้หุ่นแล้ว รอหุ่นเริ่มดาวน์โหลด" : "";
   $("cfgKv").innerHTML = [["คำปลุก (regex)", ov.voice.wake], ["คุยต่อได้โดยไม่เรียกชื่อ", ov.voice.follow_up_s + " วินาทีหลังตอบ"]]
     .map(([k, v]) => `<dt>${esc(k)}</dt><dd><code>${esc(v)}</code></dd>`).join("");
   const sel = $("personality");
   if (!sel.options.length) for (const n of ov.personalities) sel.add(new Option(n, n));
   if (document.activeElement !== sel) sel.value = ov.personality;
 }
+$("fwSend").onclick = async () => {
+  const f = $("fwFile").files[0];
+  if (!f) return;
+  $("errFw").textContent = "";
+  try {
+    const r = await fetch("/api/firmware", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+    const j = await r.json().catch(() => ({}));
+    $("errFw").textContent = r.ok ? "" : (j.error || r.statusText);
+    if (r.ok) $("fwStatus").textContent = `ส่งแล้ว ${Math.round(j.size / 1024)} KB`;
+  } catch (e) { $("errFw").textContent = "ส่งไม่สำเร็จ: " + e.message; }
+};
 $("personality").onchange = (e) => post("/api/personality", { name: e.target.value }, "errSet");
 loadOverview(); setInterval(loadOverview, 3000);
 

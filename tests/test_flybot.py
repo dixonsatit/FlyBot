@@ -2209,3 +2209,44 @@ def test_face_tracker_turns_gently(gains):
     now[0] += 4
     t.step()
     assert len(moved) == 2
+
+
+def test_firmware_update_is_offered_to_the_robot_behind_a_one_off_link(gains):
+    import base64 as _b64
+    import hashlib
+    import json as _json
+    import time as _time
+    import urllib.error
+    import urllib.request
+    from flybot.dashboard import Dashboard
+    bridge = _FakeBridge(BrainController(ControllerConfig(backend="rate"), gains=gains))
+    sent = []
+    bridge.send_ota = lambda path, size, md5: sent.append((path, size, md5))
+    bridge.robot_seen = 0.0
+    dash = Dashboard(bridge, port=0, user="admin", password="pw")
+    dash.robot_user, dash.robot_password = "stackchan", "rpw"
+    dash.start()
+
+    def upload(data, auth="admin:pw"):
+        req = urllib.request.Request(f"http://127.0.0.1:{dash.port}/api/firmware", data=data, method="POST",
+                                     headers={"Authorization": "Basic " + _b64.b64encode(auth.encode()).decode()})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, _json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    image = b"\xe9" + bytes(0x20000)
+    try:
+        assert upload(image, auth="stackchan:rpw")[0] == 401  # the robot's password can't push firmware
+        assert upload(image)[0] == 400  # robot offline: nobody to take it
+        bridge.robot_seen = _time.time()
+        assert upload(b"\x00" + bytes(0x20000))[0] == 400  # not an ESP32 image
+        code, body = upload(image)
+        assert code == 200 and body["md5"] == hashlib.md5(image).hexdigest() and not sent[0][0].startswith("/api/")
+        path, size, md5 = sent[0]
+        assert size == len(image) and md5 == body["md5"]
+        assert _http(dash.port, "GET", path) == (200, image)  # no login: the token is the key
+        assert _http(dash.port, "GET", "/fw/guess.bin")[0] == 404
+    finally:
+        dash.stop()

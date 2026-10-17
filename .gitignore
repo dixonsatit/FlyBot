@@ -6,6 +6,7 @@ data/
 .venv/
 firmware/*/.pio/
 firmware/*/src/flybot_config.h
+firmware/*/src/fw_version.h
 *.key
 firmware/*/backup/
 

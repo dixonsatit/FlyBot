@@ -27,6 +27,7 @@ data:
     topic write stackchan/selftest
     topic write stackchan/event/#
     topic write stackchan/debug/#
+    topic write stackchan/ota/status
     topic read stackchan/command
     topic read stackchan/snapshot/request
     topic read stackchan/announce
@@ -35,6 +36,7 @@ data:
     topic read stackchan/camera/stream
     topic read stackchan/screen/qr
     topic read stackchan/screen/preview
+    topic read stackchan/ota
 ---
 apiVersion: apps/v1
 kind: Deployment

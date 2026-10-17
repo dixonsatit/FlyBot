@@ -1,7 +1,7 @@
 #include "voice.h"
 
+#include "net.h"
 #include "params.h"
-#include "root_ca.h"
 
 #include <Avatar.h>
 #include <HTTPClient.h>
@@ -319,21 +319,6 @@ static void amplify(uint8_t* w, size_t len) {
   }
 }
 
-// https:// (the public endpoint) checks the server against the hospital certificate's roots.
-static void beginUrl(HTTPClient& http, const String& url) {
-  if (!url.startsWith("https://")) http.begin(url);
-#if HAVE_ROBOT_CERT
-  else {  // mTLS at the public endpoint; this overload wants host, port and path apart
-    const int slash = url.indexOf('/', 8);
-    const String hostPort = slash < 0 ? url.substring(8) : url.substring(8, slash);
-    const int colon = hostPort.indexOf(':');
-    http.begin(colon < 0 ? hostPort : hostPort.substring(0, colon), colon < 0 ? 443 : hostPort.substring(colon + 1).toInt(),
-               slash < 0 ? String("/") : url.substring(slash), KKH_ROOT_CA, ROBOT_CLIENT_CERT, ROBOT_CLIENT_KEY);
-  }
-#else
-  else http.begin(url, KKH_ROOT_CA);
-#endif
-}
 
 // vTaskDelete() never returns, so locals' destructors don't run: the request lives in its own
 // function and closes its socket explicitly (each turn leaked one until the 16 ran out).
@@ -342,7 +327,7 @@ static int voiceRequest() {
   http.setReuse(false);
   String url = voiceUrl;
   url.replace("/api/voice", path);
-  beginUrl(http, url);
+  httpBegin(http, url);
   http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
   http.addHeader("Content-Type", "application/octet-stream");
   http.setConnectTimeout(5000);
@@ -387,7 +372,7 @@ static void fetchFiller(int i) {
   http.setReuse(false);
   String url = voiceUrl;
   url.replace("/api/voice", String("/api/filler/") + FILLER_NAMES[i]);
-  beginUrl(http, url);
+  httpBegin(http, url);
   http.setAuthorization(VOICE_USER, VOICE_PASSWORD);
   http.setConnectTimeout(5000);
   http.setTimeout(20000);
