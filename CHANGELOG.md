@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v0.57.0 (2026-10-17)
+
+### Features
+
+- **k8s**: Nightly backup of faces, LINE contacts, memory and the brain to NFS
+  ([`ad4294d`](https://github.com/dixonsatit/FlyBot/commit/ad4294dca941c3184f686bfb58f0ee5d886c3599))
+
+- **robot**: The screen goes dark while resting and lights when called by name
+  ([`10f0cac`](https://github.com/dixonsatit/FlyBot/commit/10f0cac9d5db07e01359c5bf8f3e7beb8a7ff366))
+
+
 ## v0.56.1 (2026-10-17)
 
 ### Bug Fixes
