@@ -1,0 +1,80 @@
+# Nightly copy of what can't be made again: known faces, LINE contacts, notes and memory (postgres)
+# and the twin's brain. Kept 7 days on NFS (192.168.3.20), a different machine from the CephFS
+# volumes it copies, so a broken Ceph or a mistaken delete leaves last night's copy.
+# Photos and voice clips are left out: they are people's faces and voices (PDPA), and the robot
+# deletes them on its own schedule; a backup would keep them longer than that.
+#   restore: tar xzf /backup/<date>/state.tgz -C /state ; gunzip -c memory.sql.gz | psql ...
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flybot-backup
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: nfs-csi
+  resources:
+    requests: {storage: 2Gi}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flybot-backup
+spec:
+  schedule: "30 2 * * *"
+  timeZone: Asia/Bangkok
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            seccompProfile: {type: RuntimeDefault}
+          initContainers:
+            # nfs-csi makes the share root-owned; the copy runs as the files' owner, not root
+            - name: own
+              image: busybox:1.36
+              command: [sh, -c, "chown 10001:10001 /backup && chmod 750 /backup"]
+              volumeMounts: [{name: backup, mountPath: /backup}]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL], add: [CHOWN, FOWNER]}
+          containers:
+            - name: backup
+              image: postgres:16-alpine  # pg_dump of the same major version as postgres.yaml
+              env:
+                - name: PGPASSWORD
+                  valueFrom: {secretKeyRef: {name: flybot-secrets, key: memory-db-password}}
+              command: [sh, -euc]
+              args:
+                - |
+                  day=$(date +%F); tmp=/backup/.$day; rm -rf "$tmp"; mkdir -p "$tmp"
+                  tar czf "$tmp/state.tgz" -C /state --exclude=./photos --exclude=./voice .
+                  tar czf "$tmp/brain.tgz" -C /brain .
+                  pg_dump -h postgres -U flybot flybot | gzip > "$tmp/memory.sql.gz"
+                  # a half-written night never replaces a whole one
+                  rm -rf "/backup/$day"; mv "$tmp" "/backup/$day"
+                  find /backup -mindepth 1 -maxdepth 1 -type d -name '20*' -mtime +7 -exec rm -rf {} +
+                  ls -la "/backup/$day"; du -sh /backup
+              volumeMounts:
+                - {name: state, mountPath: /state, readOnly: true}
+                - {name: brain, mountPath: /brain, readOnly: true}
+                - {name: backup, mountPath: /backup}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 10001  # owns the files on flybot-state / flybot-brain
+                runAsGroup: 10001
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - name: state
+              persistentVolumeClaim: {claimName: flybot-state, readOnly: true}
+            - name: brain
+              persistentVolumeClaim: {claimName: flybot-brain, readOnly: true}
+            - name: backup
+              persistentVolumeClaim: {claimName: flybot-backup}

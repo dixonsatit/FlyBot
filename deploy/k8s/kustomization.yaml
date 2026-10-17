@@ -12,6 +12,7 @@ resources:
   - bridge.yaml
   - postgres.yaml
   - ingress.yaml
+  - backup.yaml
 images:
   - name: flybot
     newName: ghcr.io/dixonsatit/flybot
