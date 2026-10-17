@@ -880,6 +880,9 @@ def test_voice_turn_via_dashboard(gains):
     published = []
     bridge.cortex = Cortex(_ScriptedLLM(lambda text, tools, img: "สวัสดีครับ ยินดีช่วยครับ"), bridge.controller,
                            lambda t, b: published.append(_json.loads(b)), "stackchan")
+    screen = []
+    bridge.client.publish = lambda topic, payload=None, **kw: topic.endswith("/screen/sleep") and screen.append(
+        (_json.loads(payload)["on"], kw.get("retain")))
     dash = Dashboard(bridge, port=0, tts=WayuTTS(url), stt=AsrClient(url))
     dash.start()
     try:
@@ -940,6 +943,7 @@ def test_voice_turn_via_dashboard(gains):
         assert len(published) == 7  # answered from the power report, no LLM turn
         heard["text"] = "น้องหวี่ ไปพักได้แล้ว เดี๋ยวเรียก"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and dash.resting
+        assert screen == [(True, True)]  # the screen goes dark, and stays so if the robot restarts
         heard["text"] = "หันซ้ายหน่อย"  # right after its reply, but resting: the name is needed
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 204
         heard["text"] = "มี"  # a short word is no call while resting
@@ -947,6 +951,7 @@ def test_voice_turn_via_dashboard(gains):
         assert dash.announce("มี PR รอรีวิว") and dash.held[-1] == "มี PR รอรีวิว"  # small news waits
         heard["text"] = "น้องหวี่"
         assert _http_raw(dash.port, "/api/voice?wake=1", b"\x10\x00" * 160)[0] == 200 and not dash.resting
+        assert screen[-1] == (False, True)
         dash._last_reply = -1e9
         bridge.presence = type("P", (), {"present": True, "note_voice": lambda self: None})()
         heard["text"] = "ดีหันหน้ามา"  # name lost, but at the desk and addressed to the robot

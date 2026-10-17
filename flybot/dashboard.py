@@ -499,7 +499,14 @@ class Dashboard:
         self.resting = on
         self._last_reply = -math.inf  # no follow-up window: the next sentence needs the name
         self.bridge.controller.rest(on)
+        self.publish_sleep()
         log.info("resting" if on else "woke up (called by name)")
+
+    def publish_sleep(self) -> None:
+        """The robot's screen follows rest mode. Retained, so a robot that restarts while resting
+        stays dark, and one that restarts after waking doesn't."""
+        b = self.bridge
+        b.client.publish(f"{b.base}/screen/sleep", json.dumps({"on": bool(self.resting)}), qos=1, retain=True)
 
     def intake_active(self) -> bool:
         return bool(self.intake and not self.intake.closed)

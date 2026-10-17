@@ -37,6 +37,7 @@ data:
     topic read stackchan/screen/qr
     topic read stackchan/screen/preview
     topic read stackchan/ota
+    topic read stackchan/screen/sleep
 ---
 apiVersion: apps/v1
 kind: Deployment

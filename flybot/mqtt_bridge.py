@@ -132,6 +132,8 @@ class StackChanBridge:
             client.subscribe(f"{self.base}/sensor/{kind}", qos=0)
         client.subscribe(f"{self.base}/selftest", qos=1)
         client.subscribe(f"{self.base}/ota/status", qos=0)
+        if self.dashboard:  # replaces a "resting" left retained by a bridge that has since restarted
+            self.dashboard.publish_sleep()
         client.subscribe(f"{self.base}/sensor/face", qos=0)
         client.subscribe(f"{self.base}/sensor/power", qos=0)
         client.subscribe(f"{self.base}/event/body", qos=0)

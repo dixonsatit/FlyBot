@@ -10,6 +10,7 @@
 //            <base>/selftest          boot self-test result (retained), see selftest.cpp
 //            <base>/screen/qr         {"url","text","seconds"}: full-screen QR (ThaID pairing); url "" clears
 //            <base>/screen/preview    {"seconds"}: camera preview with a countdown, then the photo on <base>/snapshot
+//            <base>/screen/sleep      {"on"}: resting, screen off until woken (retained)
 //            <base>/ota               {"path","size","md5"}: update the firmware from the bridge (see ota.h),
 //                                     progress and result on <base>/ota/status
 #include <M5CoreS3.h>
@@ -406,6 +407,9 @@ static uint32_t previewStart = 0, previewMs = 0, previewStillUntil = 0;
 static bool previewPending = false, previewShown = false;
 static M5Canvas* previewCanvas = nullptr;  // 150 KB, in PSRAM
 bool screenBusy() { return qrShown || qrPending || previewShown || previewPending; }
+static volatile bool sleepWanted = false;
+static bool asleep = false;
+static uint8_t awakeBrightness = 0;
 
 // What the robot was doing when it last reset: RTC memory survives a panic or watchdog reset
 // (not a power cut), so the next self-test can say "panic during preview-shutter".
@@ -492,6 +496,11 @@ static void onCommand(char* topic, byte* payload, unsigned int len) {
     float seconds = deserializeJson(a, payload, len) ? 3.0f : float(a["seconds"] | 3.0f);
     previewMs = uint32_t(constrain(seconds, 1.0f, 10.0f) * 1000);
     previewPending = true;
+    return;
+  }
+  if (topicBase + "/screen/sleep" == topic) {
+    JsonDocument a;
+    if (!deserializeJson(a, payload, len)) sleepWanted = a["on"] | false;
     return;
   }
   if (topicBase + "/ota" == topic) {
@@ -743,6 +752,7 @@ static void ensureConnected() {
     mqtt.subscribe((topicBase + "/screen/qr").c_str(), 0);
     mqtt.subscribe((topicBase + "/screen/preview").c_str(), 0);
     mqtt.subscribe((topicBase + "/ota").c_str(), 0);
+    mqtt.subscribe((topicBase + "/screen/sleep").c_str(), 1);
     if (selfTestJson.length()) {
       mqtt.publish((topicBase + "/selftest").c_str(), (const uint8_t*)selfTestJson.c_str(),
                    selfTestJson.length(), true);
@@ -969,6 +979,31 @@ static void servicePreview() {
   c->pushSprite(&d, 0, 0);
 }
 
+// Resting: the screen goes dark (backlight off, the face task parked) once the reply has been
+// said. A QR or the photo preview lights it while it is up; the mic keeps listening for the name.
+static void serviceSleep() {
+  const bool dark = sleepWanted && !screenBusy();
+  if (dark == asleep) return;
+  auto& d = M5.Display;
+  if (dark) {
+    if (voiceBusy()) return;
+    crumb("sleep");
+    awakeBrightness = d.getBrightness();
+    if (!lookHold()) M5_LOGW("screen: the avatar did not park");
+    d.fillScreen(TFT_BLACK);
+    d.setBrightness(0);
+    asleep = true;
+    return;
+  }
+  crumb("wake");
+  d.setBrightness(awakeBrightness ? awakeBrightness : 128);
+  if (!screenBusy()) {  // a QR or preview keeps the screen it took; it releases the face itself
+    lookRelease();
+    faceDirty = true;
+  }
+  asleep = false;
+}
+
 static void otaStatus(const char* json) {
   mqtt.publish((topicBase + "/ota/status").c_str(), json);
 }
@@ -1038,6 +1073,7 @@ void loop() {
   serviceOta();
   servicePreview();
   if (!previewShown) serviceQr();  // a QR that came during the countdown waits for it
+  serviceSleep();
   voiceUpdate();
   publishStatus();
   ensureConnected();
