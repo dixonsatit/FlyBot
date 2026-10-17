@@ -364,6 +364,7 @@ async function loadOverview() {
       <div class="hint">${st.at ? new Date(st.at * 1000).toLocaleString("th-TH") : ""}${st.fw ? ` · firmware ${esc(st.fw)}` : ""}${st.reset ? ` · รีสตาร์ตเพราะ ${esc(st.reset)}` : ""}</div>`;
   const ota = (ov.robot && ov.robot.ota) || {};
   $("fwStatus").textContent = ota.error ? `อัปเดตไม่สำเร็จ: ${ota.error}`
+    : ota.booted ? `อัปเดตสำเร็จ หุ่นใช้ firmware ${ota.booted} แล้ว`
     : ota.ok ? "เขียนเสร็จ หุ่นกำลังรีสตาร์ต"
     : ota.progress != null ? `กำลังอัปเดต ${ota.progress}%`
     : ota.sent ? "ส่งให้หุ่นแล้ว รอหุ่นเริ่มดาวน์โหลด" : "";

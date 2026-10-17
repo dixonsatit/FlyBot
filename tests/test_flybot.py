@@ -2287,3 +2287,16 @@ def test_alerts_tell_line_when_the_robot_needs_someone():
     def broken(who, text):
         raise OSError("LINE down")
     Alerts(broken, ["1"], background=False).notify("x", "y")  # logged, not raised
+
+
+def test_firmware_update_counts_as_done_when_the_robot_boots_back(gains):
+    import json as _json
+    from flybot.mqtt_bridge import StackChanBridge
+    b = StackChanBridge(BrainController(ControllerConfig(backend="rate"), gains=gains), "localhost", 1883, "stackchan", 20.0)
+    msg = lambda topic, p: type("M", (), {"topic": f"stackchan/{topic}", "payload": _json.dumps(p).encode()})
+    b._on_message(None, None, msg("selftest", {"items": [], "reset": "software", "last": "ota-restart", "fw": "abc"}))
+    assert "ok" not in b.ota_status  # no update was sent: an old breadcrumb, not news
+    b.send_ota("/fw/t.bin", 100, "0" * 32)
+    b._on_message(None, None, msg("ota/status", {"progress": 100}))
+    b._on_message(None, None, msg("selftest", {"items": [], "reset": "software", "last": "ota-restart", "fw": "abc"}))
+    assert b.ota_status["ok"] and b.ota_status["booted"] == "abc"

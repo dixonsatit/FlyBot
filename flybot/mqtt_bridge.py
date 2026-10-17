@@ -148,6 +148,11 @@ class StackChanBridge:
                 self.selftest = {**json.loads(msg.payload), "at": time.time()}
             except ValueError:
                 return
+            if self.selftest.get("last") == "ota-restart" and self.ota_status.get("sent"):
+                # the robot restarts right after writing the image, before its "ok" can go out:
+                # booting back is the proof the update worked
+                self.ota_status = {**self.ota_status, "ok": True, "booted": self.selftest.get("fw"), "at": time.time()}
+                log.info("Robot firmware update done: running %s", self.selftest.get("fw"))
             if self.alerts:
                 self.alerts.selftest(self.selftest)
             return
