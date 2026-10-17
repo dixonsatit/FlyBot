@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.56.1 (2026-10-17)
+
+### Bug Fixes
+
+- **ota**: Count an update as done when the robot boots back from it
+  ([`d128b0f`](https://github.com/dixonsatit/FlyBot/commit/d128b0f84dc804b0eb51d019e2dffc99121c1a10))
+
+
 ## v0.56.0 (2026-10-17)
 
 ### Features
