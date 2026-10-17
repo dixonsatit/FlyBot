@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.55.0 (2026-10-17)
+
+### Documentation
+
+- **k8s**: The state dir lives on PVC flybot-state now
+  ([`768c063`](https://github.com/dixonsatit/FlyBot/commit/768c063fc2660df96ef415fed951246ac3339177))
+
+### Features
+
+- **robot**: Update the firmware over WiFi through the bridge
+  ([`2c08c1a`](https://github.com/dixonsatit/FlyBot/commit/2c08c1a222cb41c6c679b06afb0891dd876ebaf3))
+
+
 ## v0.54.0 (2026-10-17)
 
 ### Features
